@@ -1,8 +1,13 @@
-# GPX Battery Copilot v0.9.0 — GPX Charging Planner
+# GPX Battery Copilot v0.9.1 — GPX Charging Planner
 
 AMFLOW PL 800Wh를 중심으로 만든 오프라인 GPX 라이딩 배터리 코파일럿입니다. 임의 GPX를 불러오면 거리·고도·업힐·배터리 예측·GPS 진행도·주행 로그를 해당 코스를 기준으로 처리합니다.
 
-## v0.9.0 핵심 변화
+## v0.9.1 빌드 수정
+- GPX 웨이포인트 개수 안내 문자열의 Kotlin 문자열 보간 오류를 수정했습니다.
+- v0.9.0의 GPX 충전소 계획 기능은 그대로 유지됩니다.
+
+
+## v0.9.1 핵심 변화
 - GPX 웨이포인트를 충전소 후보로 추출하고 원하는 지점만 체크해서 사용
 - 웨이포인트가 없어도 주소 검색 / 코스 km / 고도 프로필 / 현재 진행 위치로 충전소 추가
 - 주소 검색 결과를 GPX 최근접 코스 km로 자동 연결하고 코스 이격거리 표시
@@ -63,7 +68,7 @@ AMFLOW PL 800Wh를 중심으로 만든 오프라인 GPX 라이딩 배터리 코�
 주행 중에는 로그를 계속 append하여 앱이 종료되더라도 진행 세션을 복구할 수 있도록 설계되어 있습니다.
 
 ## 버전
-- versionName: `0.9.0`
+- versionName: `0.9.1`
 - versionCode: `11`
 - codename: `GPX Charging Planner`
 

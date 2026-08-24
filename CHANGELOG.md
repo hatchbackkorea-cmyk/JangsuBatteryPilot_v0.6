@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.9.1 — Build Fix
+- `CourseActivity.kt` GPX 웨이포인트 개수 안내 문자열의 Kotlin 문자열 보간 오류 수정
+- `"웨이포인트 $wptCount개 발견"`을 `"웨이포인트 ${wptCount}개 발견"`으로 수정해 `Unresolved reference: wptCount개` 컴파일 오류 해결
+- 기능 변경 없이 v0.9.0 GPX Charging Planner 기능 유지
+
 ## 0.9.0 — GPX Charging Planner
 - GPX `<wpt>` 웨이포인트를 추출해 사용자가 충전소로 직접 선택
 - 웨이포인트가 없는 코스에서도 주소 검색, 코스 km 직접 입력, 고도 프로필 선택, 현재 진행 위치로 충전소 등록

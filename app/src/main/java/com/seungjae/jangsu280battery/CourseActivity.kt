@@ -603,7 +603,7 @@ class CourseActivity : Activity() {
                     val wptCount = course.pois.count { !it.userAdded }
                     if (wptCount > 0) {
                         AlertDialog.Builder(this)
-                            .setTitle("웨이포인트 $wptCount개 발견")
+                            .setTitle("웨이포인트 ${wptCount}개 발견")
                             .setMessage("GPX 안의 웨이포인트에서 충전소를 선택하시겠습니까?")
                             .setPositiveButton("선택하기") { _, _ -> showWaypointPicker(meta) }
                             .setNegativeButton("나중에", null)

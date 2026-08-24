@@ -632,8 +632,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.0"
-    } catch (_: Exception) { "0.9.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.1"
+    } catch (_: Exception) { "0.9.1" }
 
     override fun onResume() {
         super.onResume()

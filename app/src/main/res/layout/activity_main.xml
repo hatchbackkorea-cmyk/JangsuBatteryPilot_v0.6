@@ -465,7 +465,7 @@
             android:layout_marginTop="5dp"
             android:layout_marginBottom="8dp"
             android:gravity="end"
-            android:text="GPX Battery Copilot v0.9.0"
+            android:text="GPX Battery Copilot v0.9.1"
             android:textColor="@color/text_secondary"
             android:textSize="9sp" />
     </LinearLayout>
