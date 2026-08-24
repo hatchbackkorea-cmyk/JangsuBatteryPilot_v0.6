@@ -11,7 +11,19 @@
         android:orientation="vertical"
         android:padding="14dp">
 
-        <TextView android:id="@+id/tvGpsStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="GPS 준비 중…" android:textColor="@color/text_secondary" android:textSize="13sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="16dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="선택한 GPX 코스" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvCourseName" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="장수280 Stage1" android:textColor="@color/text_primary" android:textSize="25sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvCourseSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="135.3km · 코스 분석 중" android:textColor="@color/accent" android:textSize="13sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnImportGpx" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="+ GPX 불러오기" />
+                <Button android:id="@+id/btnSelectCourse" android:layout_width="0dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:layout_weight="1" android:text="코스 선택" />
+            </LinearLayout>
+            <Button android:id="@+id/btnRideToggle" android:layout_width="match_parent" android:layout_height="54dp" android:layout_marginTop="8dp" android:text="▶ 주행 시작" android:textStyle="bold" />
+            <Button android:id="@+id/btnExportLast" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="6dp" android:enabled="false" android:text="최근 주행 로그 ZIP 내보내기" />
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvGpsStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="주행 대기 · GPX 선택 후 주행 시작" android:textColor="@color/text_secondary" android:textSize="13sp" />
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_hero_bg" android:orientation="vertical" android:padding="18dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="현재 코스" android:textColor="@color/text_secondary" android:textSize="14sp" />
@@ -101,7 +113,7 @@
             <Button android:id="@+id/btnResetProgress" android:layout_width="match_parent" android:layout_height="48dp" android:text="새 주행 시작 · 기록 초기화" />
         </LinearLayout>
 
-        <TextView android:id="@+id/tvVersion" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Jangsu Battery Pilot v0.5.0" android:textColor="@color/accent" android:textSize="12sp" android:textStyle="bold" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:layout_marginBottom="24dp" android:text="※ AMFLOW PL 800Wh + 장수 280 스테이지1 전용 계획. 실제 배터리 음성 입력 후에는 현재 구간의 소비속도를 학습해 예측을 보정합니다. 다음 계획 충전 이후에는 새 구간 기준으로 다시 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+        <TextView android:id="@+id/tvVersion" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="GPX Battery Copilot v0.7.0" android:textColor="@color/accent" android:textSize="12sp" android:textStyle="bold" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:layout_marginBottom="24dp" android:text="※ GPX 파일을 불러오면 거리·고도·업힐을 자동 분석합니다. 주행 중 GPS와 배터리 로그를 계속 저장하고, 완료 후 GPX·CSV·JSON·ZIP으로 보관합니다. 장수280 기본 코스는 기존 전용 충전 계획을 유지합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

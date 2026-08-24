@@ -67,6 +67,13 @@ class ElevationProfileView @JvmOverloads constructor(
         val plotW = max(1f, right - left)
         val plotH = max(1f, bottom - top)
 
+        if (!c.hasElevation) {
+            canvas.drawText("GPX 고도 데이터 없음 · 거리 기반 모드", left, height / 2f, textPaint)
+            val cx = left + (currentKm.coerceIn(0.0, c.totalKm) / c.totalKm * plotW).toFloat()
+            canvas.drawLine(cx, top, cx, bottom, currentPaint)
+            return
+        }
+
         var minEle = Double.MAX_VALUE
         var maxEle = -Double.MAX_VALUE
         c.track.forEach {
@@ -104,11 +111,16 @@ class ElevationProfileView @JvmOverloads constructor(
         canvas.drawPath(fill, fillPaint)
         canvas.drawPath(path, linePaint)
 
-        listOf(50.0, 75.0, 100.0, 135.0).forEach { km ->
-            if (km <= c.totalKm + 0.5) {
+        val markerKms = buildList {
+            addAll(c.batteryMarkers.values.filter { it.chargeToPct != null }.map { it.km.toDouble() })
+            addAll(c.supplyPois.map { it.routeKm })
+            add(c.totalKm)
+        }.distinct().sorted()
+        markerKms.forEach { km ->
+            if (km in 0.0..(c.totalKm + 0.5)) {
                 val px = x(km)
                 canvas.drawLine(px, top, px, bottom, checkpointPaint)
-                val label = km.toInt().toString()
+                val label = if (kotlin.math.abs(km - c.totalKm) < 0.2) "FIN" else km.toInt().toString()
                 canvas.drawText(label, px + dp(2f), height - dp(5f), textPaint)
             }
         }

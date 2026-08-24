@@ -3,6 +3,7 @@ package com.seungjae.jangsu280battery
 import android.content.Context
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
+import java.io.InputStream
 import kotlin.math.abs
 
 
@@ -25,8 +26,19 @@ data class RoutePoi(
     val name: String,
     val routeKm: Double,
     val lat: Double,
-    val lon: Double
-)
+    val lon: Double,
+    val desc: String = "",
+    val type: String = "",
+    val userAdded: Boolean = false
+) {
+    fun isSupplyLike(): Boolean {
+        val s = "$name $desc $type".lowercase()
+        val tokens = s.split(Regex("[^a-z0-9가-힣]+"))
+        return s.contains("보급") || s.contains("급수") || s.contains("충전") || s.contains("점심") ||
+            s.contains("lunch") || s.contains("feed") || s.contains("aid station") ||
+            tokens.any { it == "as" || it.matches(Regex("as\\d+")) || it == "cp" || it.matches(Regex("cp\\d+")) }
+    }
+}
 
 data class ElevationStats(val ascentM: Double, val descentM: Double)
 
@@ -39,11 +51,26 @@ data class MajorClimb(
 )
 
 class CourseData(
+    val name: String,
     val track: List<TrackPoint>,
     val batteryMarkers: Map<Int, BatteryMarker>,
-    val pois: List<RoutePoi>
+    val pois: List<RoutePoi>,
+    val hasElevation: Boolean,
+    val totalAscentM: Double,
+    val totalDescentM: Double
 ) {
     val totalKm: Double = track.lastOrNull()?.routeKm ?: 0.0
+    val supplyPois: List<RoutePoi> get() = pois.filter { it.isSupplyLike() }
+
+    fun withAdditionalPois(extra: List<RoutePoi>): CourseData = CourseData(
+        name = name,
+        track = track,
+        batteryMarkers = batteryMarkers,
+        pois = (pois + extra).distinctBy { "${it.name}|${String.format(java.util.Locale.US, "%.3f", it.routeKm)}" }.sortedBy { it.routeKm },
+        hasElevation = hasElevation,
+        totalAscentM = totalAscentM,
+        totalDescentM = totalDescentM
+    )
 
     fun indexAtKm(km: Double): Int {
         if (track.isEmpty()) return 0
@@ -59,43 +86,49 @@ class CourseData(
 
     fun pointAtKm(km: Double): TrackPoint {
         if (track.isEmpty()) return TrackPoint(0.0, 0.0, 0.0, 0.0)
-        val idx = indexAtKm(km)
+        val target = km.coerceIn(0.0, totalKm)
+        val idx = indexAtKm(target)
         if (idx == 0) return track[0]
         val b = track[idx]
         val a = track[idx - 1]
         val span = b.routeKm - a.routeKm
         if (span <= 0.000001) return b
-        val f = ((km - a.routeKm) / span).coerceIn(0.0, 1.0)
+        val f = ((target - a.routeKm) / span).coerceIn(0.0, 1.0)
         return TrackPoint(
             lat = a.lat + (b.lat - a.lat) * f,
             lon = a.lon + (b.lon - a.lon) * f,
             ele = a.ele + (b.ele - a.ele) * f,
-            routeKm = km.coerceIn(0.0, totalKm)
+            routeKm = target
         )
     }
 
-    fun elevationAhead(fromKm: Double, spanKm: Double = 5.0): ElevationStats {
-        if (track.size < 2) return ElevationStats(0.0, 0.0)
-        val start = indexAtKm(fromKm)
-        val end = indexAtKm((fromKm + spanKm).coerceAtMost(totalKm))
+    fun elevationAhead(fromKm: Double, spanKm: Double = 5.0): ElevationStats =
+        elevationBetween(fromKm, (fromKm + spanKm).coerceAtMost(totalKm))
+
+    fun elevationBetween(fromKm: Double, toKm: Double): ElevationStats {
+        if (!hasElevation || track.size < 2 || toKm <= fromKm) return ElevationStats(0.0, 0.0)
+        val start = indexAtKm(fromKm.coerceIn(0.0, totalKm))
+        val end = indexAtKm(toKm.coerceIn(0.0, totalKm))
         var up = 0.0
         var down = 0.0
+        if (end <= start) return ElevationStats(0.0, 0.0)
         for (i in (start + 1)..end) {
             if (i !in track.indices) break
+            if (track[i].routeKm <= track[i - 1].routeKm + 0.00001) continue
             val diff = track[i].ele - track[i - 1].ele
-            if (diff > 0) up += diff else down += -diff
+            if (diff > 1.0) up += diff else if (diff < -1.0) down += -diff
         }
         return ElevationStats(up, down)
     }
 
-    fun nextPoi(afterKm: Double): RoutePoi? =
-        pois.firstOrNull { it.routeKm > afterKm + 0.04 }
+    fun nextPoi(afterKm: Double): RoutePoi? = pois.firstOrNull { it.routeKm > afterKm + 0.04 }
 
     /**
-     * 250m 단위 고도 변화를 부드럽게 묶어 다음 주요 업힐을 찾는다.
-     * 정확한 도로 경사계가 아니라 GPX 기반 라이딩 사전 안내용이다.
+     * 250m 단위 고도 변화를 묶어 다음 주요 업힐을 찾는다.
+     * GPX에 고도 데이터가 없으면 업힐 분석을 하지 않는다.
      */
     fun nextMajorClimb(afterKm: Double, searchKm: Double = 22.0): MajorClimb? {
+        if (!hasElevation) return null
         val startSearch = afterKm.coerceIn(0.0, totalKm)
         val endSearch = (startSearch + searchKm).coerceAtMost(totalKm)
         val step = 0.25
@@ -145,99 +178,127 @@ class CourseData(
     }
 
     companion object {
-        private data class RawTrack(val lat: Double, val lon: Double, val ele: Double)
+        private data class RawTrack(val lat: Double, val lon: Double, val ele: Double?, val segment: Int)
         private data class RawWpt(
             val lat: Double,
             val lon: Double,
-            var ele: Double = 0.0,
+            var ele: Double? = null,
             var name: String = "",
             var desc: String = "",
             var type: String = ""
         )
 
-        private val batteryNameRegex = Regex("""^(\d{3})K\s+(\d+)%\s*(?:→\s*(\d+)%)?.*$""")
+        private val batteryNameRegex = Regex("""^(\d{1,4})K\s+(\d+)%\s*(?:→\s*(\d+)%)?.*$""")
         private val exactNormalRegex = Regex("""잔량:\s*([0-9.]+)%""")
         private val exactChargeRegex = Regex("""예상\s*([0-9.]+)%""")
 
-        fun load(context: Context, rawResId: Int): CourseData {
+        fun load(context: Context, rawResId: Int, sourceName: String = "내장 코스"): CourseData =
+            context.resources.openRawResource(rawResId).use { parse(it, sourceName) }
+
+        fun parse(input: InputStream, sourceName: String = "GPX 코스"): CourseData {
             val rawTrack = mutableListOf<RawTrack>()
+            val rawRoute = mutableListOf<RawTrack>()
             val rawWpts = mutableListOf<RawWpt>()
 
-            context.resources.openRawResource(rawResId).use { input ->
-                val parser = Xml.newPullParser()
-                parser.setInput(input, "UTF-8")
+            val parser = Xml.newPullParser()
+            parser.setInput(input, "UTF-8")
 
-                var currentWpt: RawWpt? = null
-                var currentTrk: RawTrack? = null
-                var currentTag: String? = null
-                var trkLat = 0.0
-                var trkLon = 0.0
-                var trkEle = 0.0
+            var currentWpt: RawWpt? = null
+            var pointKind: String? = null
+            var pointLat = 0.0
+            var pointLon = 0.0
+            var pointEle: Double? = null
+            var currentTag: String? = null
+            var segment = -1
+            var inMetadata = false
+            var inTrk = false
+            var inRte = false
+            var metadataName = ""
+            var trackName = ""
+            var routeName = ""
 
-                var event = parser.eventType
-                while (event != XmlPullParser.END_DOCUMENT) {
-                    when (event) {
-                        XmlPullParser.START_TAG -> {
-                            currentTag = parser.name
-                            when (parser.name) {
-                                "wpt" -> {
-                                    currentWpt = RawWpt(
-                                        lat = parser.getAttributeValue(null, "lat").toDouble(),
-                                        lon = parser.getAttributeValue(null, "lon").toDouble()
-                                    )
-                                }
-                                "trkpt" -> {
-                                    trkLat = parser.getAttributeValue(null, "lat").toDouble()
-                                    trkLon = parser.getAttributeValue(null, "lon").toDouble()
-                                    trkEle = 0.0
-                                    currentTrk = RawTrack(trkLat, trkLon, trkEle)
-                                }
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    XmlPullParser.START_TAG -> {
+                        currentTag = parser.name
+                        when (parser.name) {
+                            "metadata" -> inMetadata = true
+                            "trk" -> inTrk = true
+                            "rte" -> inRte = true
+                            "trkseg" -> segment++
+                            "wpt" -> currentWpt = RawWpt(
+                                lat = parser.getAttributeValue(null, "lat")?.toDoubleOrNull() ?: 0.0,
+                                lon = parser.getAttributeValue(null, "lon")?.toDoubleOrNull() ?: 0.0
+                            )
+                            "trkpt", "rtept" -> {
+                                pointKind = parser.name
+                                pointLat = parser.getAttributeValue(null, "lat")?.toDoubleOrNull() ?: 0.0
+                                pointLon = parser.getAttributeValue(null, "lon")?.toDoubleOrNull() ?: 0.0
+                                pointEle = null
                             }
-                        }
-                        XmlPullParser.TEXT -> {
-                            val txt = parser.text?.trim().orEmpty()
-                            if (txt.isNotEmpty()) {
-                                if (currentWpt != null) {
-                                    when (currentTag) {
-                                        "name" -> currentWpt.name = txt
-                                        "desc" -> currentWpt.desc = txt
-                                        "type" -> currentWpt.type = txt
-                                        "ele" -> currentWpt.ele = txt.toDoubleOrNull() ?: currentWpt.ele
-                                    }
-                                } else if (currentTrk != null && currentTag == "ele") {
-                                    trkEle = txt.toDoubleOrNull() ?: 0.0
-                                }
-                            }
-                        }
-                        XmlPullParser.END_TAG -> {
-                            when (parser.name) {
-                                "wpt" -> {
-                                    currentWpt?.let(rawWpts::add)
-                                    currentWpt = null
-                                }
-                                "trkpt" -> {
-                                    rawTrack.add(RawTrack(trkLat, trkLon, trkEle))
-                                    currentTrk = null
-                                }
-                            }
-                            currentTag = null
                         }
                     }
-                    event = parser.next()
+                    XmlPullParser.TEXT -> {
+                        val txt = parser.text?.trim().orEmpty()
+                        if (txt.isNotEmpty()) {
+                            when {
+                                currentWpt != null -> when (currentTag) {
+                                    "name" -> currentWpt!!.name = txt
+                                    "desc", "cmt" -> if (currentWpt!!.desc.isBlank()) currentWpt!!.desc = txt
+                                    "type", "sym" -> if (currentWpt!!.type.isBlank()) currentWpt!!.type = txt
+                                    "ele" -> currentWpt!!.ele = txt.toDoubleOrNull()
+                                }
+                                pointKind != null && currentTag == "ele" -> pointEle = txt.toDoubleOrNull()
+                                currentTag == "name" && inMetadata && metadataName.isBlank() -> metadataName = txt
+                                currentTag == "name" && inTrk && trackName.isBlank() -> trackName = txt
+                                currentTag == "name" && inRte && routeName.isBlank() -> routeName = txt
+                            }
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        when (parser.name) {
+                            "metadata" -> inMetadata = false
+                            "trk" -> inTrk = false
+                            "rte" -> inRte = false
+                            "wpt" -> {
+                                currentWpt?.takeIf { abs(it.lat) <= 90 && abs(it.lon) <= 180 }?.let(rawWpts::add)
+                                currentWpt = null
+                            }
+                            "trkpt" -> {
+                                rawTrack += RawTrack(pointLat, pointLon, pointEle, segment.coerceAtLeast(0))
+                                pointKind = null
+                            }
+                            "rtept" -> {
+                                rawRoute += RawTrack(pointLat, pointLon, pointEle, 0)
+                                pointKind = null
+                            }
+                        }
+                        currentTag = null
+                    }
                 }
+                event = parser.next()
             }
 
-            require(rawTrack.size >= 2) { "GPX 트랙 포인트를 읽지 못했습니다." }
+            val sourcePoints = if (rawTrack.size >= 2) rawTrack else rawRoute
+            require(sourcePoints.size >= 2) { "GPX 트랙 또는 루트 포인트를 읽지 못했습니다." }
 
-            val track = ArrayList<TrackPoint>(rawTrack.size)
+            val elevationCount = sourcePoints.count { it.ele != null }
+            val hasElevation = elevationCount >= maxOf(2, sourcePoints.size / 5)
+            var lastEle = sourcePoints.firstNotNullOfOrNull { it.ele } ?: 0.0
+            val track = ArrayList<TrackPoint>(sourcePoints.size)
             var cumM = 0.0
-            rawTrack.forEachIndexed { i, p ->
+            sourcePoints.forEachIndexed { i, p ->
                 if (i > 0) {
-                    val prev = rawTrack[i - 1]
-                    cumM += Geo.distanceMeters(prev.lat, prev.lon, p.lat, p.lon)
+                    val prev = sourcePoints[i - 1]
+                    if (prev.segment == p.segment) {
+                        cumM += Geo.distanceMeters(prev.lat, prev.lon, p.lat, p.lon)
+                    }
                 }
-                track.add(TrackPoint(p.lat, p.lon, p.ele, cumM / 1000.0))
+                if (p.ele != null) lastEle = p.ele
+                track += TrackPoint(p.lat, p.lon, if (hasElevation) lastEle else 0.0, cumM / 1000.0)
             }
+            require(track.last().routeKm > 0.05) { "GPX 코스 길이가 너무 짧습니다." }
 
             fun nearestTrackIndex(lat: Double, lon: Double): Int {
                 var bestIndex = 0
@@ -245,40 +306,49 @@ class CourseData(
                 for (i in track.indices) {
                     val p = track[i]
                     val d = Geo.distanceMeters(lat, lon, p.lat, p.lon)
-                    if (d < best) {
-                        best = d
-                        bestIndex = i
-                    }
+                    if (d < best) { best = d; bestIndex = i }
                 }
                 return bestIndex
             }
 
             val battery = sortedMapOf<Int, BatteryMarker>()
             val pois = mutableListOf<RoutePoi>()
-
             for (w in rawWpts) {
                 val m = batteryNameRegex.matchEntire(w.name.trim())
                 if (m != null) {
                     val km = m.groupValues[1].toInt()
                     val roundedArrival = m.groupValues[2].toDouble()
                     val charge = m.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() }?.toDoubleOrNull()
-                    val exact = if (charge != null) {
-                        exactChargeRegex.find(w.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
-                    } else {
-                        exactNormalRegex.find(w.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
-                    }
+                    val exact = if (charge != null) exactChargeRegex.find(w.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
+                        else exactNormalRegex.find(w.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
                     battery[km] = BatteryMarker(km, exact ?: roundedArrival, charge, w.lat, w.lon)
                 } else if (w.name.isNotBlank()) {
-                    // 배터리 안내는 별도 처리. 같은 물리 위치를 두 번 지나는 1보급소는
-                    // 배터리 체크포인트(50/75km)가 담당하므로 일반 POI 안내에서는 제외한다.
-                    if (!w.name.contains("1보급소")) {
-                        val idx = nearestTrackIndex(w.lat, w.lon)
-                        pois.add(RoutePoi(w.name.replace('_', ' '), track[idx].routeKm, w.lat, w.lon))
-                    }
+                    val idx = nearestTrackIndex(w.lat, w.lon)
+                    pois += RoutePoi(w.name.replace('_', ' '), track[idx].routeKm, w.lat, w.lon, w.desc, w.type)
                 }
             }
 
-            return CourseData(track, battery, pois.sortedBy { it.routeKm })
+            var totalUp = 0.0
+            var totalDown = 0.0
+            if (hasElevation) {
+                for (i in 1 until track.size) {
+                    if (track[i].routeKm <= track[i - 1].routeKm + 0.00001) continue
+                    val d = track[i].ele - track[i - 1].ele
+                    if (d > 1.0) totalUp += d else if (d < -1.0) totalDown += -d
+                }
+            }
+
+            val resolvedName = listOf(metadataName, trackName, routeName, sourceName.substringBeforeLast('.'))
+                .firstOrNull { it.isNotBlank() } ?: "GPX 코스"
+            return CourseData(
+                name = resolvedName,
+                track = track,
+                batteryMarkers = battery,
+                pois = pois.sortedBy { it.routeKm },
+                hasElevation = hasElevation,
+                totalAscentM = totalUp,
+                totalDescentM = totalDown
+            )
         }
     }
 }

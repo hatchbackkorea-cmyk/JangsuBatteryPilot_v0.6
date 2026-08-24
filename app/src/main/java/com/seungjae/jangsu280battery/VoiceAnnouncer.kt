@@ -99,19 +99,16 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
                 if (announced.add(key)) {
                     if (checkpoint.chargeToPct != null) {
                         enqueue("${checkpoint.name}입니다. 계획상 도착 배터리 ${checkpoint.arrivalPct.roundToInt()}퍼센트. ${checkpoint.chargeToPct.roundToInt()}퍼센트까지 충전하세요.")
+                    } else if (checkpoint.name.contains("종점")) {
+                        enqueue("종점입니다. 예상 배터리 약 ${checkpoint.arrivalPct.roundToInt()}퍼센트입니다.")
                     } else {
-                        enqueue("스테이지 1 종점입니다. 목표 배터리 약 ${checkpoint.arrivalPct.roundToInt()}퍼센트입니다.")
+                        enqueue("${checkpoint.name}에 도착했습니다. 보급이나 충전이 필요하면 확인하세요.")
                     }
                 }
             }
         }
 
-        val segment = when {
-            routeKm < 50.0 -> 1
-            routeKm < 75.0 -> 2
-            routeKm < 100.0 -> 3
-            else -> 4
-        }
+        val segment = (routeKm / 25.0).toInt().coerceAtLeast(0)
         listOf(30, 20, 15).forEach { threshold ->
             if (battery.percent <= threshold) {
                 val key = "battery_${segment}_$threshold"

@@ -16,6 +16,10 @@ sealed class VoiceCommand {
     data object ChargeStart : VoiceCommand()
     data object ChargeStop : VoiceCommand()
     data object UndoActual : VoiceCommand()
+    data object RideStart : VoiceCommand()
+    data object RideStop : VoiceCommand()
+    data object AddSupplyPoint : VoiceCommand()
+    data object CourseInfo : VoiceCommand()
     data object Help : VoiceCommand()
     data object Unknown : VoiceCommand()
 }
@@ -59,6 +63,17 @@ object VoiceCommandParser {
             return VoiceCommand.Battery(percent, forcePostCharge = false)
         }
 
+        // 주행 제어/현재 위치를 코스 지점으로 등록.
+        if (hasAny(t, "주행시작", "라이딩시작", "기록시작", "출발할게", "출발하자")) {
+            return VoiceCommand.RideStart
+        }
+        if (hasAny(t, "주행종료", "라이딩종료", "기록종료", "라이딩끝", "주행끝", "오늘라이딩끝")) {
+            return VoiceCommand.RideStop
+        }
+        if (hasAny(t, "여기를보급소로등록", "여기보급소등록", "여기를충전지점으로등록", "여기충전지점등록", "여기를보급지점으로")) {
+            return VoiceCommand.AddSupplyPoint
+        }
+
         // 2) 충전 타이머.
         if (hasAny(t, "충전시작", "충전타이머시작", "충전할게", "충전한다", "충전들어가")) {
             return VoiceCommand.ChargeStart
@@ -90,6 +105,9 @@ object VoiceCommandParser {
         }
         if (hasAny(t, "앞에업힐", "앞에오르막", "힘든업힐", "힘든오르막", "다음업힐", "다음오르막", "큰업힐", "큰오르막")) {
             return VoiceCommand.NextClimb
+        }
+        if (hasAny(t, "코스정보", "코스어때", "전체거리", "전체획고", "총상승", "이코스정보")) {
+            return VoiceCommand.CourseInfo
         }
         if (hasAny(t, "어디쯤", "지금어디", "몇킬로지점", "몇키로지점", "현재위치")) {
             return VoiceCommand.LocationInfo

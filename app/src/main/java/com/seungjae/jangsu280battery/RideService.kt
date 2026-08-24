@@ -40,7 +40,7 @@ class RideService : Service(), LocationListener {
         const val EXTRA_VOICE_LEVEL = "voice_level"
         const val EXTRA_SPEAK_TEXT = "speak_text"
 
-        private const val CHANNEL_ID = "jangsu_ride_tracking"
+        private const val CHANNEL_ID = "gpx_ride_tracking"
         private const val NOTIFICATION_ID = 280
         private const val PREFS = "ride_state"
         private const val KEY_LAST_KM = "last_km"
@@ -50,30 +50,38 @@ class RideService : Service(), LocationListener {
     }
 
     private lateinit var locationManager: LocationManager
+    private lateinit var courseRepo: CourseRepository
+    private lateinit var courseMeta: CourseMeta
     private lateinit var course: CourseData
     private lateinit var matcher: RouteMatcher
     private lateinit var basePlan: BatteryPlan
     private lateinit var actualStore: BatteryActualStore
     private lateinit var plan: AdaptiveBatteryPlan
     private lateinit var announcer: VoiceAnnouncer
-    private lateinit var rideSession: RideSessionStore
     private lateinit var chargeStore: ChargingSessionStore
+    private lateinit var learningStore: BatteryLearningStore
+    private lateinit var logManager: RideLogManager
     private val paceEstimator = PaceEstimator()
+    private val passedCheckpointKeys = mutableSetOf<String>()
 
     private var lastNotificationAt = 0L
     private var lastNotifiedKm = -1
     private var updatesStarted = false
+    private var wasOffCourse = false
 
     override fun onCreate() {
         super.onCreate()
-        course = CourseData.load(this, R.raw.jangsu_stage1_battery)
+        courseRepo = CourseRepository(this)
+        courseMeta = courseRepo.activeMeta()
+        course = courseRepo.loadCourse(courseMeta.id)
+        learningStore = BatteryLearningStore(this)
+        logManager = RideLogManager(this)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val lastKm = prefs.getFloat(KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
         matcher = RouteMatcher(course, lastKm)
-        basePlan = BatteryPlan(course)
+        basePlan = BatteryPlan(course, learningStore)
         actualStore = BatteryActualStore(this)
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
-        rideSession = RideSessionStore(this).also { it.ensureStarted() }
         chargeStore = ChargingSessionStore(this)
         announcer = VoiceAnnouncer(this).also {
             it.enabled = prefs.getBoolean(KEY_VOICE, true)
@@ -83,7 +91,7 @@ class RideService : Service(), LocationListener {
         }
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("GPS 준비 중 · 예상 배터리 계산 대기"))
+        startForeground(NOTIFICATION_ID, buildNotification("GPS 준비 중 · ${courseMeta.name}"))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -95,11 +103,9 @@ class RideService : Service(), LocationListener {
             ACTION_RESET -> {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putFloat(KEY_LAST_KM, 0f).apply()
                 matcher.seekToKm(0.0)
-                actualStore.clear()
-                chargeStore.clearSession()
-                rideSession.reset()
                 paceEstimator.reset()
                 announcer.reset()
+                passedCheckpointKeys.clear()
             }
             ACTION_SET_VOICE -> {
                 val enabled = intent.getBooleanExtra(EXTRA_VOICE_ENABLED, true)
@@ -127,7 +133,7 @@ class RideService : Service(), LocationListener {
                 if (text.isNotBlank()) announcer.speakNow(text)
             }
         }
-        startLocationUpdates()
+        if (logManager.isActive()) startLocationUpdates()
         return START_STICKY
     }
 
@@ -145,11 +151,11 @@ class RideService : Service(), LocationListener {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000L, 8f, this, Looper.getMainLooper())
             }
             updatesStarted = true
-        } catch (_: SecurityException) {
-        }
+        } catch (_: SecurityException) { }
     }
 
     override fun onLocationChanged(location: Location) {
+        if (!logManager.isActive()) return
         val match = matcher.match(location.latitude, location.longitude)
         val speedKmh = paceEstimator.update(location, match.routeKm)
         val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
@@ -157,10 +163,12 @@ class RideService : Service(), LocationListener {
 
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         prefs.edit().putFloat(KEY_LAST_KM, match.routeKm.toFloat()).apply()
-        rideSession.recordProgress(match.routeKm, speedKmh)
 
         basePlan.checkpoints.forEach { cp ->
-            if (abs(cp.km - match.routeKm) <= 0.12) rideSession.recordCheckpoint(cp.name, cp.km)
+            if (abs(cp.km - match.routeKm) <= 0.12) {
+                val key = "${cp.name}@${String.format(java.util.Locale.US, "%.1f", cp.km)}"
+                if (passedCheckpointKeys.add(key)) logManager.recordEvent("CHECKPOINT", cp.name, cp.km, actualStore.latest()?.percent)
+            }
         }
 
         val battery = plan.estimate(match.routeKm)
@@ -170,18 +178,28 @@ class RideService : Service(), LocationListener {
         val finishTarget = prefs.getFloat(KEY_FINISH_TARGET, 15f).toDouble()
         val reserve = plan.reserveStatus(match.routeKm, finishTarget)
         val climb = course.nextMajorClimb(match.routeKm)
-        announcer.handle(
+        announcer.handle(match.routeKm, battery, cp, poi, stats10, match.offCourseMeters, reserve, climb)
+
+        val nowOff = match.offCourseMeters >= 150.0
+        if (nowOff != wasOffCourse) {
+            logManager.recordEvent(if (nowOff) "OFF_COURSE" else "BACK_ON_COURSE", if (nowOff) "코스 이탈 ${match.offCourseMeters.roundToInt()}m" else "코스 복귀", match.routeKm, actualStore.latest()?.percent)
+            wasOffCourse = nowOff
+        }
+
+        logManager.recordLocation(
+            timestampMs = location.time.takeIf { it > 0 } ?: System.currentTimeMillis(),
+            lat = location.latitude,
+            lon = location.longitude,
+            gpsElevationM = gpsElevation.takeIf { it.isFinite() },
+            speedKmh = speedKmh,
             routeKm = match.routeKm,
-            battery = battery,
-            checkpoint = cp,
-            poi = poi,
-            stats = stats10,
-            offCourseMeters = match.offCourseMeters,
-            reserve = reserve,
-            majorClimb = climb
+            offCourseM = match.offCourseMeters,
+            courseElevationM = match.courseElevationM,
+            estimatedBatteryPct = battery.percent,
+            actualBatteryPct = actualStore.latest()?.percent
         )
 
-        val update = Intent(ACTION_UPDATE).apply {
+        sendBroadcast(Intent(ACTION_UPDATE).apply {
             setPackage(packageName)
             putExtra(EXTRA_ROUTE_KM, match.routeKm)
             putExtra(EXTRA_OFF_COURSE_M, match.offCourseMeters)
@@ -190,16 +208,12 @@ class RideService : Service(), LocationListener {
             putExtra(EXTRA_COURSE_ELEVATION, match.courseElevationM)
             putExtra(EXTRA_GPS_ELEVATION, gpsElevation)
             putExtra(EXTRA_PROVIDER, location.provider ?: "GPS")
-        }
-        sendBroadcast(update)
+        })
 
         val now = System.currentTimeMillis()
         val kmInt = match.routeKm.toInt()
         if (kmInt != lastNotifiedKm || now - lastNotificationAt > 15000L) {
-            val cpText = cp?.let {
-                val rem = (it.km - match.routeKm).coerceAtLeast(0.0)
-                " · ${it.name} ${String.format(java.util.Locale.US, "%.1f", rem)}km"
-            }.orEmpty()
+            val cpText = cp?.let { " · ${it.name} ${String.format(java.util.Locale.US, "%.1f", (it.km - match.routeKm).coerceAtLeast(0.0))}km" }.orEmpty()
             val risk = when (reserve.label) { "위험" -> " ⚠위험"; "주의" -> " ·주의"; else -> "" }
             val text = "${String.format(java.util.Locale.US, "%.1f", match.routeKm)}km · 🔋${battery.percent.roundToInt()}%$risk$cpText"
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, buildNotification(text))
@@ -213,25 +227,23 @@ class RideService : Service(), LocationListener {
         val contentIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stopIntent = Intent(this, RideService::class.java).apply { action = ACTION_STOP }
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL_ID)
         else @Suppress("DEPRECATION") Notification.Builder(this)
-
         return builder
             .setSmallIcon(R.drawable.ic_battery_pilot)
-            .setContentTitle("장수 배터리 파일럿 · 주행 중")
+            .setContentTitle("GPX 배터리 코파일럿 · ${courseMeta.name}")
             .setContentText(text)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .addAction(android.R.drawable.ic_media_pause, "추적 종료", stopPendingIntent)
+            .addAction(android.R.drawable.ic_media_pause, "GPS 일시 중지", stopPendingIntent)
             .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "장수 랠리 GPS 주행 안내", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "화면이 꺼져도 GPS 위치와 음성 안내를 유지합니다."
+            val channel = NotificationChannel(CHANNEL_ID, "GPX 라이딩 GPS 안내", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "화면이 꺼져도 GPS 위치, 배터리 예측, 음성 안내와 주행 로그를 유지합니다."
                 setSound(null, null)
             }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
@@ -244,7 +256,7 @@ class RideService : Service(), LocationListener {
     override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) = Unit
 
     override fun onDestroy() {
-        try { locationManager.removeUpdates(this) } catch (_: Exception) {}
+        try { locationManager.removeUpdates(this) } catch (_: Exception) { }
         announcer.shutdown()
         super.onDestroy()
     }
@@ -266,7 +278,7 @@ private class PaceEstimator {
         val prevAt = lastAtMs
         if (candidate < 2.0 && prevKm != null && prevAt != null && now > prevAt) {
             val dtHours = (now - prevAt) / 3_600_000.0
-            if (dtHours > 0.0) candidate = ((routeKm - prevKm).coerceAtLeast(0.0) / dtHours)
+            if (dtHours > 0.0) candidate = (routeKm - prevKm).coerceAtLeast(0.0) / dtHours
         }
         lastRouteKm = routeKm
         lastAtMs = now
