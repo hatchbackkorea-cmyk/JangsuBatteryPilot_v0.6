@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnSettingsBack"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="← 주행" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="설정"
+                android:textColor="@color/text_primary"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="음성 안내"
+                android:textColor="@color/text_primary"
+                android:textSize="19sp"
+                android:textStyle="bold" />
+            <Switch
+                android:id="@+id/switchSettingsVoice"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:checked="true"
+                android:text="자동 음성 안내 사용"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/tvDistanceInterval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="거리 기준 안내 · 5 km마다"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <SeekBar
+                android:id="@+id/seekDistanceInterval"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:max="50"
+                android:progress="5" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0 = 거리 기준 안내 끄기 · 1~50 km 간격"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tvTimeInterval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="시간 기준 안내 · 사용 안 함"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <SeekBar
+                android:id="@+id/seekTimeInterval"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:max="120"
+                android:progress="0" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0 = 시간 기준 안내 끄기 · 1~120분 간격 · 거리/시간 중 먼저 도달한 기준으로 안내"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:id="@+id/tvSettingsFinishTarget"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="종점 목표 잔량 15%"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <SeekBar
+                android:id="@+id/seekSettingsFinishTarget"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:max="98"
+                android:progress="14" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="1% ~ 99% · 코파일럿의 여유/주의/위험 판단과 종점 역산 기준"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="화면"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <Switch
+                android:id="@+id/switchSettingsKeepScreen"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:text="주행 화면 항상 켜기"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="테스트 모드"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvSettingsCourse"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="테스트 기준 코스"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Switch
+                android:id="@+id/switchSettingsTestMode"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:text="GPS 대신 테스트 위치 사용"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/tvSettingsTestKm"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="테스트 위치 0.0 km"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <SeekBar
+                android:id="@+id/seekSettingsTestKm"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:enabled="false"
+                android:max="1353"
+                android:progress="0" />
+            <TextView
+                android:id="@+id/tvSettingsTestHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="테스트 모드를 켜면 GPS 없이 코스 진행 상황을 확인할 수 있습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <Button
+                android:id="@+id/btnResetProgress"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:text="진행 위치 / 실제 배터리 보정 초기화" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnSettingsVersion"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="10dp"
+            android:text="버전 / 변경사항" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="24dp"
+            android:text="※ 거리와 시간 자동 안내는 둘 다 켤 수 있습니다. 둘 중 먼저 설정 간격에 도달하면 한 번 안내하고 두 기준을 함께 다시 계산합니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+    </LinearLayout>
+</ScrollView>

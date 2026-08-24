@@ -4,30 +4,20 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.floor
 import kotlin.math.roundToInt
-
-enum class VoiceLevel(val label: String) {
-    QUIET("조용"),
-    NORMAL("기본"),
-    CHATTY("수다쟁이");
-
-    fun next(): VoiceLevel = when (this) {
-        QUIET -> NORMAL
-        NORMAL -> CHATTY
-        CHATTY -> QUIET
-    }
-}
 
 class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
     private val tts = TextToSpeech(context.applicationContext, this)
     private var ready = false
-    private var lastPeriodicSpoken = -5
+    private var lastPeriodicKm = 0.0
+    private var lastPeriodicAtMs = System.currentTimeMillis()
     private var offCourseWarned = false
     private var lastRiskLabel = ""
     private val announced = mutableSetOf<String>()
+
     var enabled: Boolean = true
-    var level: VoiceLevel = VoiceLevel.NORMAL
+    var distanceIntervalKm: Int = AppSettings.DEFAULT_DISTANCE_INTERVAL_KM
+    var timeIntervalMinutes: Int = AppSettings.DEFAULT_TIME_INTERVAL_MIN
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
@@ -37,13 +27,20 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    fun configure(distanceKm: Int, timeMinutes: Int, routeKm: Double? = null) {
+        distanceIntervalKm = distanceKm.coerceIn(0, 50)
+        timeIntervalMinutes = timeMinutes.coerceIn(0, 120)
+        if (routeKm != null) prime(routeKm)
+    }
+
     fun prime(routeKm: Double) {
-        val interval = if (level == VoiceLevel.CHATTY) 1 else 5
-        lastPeriodicSpoken = (floor(routeKm).toInt() / interval) * interval
+        lastPeriodicKm = routeKm.coerceAtLeast(0.0)
+        lastPeriodicAtMs = System.currentTimeMillis()
     }
 
     fun reset() {
-        lastPeriodicSpoken = -5
+        lastPeriodicKm = 0.0
+        lastPeriodicAtMs = System.currentTimeMillis()
         offCourseWarned = false
         lastRiskLabel = ""
         announced.clear()
@@ -76,10 +73,9 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
 
         if (reserve != null && reserve.label != lastRiskLabel) {
             lastRiskLabel = reserve.label
-            if (reserve.label == "위험") {
-                enqueue("배터리 위험 구간입니다. ${reserve.targetName} 예상 잔량 ${reserve.predictedPct.roundToInt()}퍼센트. 목표보다 ${(-reserve.differencePct).roundToInt()}퍼센트 부족합니다. 보조 강도를 줄이세요.")
-            } else if (reserve.label == "주의" && level != VoiceLevel.QUIET) {
-                enqueue("배터리 주의 구간입니다. ${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}퍼센트입니다.")
+            when (reserve.label) {
+                "위험" -> enqueue("배터리 위험 구간입니다. ${reserve.targetName} 예상 잔량 ${reserve.predictedPct.roundToInt()}퍼센트. 목표보다 ${(-reserve.differencePct).roundToInt()}퍼센트 부족합니다. 보조 강도를 줄이세요.")
+                "주의" -> enqueue("배터리 주의 구간입니다. ${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}퍼센트입니다.")
             }
         }
 
@@ -134,13 +130,12 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
             }
         }
 
-        if (level == VoiceLevel.QUIET) return
-
-        val interval = if (level == VoiceLevel.CHATTY) 1 else 5
-        val kmInt = floor(routeKm).toInt()
-        val periodic = (kmInt / interval) * interval
-        if (periodic >= interval && periodic > lastPeriodicSpoken && routeKm >= periodic.toDouble()) {
-            lastPeriodicSpoken = periodic
+        val now = System.currentTimeMillis()
+        val distanceDue = distanceIntervalKm > 0 && routeKm - lastPeriodicKm >= distanceIntervalKm - 0.02
+        val timeDue = timeIntervalMinutes > 0 && now - lastPeriodicAtMs >= timeIntervalMinutes * 60_000L
+        if (distanceDue || timeDue) {
+            lastPeriodicKm = routeKm
+            lastPeriodicAtMs = now
             val nextText = checkpoint?.let {
                 val r = (it.km - routeKm).coerceAtLeast(0.0)
                 " ${it.name}까지 ${String.format(Locale.US, "%.1f", r)}킬로미터."
@@ -151,8 +146,13 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
                 stats.descentM >= 500 -> " 앞으로 10킬로미터는 다운힐 비중이 큽니다."
                 else -> ""
             }
+            val triggerText = when {
+                distanceDue && timeDue -> "정기 안내입니다. "
+                timeDue -> "시간 기준 안내입니다. "
+                else -> ""
+            }
             val batteryLabel = if (battery.calibrated) "실제값 반영 예상 배터리" else "예상 배터리"
-            enqueue("현재 ${periodic}킬로미터. $batteryLabel ${battery.percent.roundToInt()}퍼센트.$terrain$nextText")
+            enqueue("${triggerText}현재 ${String.format(Locale.US, "%.1f", routeKm)}킬로미터. $batteryLabel ${battery.percent.roundToInt()}퍼센트.$terrain$nextText")
         }
     }
 

@@ -25,7 +25,7 @@ class RideService : Service(), LocationListener {
         const val ACTION_STOP = "com.seungjae.jangsu280battery.STOP"
         const val ACTION_RESET = "com.seungjae.jangsu280battery.RESET"
         const val ACTION_SET_VOICE = "com.seungjae.jangsu280battery.SET_VOICE"
-        const val ACTION_SET_VOICE_LEVEL = "com.seungjae.jangsu280battery.SET_VOICE_LEVEL"
+        const val ACTION_SET_VOICE_INTERVALS = "com.seungjae.jangsu280battery.SET_VOICE_INTERVALS"
         const val ACTION_SPEAK_NOW = "com.seungjae.jangsu280battery.SPEAK_NOW"
         const val ACTION_SPEAK_TEXT = "com.seungjae.jangsu280battery.SPEAK_TEXT"
 
@@ -37,16 +37,12 @@ class RideService : Service(), LocationListener {
         const val EXTRA_GPS_ELEVATION = "gps_elevation"
         const val EXTRA_PROVIDER = "provider"
         const val EXTRA_VOICE_ENABLED = "voice_enabled"
-        const val EXTRA_VOICE_LEVEL = "voice_level"
+        const val EXTRA_DISTANCE_INTERVAL_KM = "distance_interval_km"
+        const val EXTRA_TIME_INTERVAL_MIN = "time_interval_min"
         const val EXTRA_SPEAK_TEXT = "speak_text"
 
         private const val CHANNEL_ID = "gpx_ride_tracking"
         private const val NOTIFICATION_ID = 280
-        private const val PREFS = "ride_state"
-        private const val KEY_LAST_KM = "last_km"
-        private const val KEY_VOICE = "voice_enabled"
-        private const val KEY_VOICE_LEVEL = "voice_level"
-        private const val KEY_FINISH_TARGET = "finish_target"
     }
 
     private lateinit var locationManager: LocationManager
@@ -58,7 +54,6 @@ class RideService : Service(), LocationListener {
     private lateinit var actualStore: BatteryActualStore
     private lateinit var plan: AdaptiveBatteryPlan
     private lateinit var announcer: VoiceAnnouncer
-    private lateinit var chargeStore: ChargingSessionStore
     private lateinit var learningStore: BatteryLearningStore
     private lateinit var logManager: RideLogManager
     private val paceEstimator = PaceEstimator()
@@ -76,18 +71,15 @@ class RideService : Service(), LocationListener {
         course = courseRepo.loadCourse(courseMeta.id)
         learningStore = BatteryLearningStore(this)
         logManager = RideLogManager(this)
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val lastKm = prefs.getFloat(KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
+        val prefs = AppSettings.prefs(this)
+        val lastKm = prefs.getFloat(AppSettings.KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
         matcher = RouteMatcher(course, lastKm)
         basePlan = BatteryPlan(course, learningStore)
         actualStore = BatteryActualStore(this)
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
-        chargeStore = ChargingSessionStore(this)
         announcer = VoiceAnnouncer(this).also {
-            it.enabled = prefs.getBoolean(KEY_VOICE, true)
-            it.level = runCatching { VoiceLevel.valueOf(prefs.getString(KEY_VOICE_LEVEL, VoiceLevel.NORMAL.name) ?: VoiceLevel.NORMAL.name) }
-                .getOrDefault(VoiceLevel.NORMAL)
-            it.prime(lastKm)
+            it.enabled = AppSettings.voiceEnabled(this)
+            it.configure(AppSettings.distanceIntervalKm(this), AppSettings.timeIntervalMin(this), lastKm)
         }
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         createNotificationChannel()
@@ -101,7 +93,7 @@ class RideService : Service(), LocationListener {
                 return START_NOT_STICKY
             }
             ACTION_RESET -> {
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putFloat(KEY_LAST_KM, 0f).apply()
+                AppSettings.prefs(this).edit().putFloat(AppSettings.KEY_LAST_KM, 0f).apply()
                 matcher.seekToKm(0.0)
                 paceEstimator.reset()
                 announcer.reset()
@@ -110,21 +102,23 @@ class RideService : Service(), LocationListener {
             ACTION_SET_VOICE -> {
                 val enabled = intent.getBooleanExtra(EXTRA_VOICE_ENABLED, true)
                 announcer.enabled = enabled
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_VOICE, enabled).apply()
+                AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_VOICE, enabled).apply()
             }
-            ACTION_SET_VOICE_LEVEL -> {
-                val raw = intent.getStringExtra(EXTRA_VOICE_LEVEL) ?: VoiceLevel.NORMAL.name
-                val level = runCatching { VoiceLevel.valueOf(raw) }.getOrDefault(VoiceLevel.NORMAL)
-                announcer.level = level
-                announcer.prime(matcher.currentKm())
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_VOICE_LEVEL, level.name).apply()
+            ACTION_SET_VOICE_INTERVALS -> {
+                val distanceKm = intent.getIntExtra(EXTRA_DISTANCE_INTERVAL_KM, AppSettings.distanceIntervalKm(this))
+                val timeMin = intent.getIntExtra(EXTRA_TIME_INTERVAL_MIN, AppSettings.timeIntervalMin(this))
+                announcer.configure(distanceKm, timeMin, matcher.currentKm())
+                AppSettings.prefs(this).edit()
+                    .putInt(AppSettings.KEY_ANNOUNCE_DISTANCE_KM, distanceKm.coerceIn(0, 50))
+                    .putInt(AppSettings.KEY_ANNOUNCE_TIME_MIN, timeMin.coerceIn(0, 120))
+                    .apply()
             }
             ACTION_SPEAK_NOW -> {
                 val km = matcher.currentKm()
                 val battery = plan.estimate(km)
                 val cp = plan.currentOrNextCheckpoint(km)
                 val stats = course.elevationAhead(km, 10.0)
-                val finishTarget = getSharedPreferences(PREFS, MODE_PRIVATE).getFloat(KEY_FINISH_TARGET, 15f).toDouble()
+                val finishTarget = AppSettings.finishTarget(this)
                 val reserve = plan.reserveStatus(km, finishTarget)
                 announcer.speakNow(announcer.summaryText(km, battery, cp, stats, reserve))
             }
@@ -161,8 +155,8 @@ class RideService : Service(), LocationListener {
         val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
         val gpsElevation = if (location.hasAltitude()) location.altitude else Double.NaN
 
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        prefs.edit().putFloat(KEY_LAST_KM, match.routeKm.toFloat()).apply()
+        val prefs = AppSettings.prefs(this)
+        prefs.edit().putFloat(AppSettings.KEY_LAST_KM, match.routeKm.toFloat()).apply()
 
         basePlan.checkpoints.forEach { cp ->
             if (abs(cp.km - match.routeKm) <= 0.12) {
@@ -175,7 +169,7 @@ class RideService : Service(), LocationListener {
         val cp = plan.currentOrNextCheckpoint(match.routeKm)
         val poi = course.nextPoi(match.routeKm)
         val stats10 = course.elevationAhead(match.routeKm, 10.0)
-        val finishTarget = prefs.getFloat(KEY_FINISH_TARGET, 15f).toDouble()
+        val finishTarget = AppSettings.finishTarget(this)
         val reserve = plan.reserveStatus(match.routeKm, finishTarget)
         val climb = course.nextMajorClimb(match.routeKm)
         announcer.handle(match.routeKm, battery, cp, poi, stats10, match.offCourseMeters, reserve, climb)

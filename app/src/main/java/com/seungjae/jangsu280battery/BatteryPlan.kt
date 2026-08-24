@@ -168,11 +168,11 @@ class BatteryPlan(
 
     fun recommendedChargeKm(finishTargetPct: Double = 15.0): Double? {
         if (isLegacyPlannedCourse) return checkpoints.firstOrNull { it.chargeToPct != null }?.km
-        val allowedUse = 100.0 - finishTargetPct.coerceIn(5.0, 30.0)
+        val allowedUse = 100.0 - finishTargetPct.coerceIn(1.0, 99.0)
         val totalUse = predictedTotalUsePct()
         if (totalUse <= allowedUse) return null
-        // 약 25% 잔량에 도달하기 직전 위치를 첫 권장 충전 지점으로 제안한다.
-        val thresholdUse = 75.0
+        // 목표 잔량에 따라 첫 충전 검토 시점을 조정한다. 낮은 목표에서는 기존처럼 약 25% 잔량을 하한으로 사용한다.
+        val thresholdUse = allowedUse.coerceIn(1.0, 75.0)
         var km = 1.0
         while (km < course.totalKm) {
             if (learning.estimateConsumption(course, 0.0, km) >= thresholdUse) return km

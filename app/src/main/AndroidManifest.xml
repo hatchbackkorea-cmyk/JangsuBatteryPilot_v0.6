@@ -25,6 +25,17 @@
             </intent-filter>
         </activity>
 
+
+        <activity
+            android:name=".CourseActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <service
             android:name=".RideService"
             android:enabled="true"
