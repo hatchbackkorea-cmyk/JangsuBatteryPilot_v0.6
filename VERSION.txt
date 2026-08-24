@@ -1,0 +1,4 @@
+Jangsu Battery Pilot
+Version: 0.6.0
+VersionCode: 7
+Codename: Natural Voice Copilot
