@@ -237,16 +237,52 @@ class MainActivity : Activity() {
         if (!logManager.isActive()) return
         stopRideService()
         try {
-            val archive = logManager.finalizeRide(course, actualStore, learningStore, chargingStore.list(courseMeta.id))
+            val archive = logManager.finalizeRide(
+                course = course,
+                actualStore = actualStore,
+                chargingStations = chargingStore.list(courseMeta.id),
+                testMode = testMode
+            )
             renderRideState()
-            AlertDialog.Builder(this)
-                .setTitle("주행 로그 저장 완료")
-                .setMessage("${archive.courseName}\n${RideFormatter.one(archive.maxRouteKm)} km\n\nGPX · CSV · JSON · ZIP 저장 완료\n개인 배터리 학습 ${archive.learnedSamples}개 구간 반영\n\n최근 ZIP 내보내기는 코스 메뉴에서 할 수 있습니다.")
-                .setPositiveButton("확인", null)
-                .show()
+            if (testMode) {
+                logManager.skipArchiveLearning(archive, "TEST_MODE_SKIPPED")
+                AlertDialog.Builder(this)
+                    .setTitle("주행 로그 저장 완료")
+                    .setMessage("${archive.courseName}\n${RideFormatter.one(archive.maxRouteKm)} km\n\nGPX · CSV · JSON · ZIP 저장 완료\n\n테스트 모드 주행은 개인 배터리 학습에서 자동 제외했습니다.\n최근 ZIP 내보내기는 코스 메뉴에서 할 수 있습니다.")
+                    .setPositiveButton("확인", null)
+                    .show()
+            } else {
+                askLearningDecision(archive)
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "로그 저장 실패: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun askLearningDecision(archive: RideArchive) {
+        AlertDialog.Builder(this)
+            .setTitle("주행 로그 저장 완료")
+            .setMessage(
+                "${archive.courseName}\n${RideFormatter.one(archive.maxRouteKm)} km\n\n" +
+                    "GPX · CSV · JSON · ZIP 저장 완료\n\n" +
+                    "이 주행 파일의 실제 배터리 기록을 앞으로의 배터리 예측 학습에 사용할까요?\n" +
+                    "차량 테스트나 임의로 입력한 배터리 값이 포함됐다면 ‘사용 안 함’을 선택하세요."
+            )
+            .setPositiveButton("학습에 사용") { _, _ ->
+                val learned = logManager.learnFromArchive(archive, course, learningStore)
+                val msg = if (learned > 0) {
+                    "개인 배터리 학습 ${learned}개 구간을 반영했습니다."
+                } else {
+                    "학습 가능한 실제 배터리 구간이 없었습니다."
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("사용 안 함") { _, _ ->
+                logManager.skipArchiveLearning(archive)
+                Toast.makeText(this, "이 주행은 배터리 학습에 사용하지 않습니다.", Toast.LENGTH_SHORT).show()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun renderRideState() {
@@ -632,8 +668,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.1"
-    } catch (_: Exception) { "0.9.1" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.2"
+    } catch (_: Exception) { "0.9.2" }
 
     override fun onResume() {
         super.onResume()

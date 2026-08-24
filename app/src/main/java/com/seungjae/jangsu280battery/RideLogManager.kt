@@ -154,8 +154,8 @@ class RideLogManager(context: Context) {
     fun finalizeRide(
         course: CourseData,
         actualStore: BatteryActualStore,
-        learning: BatteryLearningStore,
-        chargingStations: List<ChargingStation> = emptyList()
+        chargingStations: List<ChargingStation> = emptyList(),
+        testMode: Boolean = false
     ): RideArchive {
         val ride = activeRide() ?: error("진행 중인 주행이 없습니다.")
         val end = System.currentTimeMillis()
@@ -176,7 +176,7 @@ class RideLogManager(context: Context) {
         val gpx = File(outDir, "$baseName.gpx")
         writeGpxFromCsv(sourceCsv, gpx, ride.courseName)
 
-        val learned = learning.trainFromRide(ride.sessionId, course, actualStore.entries())
+        val learned = 0
         val json = File(outDir, "$baseName.json")
         val summary = JSONObject().apply {
             put("sessionId", ride.sessionId)
@@ -191,6 +191,8 @@ class RideLogManager(context: Context) {
             put("courseAscentM", course.totalAscentM)
             put("courseDescentM", course.totalDescentM)
             put("courseHasElevation", course.hasElevation)
+            put("testMode", testMode)
+            put("learningStatus", if (testMode) "TEST_MODE_SKIPPED" else "PENDING")
             put("learnedSamplesAdded", learned)
             put("chargingPlan", JSONArray().apply {
                 chargingStations.sortedBy { it.routeKm }.forEach { s -> put(JSONObject().apply {
@@ -217,6 +219,49 @@ class RideLogManager(context: Context) {
         return RideArchive(ride.sessionId, ride.courseName, ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, learned)
     }
 
+    fun learnFromArchive(archive: RideArchive, course: CourseData, learning: BatteryLearningStore): Int {
+        val json = archive.jsonFile
+        if (!json.exists()) return 0
+        val root = runCatching { JSONObject(json.readText()) }.getOrNull() ?: return 0
+        if (root.optBoolean("testMode", false)) {
+            updateLearningDecision(archive, "TEST_MODE_SKIPPED", 0)
+            return 0
+        }
+        if (root.optString("learningStatus") == "USED") return root.optInt("learnedSamplesAdded", 0)
+        val arr = root.optJSONArray("actualBattery") ?: JSONArray()
+        val entries = mutableListOf<ActualBatteryEntry>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val kind = runCatching { ActualEntryKind.valueOf(o.optString("kind", "RIDING")) }
+                .getOrDefault(ActualEntryKind.RIDING)
+            entries += ActualBatteryEntry(
+                percent = o.optDouble("percent", Double.NaN),
+                routeKm = o.optDouble("routeKm", Double.NaN),
+                timestampMs = o.optLong("timestampMs", 0L),
+                kind = kind
+            )
+        }
+        val valid = entries.filter { it.percent.isFinite() && it.routeKm.isFinite() }
+        val learned = learning.trainFromRide(archive.sessionId, course, valid)
+        updateLearningDecision(archive, "USED", learned)
+        return learned
+    }
+
+    fun skipArchiveLearning(archive: RideArchive, reason: String = "SKIPPED") {
+        updateLearningDecision(archive, reason, 0)
+    }
+
+    private fun updateLearningDecision(archive: RideArchive, status: String, learnedSamples: Int) {
+        val json = archive.jsonFile
+        if (!json.exists()) return
+        val root = runCatching { JSONObject(json.readText()) }.getOrNull() ?: return
+        root.put("learningStatus", status)
+        root.put("learnedSamplesAdded", learnedSamples)
+        root.put("learningDecisionMs", System.currentTimeMillis())
+        json.writeText(root.toString(2))
+        zipFiles(archive.zipFile, listOf(archive.csvFile, archive.gpxFile, archive.jsonFile))
+    }
+
     fun discardActive() {
         val ride = activeRide()
         if (ride != null) File(sessionsRoot, ride.sessionId).deleteRecursively()
@@ -240,7 +285,12 @@ class RideLogManager(context: Context) {
                 append("진행 거리: "); append(RideFormatter.one(o.optDouble("maxRouteKm"))); append(" km\n")
                 append("기록 시간: "); append(if (h > 0) "${h}시간 ${m}분" else "${m}분"); append('\n')
                 append("GPS 이동 평균: "); append(RideFormatter.one(o.optDouble("avgSpeedKmh"))); append(" km/h\n")
-                append("학습 반영 구간: "); append(o.optInt("learnedSamplesAdded")); append("개\n")
+                when (o.optString("learningStatus", "PENDING")) {
+                    "USED" -> { append("학습 반영: "); append(o.optInt("learnedSamplesAdded")); append("개 구간\n") }
+                    "SKIPPED" -> append("학습: 사용 안 함\n")
+                    "TEST_MODE_SKIPPED" -> append("학습: 테스트 모드 제외\n")
+                    else -> append("학습: 선택 대기\n")
+                }
                 append("GPX / CSV / JSON / ZIP 저장 완료")
             }
         } catch (_: Exception) { "리포트를 읽지 못했습니다." }

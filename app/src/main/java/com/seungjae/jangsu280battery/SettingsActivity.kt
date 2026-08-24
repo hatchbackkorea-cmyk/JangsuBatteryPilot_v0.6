@@ -15,6 +15,9 @@ class SettingsActivity : Activity() {
     private lateinit var courseRepo: CourseRepository
     private lateinit var logManager: RideLogManager
     private lateinit var prefs: android.content.SharedPreferences
+    private lateinit var learningStore: BatteryLearningStore
+    private lateinit var tvLearningSummary: TextView
+    private lateinit var btnClearLearning: Button
 
     private lateinit var switchVoice: Switch
     private lateinit var switchKeepScreen: Switch
@@ -36,6 +39,7 @@ class SettingsActivity : Activity() {
         courseRepo = CourseRepository(this)
         logManager = RideLogManager(this)
         prefs = AppSettings.prefs(this)
+        learningStore = BatteryLearningStore(this)
 
         findViewById<Button>(R.id.btnSettingsBack).setOnClickListener { finish() }
         switchVoice = findViewById(R.id.switchSettingsVoice)
@@ -50,6 +54,9 @@ class SettingsActivity : Activity() {
         tvTestKm = findViewById(R.id.tvSettingsTestKm)
         seekTestKm = findViewById(R.id.seekSettingsTestKm)
         tvTestHint = findViewById(R.id.tvSettingsTestHint)
+        tvLearningSummary = findViewById(R.id.tvLearningSummary)
+        btnClearLearning = findViewById(R.id.btnClearLearning)
+        refreshLearningSummary()
 
         findViewById<TextView>(R.id.tvSettingsCourse).text = runCatching {
             val m = courseRepo.activeMeta()
@@ -119,6 +126,9 @@ class SettingsActivity : Activity() {
         })
 
         findViewById<Button>(R.id.btnResetProgress).setOnClickListener { resetProgress() }
+        btnClearLearning.setOnClickListener { confirmClearLearning() }
+        btnClearLearning.isEnabled = !logManager.isActive()
+        if (logManager.isActive()) btnClearLearning.text = "주행 종료 후 학습 데이터 초기화"
         findViewById<Button>(R.id.btnSettingsVersion).setOnClickListener { showVersionInfo() }
     }
 
@@ -153,6 +163,33 @@ class SettingsActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::tvLearningSummary.isInitialized) refreshLearningSummary()
+    }
+
+    private fun refreshLearningSummary() {
+        val count = learningStore.samples().size
+        tvLearningSummary.text = if (count == 0) {
+            "학습 데이터 없음 · 기본 배터리 모델 사용 중"
+        } else {
+            "저장된 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}"
+        }
+    }
+
+    private fun confirmClearLearning() {
+        AlertDialog.Builder(this)
+            .setTitle("배터리 학습 데이터 초기화")
+            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
+            .setPositiveButton("학습 데이터 삭제") { _, _ ->
+                learningStore.clear()
+                refreshLearningSummary()
+                Toast.makeText(this, "배터리 학습 데이터를 초기화했습니다.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
     private fun resetProgress() {
         if (logManager.isActive()) {
             Toast.makeText(this, "주행 기록 중에는 진행 기록을 초기화할 수 없습니다.", Toast.LENGTH_LONG).show()
@@ -184,7 +221,10 @@ class SettingsActivity : Activity() {
                     "• 음성 자동 안내를 km 간격 / 분 간격으로 직접 설정\n" +
                     "• 설정 및 테스트 기능을 별도 설정 메뉴로 분리\n" +
                     "• GPX 코스 관리를 별도 코스 메뉴로 분리\n" +
-                    "• 충전 타이머 제거"
+                    "• 충전 타이머 제거\n" +
+                    "• 주행 저장 후 학습 사용 여부를 직접 선택\n" +
+                    "• 테스트 모드 주행은 학습에서 자동 제외\n" +
+                    "• 개인 배터리 학습 데이터 확인 / 초기화"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -192,8 +232,8 @@ class SettingsActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.1"
-    } catch (_: Exception) { "0.9.1" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.2"
+    } catch (_: Exception) { "0.9.2" }
 
     private fun applyKeepScreen(enabled: Boolean) {
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

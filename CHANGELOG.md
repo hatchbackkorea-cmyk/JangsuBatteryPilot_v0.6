@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.9.2 — Learning Safety Patch
+- 주행 종료 시 배터리 학습을 자동 실행하지 않고 GPX/CSV/JSON/ZIP 로그부터 저장
+- 저장 직후 `학습에 사용` / `사용 안 함` 선택 다이얼로그 추가
+- 사용자가 `학습에 사용`을 선택한 경우에만 저장된 JSON의 실제 배터리 기록을 읽어 개인 소비 모델 학습
+- 테스트 모드 주행은 사용자의 실수와 관계없이 배터리 학습에서 자동 제외
+- 로그 JSON에 `learningStatus`, `learningDecisionMs`, `learnedSamplesAdded`, `testMode` 기록
+- 학습 선택 결과가 바뀌면 ZIP 안의 JSON도 다시 갱신
+- 설정 메뉴에 개인 배터리 학습 데이터 개수/요약 표시와 전체 초기화 버튼 추가
+- 기존 주행 로그와 실제 배터리 기록은 학습 초기화 시 삭제하지 않음
+
 ## 0.9.1 — Build Fix
 - `CourseActivity.kt` GPX 웨이포인트 개수 안내 문자열의 Kotlin 문자열 보간 오류 수정
 - `"웨이포인트 $wptCount개 발견"`을 `"웨이포인트 ${wptCount}개 발견"`으로 수정해 `Unresolved reference: wptCount개` 컴파일 오류 해결
