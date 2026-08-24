@@ -2,6 +2,7 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
@@ -18,6 +19,8 @@ class SettingsActivity : Activity() {
     private lateinit var learningStore: BatteryLearningStore
     private lateinit var tvLearningSummary: TextView
     private lateinit var btnClearLearning: Button
+    private lateinit var historicalRideStore: HistoricalRideStore
+    private lateinit var tvHistoricalLearningSummary: TextView
 
     private lateinit var switchVoice: Switch
     private lateinit var switchKeepScreen: Switch
@@ -40,6 +43,7 @@ class SettingsActivity : Activity() {
         logManager = RideLogManager(this)
         prefs = AppSettings.prefs(this)
         learningStore = BatteryLearningStore(this)
+        historicalRideStore = HistoricalRideStore(this)
 
         findViewById<Button>(R.id.btnSettingsBack).setOnClickListener { finish() }
         switchVoice = findViewById(R.id.switchSettingsVoice)
@@ -56,6 +60,7 @@ class SettingsActivity : Activity() {
         tvTestHint = findViewById(R.id.tvSettingsTestHint)
         tvLearningSummary = findViewById(R.id.tvLearningSummary)
         btnClearLearning = findViewById(R.id.btnClearLearning)
+        tvHistoricalLearningSummary = findViewById(R.id.tvHistoricalLearningSummary)
         refreshLearningSummary()
 
         findViewById<TextView>(R.id.tvSettingsCourse).text = runCatching {
@@ -126,6 +131,13 @@ class SettingsActivity : Activity() {
         })
 
         findViewById<Button>(R.id.btnResetProgress).setOnClickListener { resetProgress() }
+        findViewById<Button>(R.id.btnHistoricalLearning).setOnClickListener {
+            if (logManager.isActive()) {
+                Toast.makeText(this, "주행 종료 후 과거 라이딩 학습을 관리해 주세요.", Toast.LENGTH_LONG).show()
+            } else {
+                startActivity(Intent(this, HistoricalRideActivity::class.java))
+            }
+        }
         btnClearLearning.setOnClickListener { confirmClearLearning() }
         btnClearLearning.isEnabled = !logManager.isActive()
         if (logManager.isActive()) btnClearLearning.text = "주행 종료 후 학습 데이터 초기화"
@@ -170,19 +182,26 @@ class SettingsActivity : Activity() {
 
     private fun refreshLearningSummary() {
         val count = learningStore.samples().size
+        val historical = historicalRideStore.records()
         tvLearningSummary.text = if (count == 0) {
             "학습 데이터 없음 · 기본 배터리 모델 사용 중"
         } else {
             "저장된 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}"
+        }
+        tvHistoricalLearningSummary.text = if (historical.isEmpty()) {
+            "과거 FIT/GPX 학습 라이딩 없음"
+        } else {
+            "과거 FIT/GPX 학습 ${historical.size}개 · 생성된 학습 샘플 ${historical.sumOf { it.sampleCount }}개"
         }
     }
 
     private fun confirmClearLearning() {
         AlertDialog.Builder(this)
             .setTitle("배터리 학습 데이터 초기화")
-            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
+            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? 과거 FIT/GPX에서 가져온 학습 기록도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
+                historicalRideStore.clear()
                 refreshLearningSummary()
                 Toast.makeText(this, "배터리 학습 데이터를 초기화했습니다.", Toast.LENGTH_SHORT).show()
             }
@@ -224,7 +243,10 @@ class SettingsActivity : Activity() {
                     "• 충전 타이머 제거\n" +
                     "• 주행 저장 후 학습 사용 여부를 직접 선택\n" +
                     "• 테스트 모드 주행은 학습에서 자동 제외\n" +
-                    "• 개인 배터리 학습 데이터 확인 / 초기화"
+                    "• 개인 배터리 학습 데이터 확인 / 초기화\n" +
+                    "• 과거 FIT/GPX 라이딩 가져오기 및 배터리 학습\n" +
+                    "• FIT 심박 / 케이던스 / 파워 데이터 자동 분석\n" +
+                    "• 동일 파일 중복 학습 방지 및 개별 학습 삭제"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -232,8 +254,8 @@ class SettingsActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.2"
-    } catch (_: Exception) { "0.9.2" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.10.0"
+    } catch (_: Exception) { "0.10.0" }
 
     private fun applyKeepScreen(enabled: Boolean) {
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

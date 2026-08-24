@@ -232,6 +232,20 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
             <Button
+                android:id="@+id/btnHistoricalLearning"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="10dp"
+                android:text="과거 라이딩 학습 가져오기 (FIT / GPX)" />
+            <TextView
+                android:id="@+id/tvHistoricalLearningSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="과거 학습 라이딩 0개"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <Button
                 android:id="@+id/btnClearLearning"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
@@ -241,7 +255,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="주행 로그 파일은 유지되고, 향후 배터리 예측에 사용하는 개인 학습값만 삭제됩니다."
+                android:text="주행 로그 파일은 유지됩니다. 개인 학습값과 과거 FIT/GPX에서 만든 학습 기록만 초기화됩니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>

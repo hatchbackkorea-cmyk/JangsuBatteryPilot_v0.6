@@ -101,6 +101,74 @@ class BatteryLearningStore(context: Context) {
         return newSamples.size
     }
 
+
+    /**
+     * 과거 FIT/GPX 파일의 배터리 기록을 학습한다.
+     * 실제 배터리 지점 사이의 총 소비량만 알고 있으므로, 해당 구간을 0.5km 단위로 나눈 뒤
+     * 지형 버킷별 기본 소비량 비율에 따라 동일한 전체 보정계수를 적용한다.
+     */
+    fun trainHistoricalRide(sessionId: String, course: CourseData, entries: List<ActualBatteryEntry>): Int {
+        if (sessionId.isBlank() || isTrained(sessionId)) return 0
+        val ordered = entries.withIndex().sortedWith(compareBy<IndexedValue<ActualBatteryEntry>> { it.value.routeKm }.thenBy { it.index })
+            .map { it.value }
+        val newSamples = mutableListOf<BatteryLearningSample>()
+        for (i in 1 until ordered.size) {
+            val a = ordered[i - 1]
+            val b = ordered[i]
+            val dist = b.routeKm - a.routeKm
+            val used = a.percent - b.percent
+            if (dist < 0.7 || used < 0.8) continue
+
+            data class BucketAgg(var base: Double = 0.0, var distance: Double = 0.0, var ascent: Double = 0.0)
+            val aggs = TerrainBucket.values().associateWith { BucketAgg() }.toMutableMap()
+            var x = a.routeKm.coerceIn(0.0, course.totalKm)
+            val end = b.routeKm.coerceIn(x, course.totalKm)
+            while (x < end - 0.0001) {
+                val nx = (x + 0.5).coerceAtMost(end)
+                val d = nx - x
+                val ascent = course.elevationBetween(x, nx).ascentM
+                val bkt = bucket(d, ascent)
+                val agg = aggs.getValue(bkt)
+                agg.base += baseConsumption(d, ascent)
+                agg.distance += d
+                agg.ascent += ascent
+                x = nx
+            }
+            val modeled = aggs.values.sumOf { it.base }
+            if (modeled < 0.5) continue
+            val factor = (used / modeled).coerceIn(0.45, 2.20)
+            aggs.forEach { (bkt, agg) ->
+                if (agg.distance < 0.25 || agg.base < 0.15) return@forEach
+                newSamples += BatteryLearningSample(
+                    bucket = bkt,
+                    factor = factor,
+                    pctPerKm = (agg.base * factor) / agg.distance,
+                    distanceKm = agg.distance,
+                    ascentM = agg.ascent,
+                    timestampMs = b.timestampMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    sessionId = sessionId
+                )
+            }
+        }
+        if (newSamples.isNotEmpty()) {
+            writeSamples((samples() + newSamples).takeLast(MAX_SAMPLES))
+        }
+        markTrained(sessionId)
+        return newSamples.size
+    }
+
+    fun hasSession(sessionId: String): Boolean = isTrained(sessionId)
+
+    fun removeSession(sessionId: String): Int {
+        if (sessionId.isBlank()) return 0
+        val before = samples()
+        val after = before.filterNot { it.sessionId == sessionId }
+        if (after.size != before.size) writeSamples(after)
+        val set = trainedSessions().apply { remove(sessionId) }
+        prefs.edit().putStringSet(KEY_TRAINED, set).apply()
+        return before.size - after.size
+    }
+
     fun samples(): List<BatteryLearningSample> {
         val raw = prefs.getString(KEY_SAMPLES, null) ?: return emptyList()
         return try {
