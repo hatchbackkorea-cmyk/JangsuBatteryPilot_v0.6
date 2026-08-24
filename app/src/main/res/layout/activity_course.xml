@@ -19,57 +19,72 @@
             <Button
                 android:id="@+id/btnCourseBack"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
+                android:layout_height="44dp"
                 android:text="← 주행" />
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
+                android:layout_marginStart="10dp"
                 android:layout_weight="1"
                 android:text="코스"
                 android:textColor="@color/text_primary"
-                android:textSize="26sp"
+                android:textSize="24sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/panel_accent_bg"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="14dp">
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="선택한 GPX 코스"
+                android:text="선택한 코스"
                 android:textColor="@color/text_secondary"
-                android:textSize="13sp" />
+                android:textSize="11sp" />
             <TextView
                 android:id="@+id/tvCourseMenuActive"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="2dp"
                 android:text="현재 코스"
                 android:textColor="@color/text_primary"
-                android:textSize="21sp"
+                android:textSize="19sp"
                 android:textStyle="bold" />
-            <Button
-                android:id="@+id/btnCourseImport"
+
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:layout_marginTop="10dp"
-                android:text="+ GPX 파일 불러오기" />
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnCourseImport"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:text="+ GPX 불러오기" />
+                <Button
+                    android:id="@+id/btnCourseExportLast"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:enabled="false"
+                    android:text="최근 로그 ZIP" />
+            </LinearLayout>
         </LinearLayout>
 
         <TextView
             android:id="@+id/tvCourseMenuHint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:text="저장된 코스를 선택하세요."
             android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:textSize="11sp" />
 
         <LinearLayout
             android:id="@+id/courseListContainer"
@@ -80,10 +95,10 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:layout_marginBottom="24dp"
-            android:text="※ GPX의 trk/rte와 ele 고도 데이터를 자동 분석합니다. 고도 데이터가 없는 GPX도 거리 기반으로 사용할 수 있습니다."
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="18dp"
+            android:text="GPX 코스 관리와 최근 주행 로그 내보내기를 여기서 처리합니다."
             android:textColor="@color/text_secondary"
-            android:textSize="11sp" />
+            android:textSize="10sp" />
     </LinearLayout>
 </ScrollView>

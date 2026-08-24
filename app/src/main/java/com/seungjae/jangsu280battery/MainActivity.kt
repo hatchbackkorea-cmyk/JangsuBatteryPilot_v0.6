@@ -12,15 +12,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -31,7 +29,6 @@ class MainActivity : Activity() {
         private const val REQ_NOTIFICATIONS = 1002
         private const val REQ_MICROPHONE = 1003
         private const val REQ_SPEECH = 1004
-        private const val REQ_EXPORT = 1006
     }
 
     private lateinit var courseRepo: CourseRepository
@@ -43,12 +40,9 @@ class MainActivity : Activity() {
     private lateinit var actualStore: BatteryActualStore
     private lateinit var plan: AdaptiveBatteryPlan
 
-    private lateinit var tvCourseName: TextView
-    private lateinit var tvCourseSummary: TextView
     private lateinit var btnCourseMenu: Button
     private lateinit var btnSettingsMenu: Button
     private lateinit var btnRideToggle: Button
-    private lateinit var btnExportLast: Button
     private lateinit var tvGpsStatus: TextView
     private lateinit var tvCurrentKm: TextView
     private lateinit var tvBattery: TextView
@@ -87,7 +81,6 @@ class MainActivity : Activity() {
     private var receiverRegistered = false
     private var speechPendingAfterPermission = false
     private var finishTargetPct = AppSettings.DEFAULT_FINISH_TARGET.toDouble()
-    private var pendingExportFile: File? = null
     private var loadedCourseId: String? = null
 
     private val rideReceiver = object : BroadcastReceiver() {
@@ -122,7 +115,6 @@ class MainActivity : Activity() {
         btnCourseMenu.setOnClickListener { startActivity(Intent(this, CourseActivity::class.java)) }
         btnSettingsMenu.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else startRide() }
-        btnExportLast.setOnClickListener { exportLastLog() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnMicBattery.setOnClickListener { requestVoiceCommand() }
         btnUndoActual.setOnClickListener { undoActual() }
@@ -133,12 +125,9 @@ class MainActivity : Activity() {
     }
 
     private fun bindViews() {
-        tvCourseName = findViewById(R.id.tvCourseName)
-        tvCourseSummary = findViewById(R.id.tvCourseSummary)
         btnCourseMenu = findViewById(R.id.btnCourseMenu)
         btnSettingsMenu = findViewById(R.id.btnSettingsMenu)
         btnRideToggle = findViewById(R.id.btnRideToggle)
-        btnExportLast = findViewById(R.id.btnExportLast)
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
         tvCurrentKm = findViewById(R.id.tvCurrentKm)
         tvBattery = findViewById(R.id.tvBattery)
@@ -184,7 +173,6 @@ class MainActivity : Activity() {
             latestRouteKm = prefs.getFloat(AppSettings.KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
             latestCourseElevation = course.pointAtKm(latestRouteKm).ele
             tvVersion.text = "GPX Battery Copilot v${appVersionName()} · GPX Ride Copilot"
-            updateCourseHeader()
             true
         } catch (e: Exception) {
             Toast.makeText(this, "GPX 읽기 실패: ${e.message}", Toast.LENGTH_LONG).show()
@@ -196,7 +184,6 @@ class MainActivity : Activity() {
         finishTargetPct = AppSettings.finishTarget(this).coerceIn(1.0, 99.0)
         testMode = AppSettings.testMode(this)
         applyKeepScreenOn(AppSettings.keepScreenOn(this))
-        updateCourseHeader()
 
         if (logManager.isActive() && !testMode) {
             sendVoiceSettingsToService()
@@ -211,7 +198,7 @@ class MainActivity : Activity() {
             latestOffCourseM = 0.0
             latestAccuracyM = 5f
             latestCourseElevation = course.pointAtKm(latestRouteKm).ele
-            tvGpsStatus.text = "테스트 모드 · 설정 메뉴의 테스트 위치 사용"
+            tvGpsStatus.text = "테스트 모드"
             renderAtKm(latestRouteKm, true)
         } else {
             val stored = AppSettings.prefs(this).getFloat(AppSettings.KEY_LAST_KM, latestRouteKm.toFloat()).toDouble()
@@ -219,21 +206,6 @@ class MainActivity : Activity() {
             renderAtKm(latestRouteKm, false)
             if (logManager.isActive()) ensurePermissionsAndStart()
         }
-    }
-
-    private fun updateCourseHeader() {
-        if (!::plan.isInitialized) return
-        tvCourseName.text = courseMeta.name
-        val elev = if (course.hasElevation) "▲${course.totalAscentM.roundToInt()}m · ▼${course.totalDescentM.roundToInt()}m" else "고도 데이터 없음"
-        val predictedUse = plan.predictedTotalUsePct()
-        val chargeKm = plan.recommendedChargeKm(finishTargetPct)
-        val batteryLine = when {
-            plan.isLegacyPlan() -> "장수 전용 충전 계획 유지"
-            predictedUse <= 100.0 - finishTargetPct -> "무충전 종점 예상 ${(100.0 - predictedUse).coerceAtLeast(0.0).roundToInt()}%"
-            chargeKm != null -> "예상 사용 ${predictedUse.roundToInt()}% · 약 ${RideFormatter.one(chargeKm)}km 부근 충전 검토"
-            else -> "예상 사용 ${predictedUse.roundToInt()}%"
-        }
-        tvCourseSummary.text = "${RideFormatter.one(course.totalKm)} km · $elev\n$batteryLine · 목표 ${finishTargetPct.roundToInt()}% · ${plan.modelLabel()}"
     }
 
     private fun startRide() {
@@ -265,12 +237,10 @@ class MainActivity : Activity() {
         try {
             val archive = logManager.finalizeRide(course, actualStore, learningStore)
             renderRideState()
-            updateCourseHeader()
             AlertDialog.Builder(this)
                 .setTitle("주행 로그 저장 완료")
-                .setMessage("${archive.courseName}\n${RideFormatter.one(archive.maxRouteKm)} km\n\nGPX · CSV · JSON · ZIP 저장 완료\n개인 배터리 학습 ${archive.learnedSamples}개 구간 반영")
-                .setPositiveButton("ZIP 내보내기") { _, _ -> exportFile(archive.zipFile) }
-                .setNegativeButton("확인", null)
+                .setMessage("${archive.courseName}\n${RideFormatter.one(archive.maxRouteKm)} km\n\nGPX · CSV · JSON · ZIP 저장 완료\n개인 배터리 학습 ${archive.learnedSamples}개 구간 반영\n\n최근 ZIP 내보내기는 코스 메뉴에서 할 수 있습니다.")
+                .setPositiveButton("확인", null)
                 .show()
         } catch (e: Exception) {
             Toast.makeText(this, "로그 저장 실패: ${e.message}", Toast.LENGTH_LONG).show()
@@ -280,25 +250,9 @@ class MainActivity : Activity() {
     private fun renderRideState() {
         val active = logManager.isActive()
         btnRideToggle.text = if (active) "■ 주행 종료 · 로그 저장" else "▶ 주행 시작"
-        btnExportLast.isEnabled = logManager.lastZipFile() != null
         if (!active) {
-            tvGpsStatus.text = if (testMode) "테스트 모드 · 설정 메뉴의 테스트 위치 사용" else "주행 대기 · 코스 메뉴에서 GPX를 선택하세요"
+            tvGpsStatus.text = if (testMode) "테스트 모드" else "주행 대기"
         }
-    }
-
-    private fun exportLastLog() {
-        val file = logManager.lastZipFile() ?: return Toast.makeText(this, "내보낼 주행 로그가 없습니다.", Toast.LENGTH_SHORT).show()
-        exportFile(file)
-    }
-
-    private fun exportFile(file: File) {
-        pendingExportFile = file
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/zip"
-            putExtra(Intent.EXTRA_TITLE, file.name)
-        }
-        startActivityForResult(intent, REQ_EXPORT)
     }
 
     private fun requestVoiceCommand() {
@@ -326,34 +280,18 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android, retained for minSdk 26 compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        when (requestCode) {
-            REQ_EXPORT -> {
-                if (resultCode == RESULT_OK) {
-                    val uri = data?.data
-                    val source = pendingExportFile
-                    if (uri != null && source != null) try {
-                        contentResolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
-                        Toast.makeText(this, "주행 로그 ZIP을 저장했습니다.", Toast.LENGTH_LONG).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(this, "내보내기 실패: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
-                pendingExportFile = null
-            }
-            REQ_SPEECH -> {
-                if (resultCode != RESULT_OK) {
-                    tvMicHint.text = "큰 마이크를 누르고 자연스럽게 말하세요"
-                    return
-                }
-                val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS).orEmpty()
-                val parsed = results.map { VoiceCommandParser.parse(it) to it }.firstOrNull { it.first !is VoiceCommand.Unknown }
-                if (parsed == null) {
-                    tvMicHint.text = "명령을 못 알아들었습니다 · 다시 말해주세요"
-                    return
-                }
-                handleVoiceCommand(parsed.first, parsed.second)
-            }
+        if (requestCode != REQ_SPEECH) return
+        if (resultCode != RESULT_OK) {
+            tvMicHint.text = "큰 마이크를 누르고 자연스럽게 말하세요"
+            return
         }
+        val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS).orEmpty()
+        val parsed = results.map { VoiceCommandParser.parse(it) to it }.firstOrNull { it.first !is VoiceCommand.Unknown }
+        if (parsed == null) {
+            tvMicHint.text = "명령을 못 알아들었습니다 · 다시 말해주세요"
+            return
+        }
+        handleVoiceCommand(parsed.first, parsed.second)
     }
 
     private fun handleVoiceCommand(command: VoiceCommand, heardText: String) {
@@ -362,7 +300,6 @@ class MainActivity : Activity() {
             is VoiceCommand.FinishTarget -> {
                 finishTargetPct = command.percent.toDouble().coerceIn(1.0, 99.0)
                 AppSettings.prefs(this).edit().putInt(AppSettings.KEY_FINISH_TARGET, finishTargetPct.roundToInt()).apply()
-                updateCourseHeader()
                 renderAtKm(latestRouteKm, testMode)
                 speakText("종점 목표 잔량을 ${finishTargetPct.roundToInt()}퍼센트로 설정했습니다.")
             }
@@ -567,7 +504,7 @@ class MainActivity : Activity() {
         tvBattery.setTextColor(batteryColor(battery.percent))
         progressBattery.progress = pct
         progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(batteryColor(battery.percent))
-        tvBatteryRange.text = "${battery.note} · 예상 범위 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
+        tvBatteryRange.text = "예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%${if (battery.calibrated) " · 실측보정" else ""}"
 
         tvRiskStatus.text = reserve.label
         tvRiskStatus.setTextColor(when (reserve.label) {
@@ -576,15 +513,16 @@ class MainActivity : Activity() {
             else -> getColor(R.color.danger)
         })
         val diffAbs = abs(reserve.differencePct).roundToInt()
-        val differenceText = if (reserve.differencePct >= 0) "목표보다 ${diffAbs}% 여유" else "목표보다 ${diffAbs}% 부족 · 약 ${diffAbs}% 절약 필요"
-        tvRiskDetail.text = "${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}% / 목표 ${reserve.targetPct.roundToInt()}% · $differenceText · 실시간계수 ${String.format(Locale.US, "%.2f", reserve.consumptionFactor)}x"
+        val differenceText = if (reserve.differencePct >= 0) "여유 ${diffAbs}%" else "부족 ${diffAbs}%"
+        tvRiskDetail.text = "${reserve.targetName} ${reserve.predictedPct.roundToInt()}% · 목표 ${reserve.targetPct.roundToInt()}% · $differenceText"
 
         val latestActual = actualStatus?.entry
         if (latestActual == null) {
             tvActualBattery.text = "실제값 없음"
             tvActualBattery.setTextColor(getColor(R.color.text_secondary))
-            tvActualDetail.text = "실제 배터리를 말하면 이 코스의 이후 소비 예측을 즉시 보정합니다."
+            tvActualDetail.text = "마이크로 실제 잔량 입력"
             btnUndoActual.isEnabled = false
+            btnUndoActual.visibility = View.GONE
         } else {
             tvActualBattery.text = "실제 ${latestActual.percent.roundToInt()}%"
             tvActualBattery.setTextColor(batteryColor(latestActual.percent))
@@ -594,12 +532,13 @@ class MainActivity : Activity() {
                 ActualEntryKind.POST_CHARGE -> "충전 후 기준"
                 ActualEntryKind.RIDING -> "주행 기준"
             }
-            tvActualDetail.text = "${RideFormatter.one(latestActual.routeKm)}km · 기준 대비 ${if (delta >= 0) "+" else ""}$delta% · $phase · 소비 ${String.format(Locale.US, "%.2f", actualStatus.consumptionFactor)}x · ${timeText(latestActual.timestampMs)}"
+            tvActualDetail.text = "${RideFormatter.one(latestActual.routeKm)}km · ${if (delta >= 0) "+" else ""}$delta% · $phase · ${String.format(Locale.US, "%.2f", actualStatus.consumptionFactor)}x"
             btnUndoActual.isEnabled = true
+            btnUndoActual.visibility = View.VISIBLE
         }
 
         val remainFinish = (course.totalKm - km).coerceAtLeast(0.0)
-        tvSpeed.text = if (latestSpeedKmh >= 2.0) "이동 평균 ${RideFormatter.one(latestSpeedKmh)} km/h" else "이동 속도 계산 중"
+        tvSpeed.text = if (latestSpeedKmh >= 2.0) "속도 ${RideFormatter.one(latestSpeedKmh)}km/h" else "속도 -"
         tvFinishEta.text = "종점 ${RideFormatter.one(remainFinish)}km · ${RideFormatter.etaClock(remainFinish, latestSpeedKmh)}"
 
         if (cp != null) {
@@ -611,9 +550,9 @@ class MainActivity : Activity() {
                 cp.chargeToPct != null && atCurrent -> "도착 예상 $predicted% → 계획 ${cp.chargeToPct.roundToInt()}% 충전"
                 cp.chargeToPct != null -> "${RideFormatter.one(remain)}km · 도착 예상 $predicted% · 계획 ${cp.chargeToPct.roundToInt()}% 충전"
                 cp.km >= course.totalKm - 0.05 -> "${RideFormatter.one(remain)}km 남음 · 종점 예상 $predicted%"
-                else -> "${RideFormatter.one(remain)}km 남음 · 예상 배터리 $predicted% · 보급/충전 가능 지점"
+                else -> "${RideFormatter.one(remain)}km · 예상 $predicted% · 보급/충전"
             }
-            tvEta.text = "예상 도착 ${RideFormatter.etaClock(remain, latestSpeedKmh)} · ${RideFormatter.duration(remain, latestSpeedKmh)}"
+            tvEta.text = "ETA ${RideFormatter.etaClock(remain, latestSpeedKmh)} · ${RideFormatter.duration(remain, latestSpeedKmh)}"
         } else {
             tvNextCheckpoint.text = "코스 완료"
             tvNextCheckpointDetail.text = "종점 도착"
@@ -621,25 +560,25 @@ class MainActivity : Activity() {
         }
 
         if (course.hasElevation) {
-            tvElevationAhead.text = "앞 10km  ▲${stats10.ascentM.roundToInt()}m   ▼${stats10.descentM.roundToInt()}m"
+            tvElevationAhead.text = "10km ▲${stats10.ascentM.roundToInt()}m ▼${stats10.descentM.roundToInt()}m"
             if (climb == null) {
                 tvNextClimb.text = "주요 업힐 없음"
-                tvNextClimbDetail.text = "앞 22km에서 큰 연속 업힐이 감지되지 않았습니다."
+                tvNextClimbDetail.text = "22km 내 큰 업힐 없음"
             } else {
                 val rem = (climb.startKm - km).coerceAtLeast(0.0)
                 tvNextClimb.text = if (rem <= 0.2) "현재 주요 업힐" else "${RideFormatter.one(rem)}km 후 주요 업힐"
                 tvNextClimbDetail.text = "길이 ${RideFormatter.one(climb.distanceKm)}km · 상승 +${climb.ascentM.roundToInt()}m · 평균 ${String.format(Locale.US, "%.1f", climb.averageGradePct)}%"
             }
         } else {
-            tvElevationAhead.text = "GPX 고도 데이터 없음 · 거리 기반 모드"
+            tvElevationAhead.text = "고도 없음 · 거리 기반"
             tvNextClimb.text = "업힐 분석 불가"
-            tvNextClimbDetail.text = "이 GPX에는 ele 고도 데이터가 충분하지 않습니다."
+            tvNextClimbDetail.text = "GPX 고도 데이터 없음"
         }
 
-        tvTenKmBattery.text = "10km 후 예상 ${battery10.percent.roundToInt()}%${if (battery10.calibrated) " · 실측 보정" else ""}"
+        tvTenKmBattery.text = "10km 후 ${battery10.percent.roundToInt()}%${if (battery10.calibrated) " · 보정" else ""}"
         tvAssist.text = when {
-            reserve.label == "위험" -> "⚠ 목표 달성을 위해 약 ${(-reserve.differencePct).coerceAtLeast(0.0).roundToInt()}% 절약 필요"
-            reserve.label == "주의" -> "배터리 목표선 근처 · 긴 업힐에서 보조 강도 절약"
+            reserve.label == "위험" -> "⚠ ${(-reserve.differencePct).coerceAtLeast(0.0).roundToInt()}% 절약 필요"
+            reserve.label == "주의" -> "목표선 근처 · 업힐 절약"
             else -> plan.assistText(km, battery, stats10)
         }
         tvAssist.setTextColor(when {
@@ -647,19 +586,19 @@ class MainActivity : Activity() {
             reserve.label == "주의" -> getColor(R.color.warn)
             else -> getColor(R.color.good)
         })
-        tvNextPoi.text = poi?.let { "다음 포인트 · ${it.name} · ${RideFormatter.one((it.routeKm - km).coerceAtLeast(0.0))}km" } ?: "다음 포인트 · 종점"
+        tvNextPoi.text = poi?.let { "포인트 ${it.name} · ${RideFormatter.one((it.routeKm - km).coerceAtLeast(0.0))}km" } ?: "포인트 · 종점"
 
         val accText = if (latestAccuracyM >= 0) "±${latestAccuracyM.roundToInt()}m" else "-"
-        val offText = if (simulated) "테스트" else "코스 이탈 ${latestOffCourseM.roundToInt()}m"
+        val offText = if (simulated) "테스트" else "이탈 ${latestOffCourseM.roundToInt()}m"
         val ele = if (latestCourseElevation > 0) latestCourseElevation else point.ele
         tvCourseStatus.text = if (course.hasElevation) "고도 ${ele.roundToInt()}m · GPS $accText · $offText" else "GPS $accText · $offText · 고도 없음"
 
         if (!simulated) {
             tvGpsStatus.text = when {
-                !logManager.isActive() -> "주행 대기 · 코스 메뉴에서 GPX를 선택하세요"
-                latestOffCourseM >= 150 -> "⚠ 코스에서 ${latestOffCourseM.roundToInt()}m 벗어남 · 방향 확인"
-                latestAccuracyM > 50 -> "GPS 정확도 낮음 ${latestAccuracyM.roundToInt()}m"
-                else -> "GPS 추적 + 로그 자동 저장 정상"
+                !logManager.isActive() -> "주행 대기"
+                latestOffCourseM >= 150 -> "⚠ 코스 이탈 ${latestOffCourseM.roundToInt()}m"
+                latestAccuracyM > 50 -> "GPS ±${latestAccuracyM.roundToInt()}m"
+                else -> "GPS · 로그 정상"
             }
             tvGpsStatus.setTextColor(if (latestOffCourseM >= 150 && logManager.isActive()) getColor(R.color.danger) else getColor(R.color.text_secondary))
         }
@@ -691,10 +630,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.8.0"
-    } catch (_: Exception) { "0.8.0" }
-
-    private fun timeText(timestampMs: Long): String = if (timestampMs <= 0) "" else SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(timestampMs))
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.8.1"
+    } catch (_: Exception) { "0.8.1" }
 
     override fun onResume() {
         super.onResume()

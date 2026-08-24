@@ -14,16 +14,22 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
 import kotlin.math.roundToInt
 
 class CourseActivity : Activity() {
-    companion object { private const val REQ_GPX = 2001 }
+    companion object {
+        private const val REQ_GPX = 2001
+        private const val REQ_EXPORT = 2002
+    }
 
     private lateinit var repo: CourseRepository
     private lateinit var logManager: RideLogManager
     private lateinit var container: LinearLayout
     private lateinit var tvActive: TextView
     private lateinit var btnImport: Button
+    private lateinit var btnExportLast: Button
+    private var pendingExportFile: File? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,9 +39,11 @@ class CourseActivity : Activity() {
         container = findViewById(R.id.courseListContainer)
         tvActive = findViewById(R.id.tvCourseMenuActive)
         btnImport = findViewById(R.id.btnCourseImport)
+        btnExportLast = findViewById(R.id.btnCourseExportLast)
 
         findViewById<Button>(R.id.btnCourseBack).setOnClickListener { finish() }
         btnImport.setOnClickListener { importGpx() }
+        btnExportLast.setOnClickListener { exportLastLog() }
         renderCourses()
     }
 
@@ -51,6 +59,7 @@ class CourseActivity : Activity() {
 
         val riding = logManager.isActive()
         btnImport.isEnabled = !riding
+        btnExportLast.isEnabled = logManager.lastZipFile() != null
         findViewById<TextView>(R.id.tvCourseMenuHint).text = if (riding) {
             "현재 주행 기록 중입니다. 코스 변경/삭제/불러오기는 주행 종료 후 가능합니다."
         } else {
@@ -140,6 +149,18 @@ class CourseActivity : Activity() {
             .show()
     }
 
+    private fun exportLastLog() {
+        val file = logManager.lastZipFile() ?: return Toast.makeText(this, "내보낼 주행 로그가 없습니다.", Toast.LENGTH_SHORT).show()
+        pendingExportFile = file
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, file.name)
+        }
+        try { startActivityForResult(intent, REQ_EXPORT) }
+        catch (_: ActivityNotFoundException) { Toast.makeText(this, "파일 저장 위치를 열 수 없습니다.", Toast.LENGTH_LONG).show() }
+    }
+
     private fun importGpx() {
         if (logManager.isActive()) return Toast.makeText(this, "주행 종료 후 GPX를 불러오세요.", Toast.LENGTH_LONG).show()
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -154,19 +175,40 @@ class CourseActivity : Activity() {
     @Deprecated("Deprecated in Android, retained for minSdk 26 compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_GPX || resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        try {
-            val meta = repo.importGpx(uri, displayName(uri))
-            BatteryActualStore(this).clear()
-            AppSettings.prefs(this).edit()
-                .putFloat(AppSettings.KEY_LAST_KM, 0f)
-                .putFloat(AppSettings.KEY_TEST_KM, 0f)
-                .apply()
-            renderCourses()
-            Toast.makeText(this, "${meta.name} · ${RideFormatter.one(meta.totalKm)} km 불러오기 완료", Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "GPX 불러오기 실패: ${e.message}", Toast.LENGTH_LONG).show()
+        when (requestCode) {
+            REQ_GPX -> {
+                if (resultCode != RESULT_OK) return
+                val uri = data?.data ?: return
+                try {
+                    val meta = repo.importGpx(uri, displayName(uri))
+                    BatteryActualStore(this).clear()
+                    AppSettings.prefs(this).edit()
+                        .putFloat(AppSettings.KEY_LAST_KM, 0f)
+                        .putFloat(AppSettings.KEY_TEST_KM, 0f)
+                        .apply()
+                    renderCourses()
+                    Toast.makeText(this, "${meta.name} · ${RideFormatter.one(meta.totalKm)} km 불러오기 완료", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "GPX 불러오기 실패: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+            REQ_EXPORT -> {
+                if (resultCode == RESULT_OK) {
+                    val uri = data?.data
+                    val source = pendingExportFile
+                    if (uri != null && source != null) {
+                        try {
+                            contentResolver.openOutputStream(uri)?.use { out ->
+                                source.inputStream().use { input -> input.copyTo(out) }
+                            }
+                            Toast.makeText(this, "최근 주행 로그 ZIP을 저장했습니다.", Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "내보내기 실패: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                pendingExportFile = null
+            }
         }
     }
 
