@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#080D12</color>
+    <color name="panel">#111A23</color>
+    <color name="panel2">#172330</color>
+    <color name="text_primary">#F7FAFC</color>
+    <color name="text_secondary">#9EAFBF</color>
+    <color name="line">#263746</color>
+    <color name="accent">#5AC8FA</color>
+    <color name="accent_dark">#123346</color>
+    <color name="good">#67D77D</color>
+    <color name="warn">#F2C84B</color>
+    <color name="orange">#F39A4A</color>
+    <color name="danger">#F26161</color>
+    <color name="profile_line">#D5E3ED</color>
+    <color name="profile_fill">#263746</color>
+    <color name="preview_band">#263B4C</color>
+</resources>

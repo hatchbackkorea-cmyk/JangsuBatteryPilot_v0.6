@@ -1,0 +1,279 @@
+package com.seungjae.jangsu280battery
+
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.IBinder
+import android.os.Looper
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+class RideService : Service(), LocationListener {
+    companion object {
+        const val ACTION_UPDATE = "com.seungjae.jangsu280battery.UPDATE"
+        const val ACTION_START = "com.seungjae.jangsu280battery.START"
+        const val ACTION_STOP = "com.seungjae.jangsu280battery.STOP"
+        const val ACTION_RESET = "com.seungjae.jangsu280battery.RESET"
+        const val ACTION_SET_VOICE = "com.seungjae.jangsu280battery.SET_VOICE"
+        const val ACTION_SET_VOICE_LEVEL = "com.seungjae.jangsu280battery.SET_VOICE_LEVEL"
+        const val ACTION_SPEAK_NOW = "com.seungjae.jangsu280battery.SPEAK_NOW"
+        const val ACTION_SPEAK_TEXT = "com.seungjae.jangsu280battery.SPEAK_TEXT"
+
+        const val EXTRA_ROUTE_KM = "route_km"
+        const val EXTRA_OFF_COURSE_M = "off_course_m"
+        const val EXTRA_ACCURACY_M = "accuracy_m"
+        const val EXTRA_SPEED_KMH = "speed_kmh"
+        const val EXTRA_COURSE_ELEVATION = "course_elevation"
+        const val EXTRA_GPS_ELEVATION = "gps_elevation"
+        const val EXTRA_PROVIDER = "provider"
+        const val EXTRA_VOICE_ENABLED = "voice_enabled"
+        const val EXTRA_VOICE_LEVEL = "voice_level"
+        const val EXTRA_SPEAK_TEXT = "speak_text"
+
+        private const val CHANNEL_ID = "jangsu_ride_tracking"
+        private const val NOTIFICATION_ID = 280
+        private const val PREFS = "ride_state"
+        private const val KEY_LAST_KM = "last_km"
+        private const val KEY_VOICE = "voice_enabled"
+        private const val KEY_VOICE_LEVEL = "voice_level"
+        private const val KEY_FINISH_TARGET = "finish_target"
+    }
+
+    private lateinit var locationManager: LocationManager
+    private lateinit var course: CourseData
+    private lateinit var matcher: RouteMatcher
+    private lateinit var basePlan: BatteryPlan
+    private lateinit var actualStore: BatteryActualStore
+    private lateinit var plan: AdaptiveBatteryPlan
+    private lateinit var announcer: VoiceAnnouncer
+    private lateinit var rideSession: RideSessionStore
+    private lateinit var chargeStore: ChargingSessionStore
+    private val paceEstimator = PaceEstimator()
+
+    private var lastNotificationAt = 0L
+    private var lastNotifiedKm = -1
+    private var updatesStarted = false
+
+    override fun onCreate() {
+        super.onCreate()
+        course = CourseData.load(this, R.raw.jangsu_stage1_battery)
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val lastKm = prefs.getFloat(KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
+        matcher = RouteMatcher(course, lastKm)
+        basePlan = BatteryPlan(course)
+        actualStore = BatteryActualStore(this)
+        plan = AdaptiveBatteryPlan(basePlan, actualStore)
+        rideSession = RideSessionStore(this).also { it.ensureStarted() }
+        chargeStore = ChargingSessionStore(this)
+        announcer = VoiceAnnouncer(this).also {
+            it.enabled = prefs.getBoolean(KEY_VOICE, true)
+            it.level = runCatching { VoiceLevel.valueOf(prefs.getString(KEY_VOICE_LEVEL, VoiceLevel.NORMAL.name) ?: VoiceLevel.NORMAL.name) }
+                .getOrDefault(VoiceLevel.NORMAL)
+            it.prime(lastKm)
+        }
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification("GPS 준비 중 · 예상 배터리 계산 대기"))
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_RESET -> {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putFloat(KEY_LAST_KM, 0f).apply()
+                matcher.seekToKm(0.0)
+                actualStore.clear()
+                chargeStore.clearSession()
+                rideSession.reset()
+                paceEstimator.reset()
+                announcer.reset()
+            }
+            ACTION_SET_VOICE -> {
+                val enabled = intent.getBooleanExtra(EXTRA_VOICE_ENABLED, true)
+                announcer.enabled = enabled
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_VOICE, enabled).apply()
+            }
+            ACTION_SET_VOICE_LEVEL -> {
+                val raw = intent.getStringExtra(EXTRA_VOICE_LEVEL) ?: VoiceLevel.NORMAL.name
+                val level = runCatching { VoiceLevel.valueOf(raw) }.getOrDefault(VoiceLevel.NORMAL)
+                announcer.level = level
+                announcer.prime(matcher.currentKm())
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_VOICE_LEVEL, level.name).apply()
+            }
+            ACTION_SPEAK_NOW -> {
+                val km = matcher.currentKm()
+                val battery = plan.estimate(km)
+                val cp = plan.currentOrNextCheckpoint(km)
+                val stats = course.elevationAhead(km, 10.0)
+                val finishTarget = getSharedPreferences(PREFS, MODE_PRIVATE).getFloat(KEY_FINISH_TARGET, 15f).toDouble()
+                val reserve = plan.reserveStatus(km, finishTarget)
+                announcer.speakNow(announcer.summaryText(km, battery, cp, stats, reserve))
+            }
+            ACTION_SPEAK_TEXT -> {
+                val text = intent.getStringExtra(EXTRA_SPEAK_TEXT).orEmpty()
+                if (text.isNotBlank()) announcer.speakNow(text)
+            }
+        }
+        startLocationUpdates()
+        return START_STICKY
+    }
+
+    private fun hasLocationPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private fun startLocationUpdates() {
+        if (updatesStarted || !hasLocationPermission()) return
+        try {
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1500L, 2f, this, Looper.getMainLooper())
+            }
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000L, 8f, this, Looper.getMainLooper())
+            }
+            updatesStarted = true
+        } catch (_: SecurityException) {
+        }
+    }
+
+    override fun onLocationChanged(location: Location) {
+        val match = matcher.match(location.latitude, location.longitude)
+        val speedKmh = paceEstimator.update(location, match.routeKm)
+        val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
+        val gpsElevation = if (location.hasAltitude()) location.altitude else Double.NaN
+
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        prefs.edit().putFloat(KEY_LAST_KM, match.routeKm.toFloat()).apply()
+        rideSession.recordProgress(match.routeKm, speedKmh)
+
+        basePlan.checkpoints.forEach { cp ->
+            if (abs(cp.km - match.routeKm) <= 0.12) rideSession.recordCheckpoint(cp.name, cp.km)
+        }
+
+        val battery = plan.estimate(match.routeKm)
+        val cp = plan.currentOrNextCheckpoint(match.routeKm)
+        val poi = course.nextPoi(match.routeKm)
+        val stats10 = course.elevationAhead(match.routeKm, 10.0)
+        val finishTarget = prefs.getFloat(KEY_FINISH_TARGET, 15f).toDouble()
+        val reserve = plan.reserveStatus(match.routeKm, finishTarget)
+        val climb = course.nextMajorClimb(match.routeKm)
+        announcer.handle(
+            routeKm = match.routeKm,
+            battery = battery,
+            checkpoint = cp,
+            poi = poi,
+            stats = stats10,
+            offCourseMeters = match.offCourseMeters,
+            reserve = reserve,
+            majorClimb = climb
+        )
+
+        val update = Intent(ACTION_UPDATE).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_ROUTE_KM, match.routeKm)
+            putExtra(EXTRA_OFF_COURSE_M, match.offCourseMeters)
+            putExtra(EXTRA_ACCURACY_M, accuracy)
+            putExtra(EXTRA_SPEED_KMH, speedKmh)
+            putExtra(EXTRA_COURSE_ELEVATION, match.courseElevationM)
+            putExtra(EXTRA_GPS_ELEVATION, gpsElevation)
+            putExtra(EXTRA_PROVIDER, location.provider ?: "GPS")
+        }
+        sendBroadcast(update)
+
+        val now = System.currentTimeMillis()
+        val kmInt = match.routeKm.toInt()
+        if (kmInt != lastNotifiedKm || now - lastNotificationAt > 15000L) {
+            val cpText = cp?.let {
+                val rem = (it.km - match.routeKm).coerceAtLeast(0.0)
+                " · ${it.name} ${String.format(java.util.Locale.US, "%.1f", rem)}km"
+            }.orEmpty()
+            val risk = when (reserve.label) { "위험" -> " ⚠위험"; "주의" -> " ·주의"; else -> "" }
+            val text = "${String.format(java.util.Locale.US, "%.1f", match.routeKm)}km · 🔋${battery.percent.roundToInt()}%$risk$cpText"
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, buildNotification(text))
+            lastNotificationAt = now
+            lastNotifiedKm = kmInt
+        }
+    }
+
+    private fun buildNotification(text: String): Notification {
+        val launchIntent = Intent(this, MainActivity::class.java)
+        val contentIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val stopIntent = Intent(this, RideService::class.java).apply { action = ACTION_STOP }
+        val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL_ID)
+        else @Suppress("DEPRECATION") Notification.Builder(this)
+
+        return builder
+            .setSmallIcon(R.drawable.ic_battery_pilot)
+            .setContentTitle("장수 배터리 파일럿 · 주행 중")
+            .setContentText(text)
+            .setContentIntent(contentIntent)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .addAction(android.R.drawable.ic_media_pause, "추적 종료", stopPendingIntent)
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "장수 랠리 GPS 주행 안내", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "화면이 꺼져도 GPS 위치와 음성 안내를 유지합니다."
+                setSound(null, null)
+            }
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+        }
+    }
+
+    override fun onProviderDisabled(provider: String) = Unit
+    override fun onProviderEnabled(provider: String) = Unit
+    @Deprecated("Deprecated in Android")
+    override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) = Unit
+
+    override fun onDestroy() {
+        try { locationManager.removeUpdates(this) } catch (_: Exception) {}
+        announcer.shutdown()
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+private class PaceEstimator {
+    private val speeds = ArrayDeque<Double>()
+    private var lastRouteKm: Double? = null
+    private var lastAtMs: Long? = null
+
+    fun reset() { speeds.clear(); lastRouteKm = null; lastAtMs = null }
+
+    fun update(location: Location, routeKm: Double): Double {
+        val now = location.time.takeIf { it > 0 } ?: System.currentTimeMillis()
+        var candidate = if (location.hasSpeed()) location.speed * 3.6 else 0.0
+        val prevKm = lastRouteKm
+        val prevAt = lastAtMs
+        if (candidate < 2.0 && prevKm != null && prevAt != null && now > prevAt) {
+            val dtHours = (now - prevAt) / 3_600_000.0
+            if (dtHours > 0.0) candidate = ((routeKm - prevKm).coerceAtLeast(0.0) / dtHours)
+        }
+        lastRouteKm = routeKm
+        lastAtMs = now
+        if (candidate in 2.0..60.0) {
+            speeds.addLast(candidate)
+            while (speeds.size > 12) speeds.removeFirst()
+        }
+        return if (speeds.isEmpty()) 0.0 else speeds.average()
+    }
+}

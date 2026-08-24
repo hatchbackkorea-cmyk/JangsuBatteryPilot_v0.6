@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <TextView android:id="@+id/tvGpsStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="GPS 준비 중…" android:textColor="@color/text_secondary" android:textSize="13sp" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_hero_bg" android:orientation="vertical" android:padding="18dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="현재 코스" android:textColor="@color/text_secondary" android:textSize="14sp" />
+            <TextView android:id="@+id/tvCurrentKm" android:layout_width="match_parent" android:layout_height="wrap_content" android:includeFontPadding="false" android:text="0.0 km" android:textColor="@color/text_primary" android:textSize="52sp" android:textStyle="bold" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="현재 예측 배터리" android:textColor="@color/text_secondary" android:textSize="14sp" />
+            <TextView android:id="@+id/tvBattery" android:layout_width="match_parent" android:layout_height="wrap_content" android:includeFontPadding="false" android:text="100%" android:textColor="@color/good" android:textSize="70sp" android:textStyle="bold" />
+            <ProgressBar android:id="@+id/progressBattery" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="12dp" android:max="100" android:progress="100" />
+            <TextView android:id="@+id/tvBatteryRange" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="참고 범위 96~100%" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:orientation="horizontal">
+                <TextView android:id="@+id/tvSpeed" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/pill_bg" android:gravity="center" android:padding="10dp" android:text="이동 속도 계산 중" android:textColor="@color/text_primary" android:textSize="13sp" />
+                <TextView android:id="@+id/tvFinishEta" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:background="@drawable/pill_bg" android:gravity="center" android:padding="10dp" android:text="종점 ETA 계산 중" android:textColor="@color/text_primary" android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="16dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="배터리 코파일럿 판단" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvRiskStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="여유" android:textColor="@color/good" android:textSize="34sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRiskDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="다음 목표와 배터리 여유 계산 중" android:textColor="@color/text_primary" android:textSize="14sp" />
+            <TextView android:id="@+id/tvAssist" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="현재 계획 페이스 유지" android:textColor="@color/good" android:textSize="17sp" android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="16dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="실제 배터리 · 음성 보정/명령" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:gravity="center_vertical" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:id="@+id/tvActualBattery" android:layout_width="match_parent" android:layout_height="wrap_content" android:includeFontPadding="false" android:text="실제값 없음" android:textColor="@color/text_secondary" android:textSize="30sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/tvActualDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="마이크로 실제 잔량을 말하면 소비율을 학습합니다." android:textColor="@color/text_secondary" android:textSize="12sp" />
+                </LinearLayout>
+                <ImageButton android:id="@+id/btnMicBattery" android:layout_width="100dp" android:layout_height="100dp" android:layout_marginStart="12dp" android:background="@drawable/mic_button_bg" android:contentDescription="음성 명령" android:padding="22dp" android:scaleType="fitCenter" android:src="@drawable/ic_mic" />
+            </LinearLayout>
+            <TextView android:id="@+id/tvMicHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="🎤 ‘배터리 48’ · ‘충전 시작’ · ‘다음 보급소’ · ‘현재 예상’" android:textColor="@color/accent" android:textSize="13sp" android:textStyle="bold" />
+            <Button android:id="@+id/btnUndoActual" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="8dp" android:enabled="false" android:text="마지막 실제 배터리 입력 취소" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="다음 충전 / 주요 지점" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvNextCheckpoint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="1보급소 1차" android:textColor="@color/text_primary" android:textSize="25sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvNextCheckpointDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="50km 남음 · 도착 42% · 70% 충전" android:textColor="@color/accent" android:textSize="16sp" />
+            <TextView android:id="@+id/tvEta" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="예상 도착 ETA 계산 중" android:textColor="@color/text_secondary" android:textSize="14sp" />
+            <TextView android:id="@+id/tvNextPoi" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="다음 포인트 · -" android:textColor="@color/text_secondary" android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="충전 타이머" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvChargeTimer" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="충전 대기" android:textColor="@color/text_primary" android:textSize="25sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvChargeDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="충전 지점에서 시작할 수 있습니다." android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <Button android:id="@+id/btnChargeToggle" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="충전 시작" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="앞으로 10km" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvElevationAhead" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="앞 10km ▲0m ▼0m" android:textColor="@color/text_primary" android:textSize="23sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvTenKmBattery" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="10km 후 예상 90%" android:textColor="@color/accent" android:textSize="15sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="다음 주요 업힐" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvNextClimb" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="분석 중" android:textColor="@color/text_primary" android:textSize="22sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvNextClimbDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="업힐 거리와 상승량 계산 중" android:textColor="@color/text_secondary" android:textSize="14sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="전체 획고 · 파란선 현재 위치 · 음영은 다음 10km" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <com.seungjae.jangsu280battery.ElevationProfileView android:id="@+id/profileView" android:layout_width="match_parent" android:layout_height="170dp" android:layout_marginTop="4dp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp">
+            <TextView android:id="@+id/tvFinishTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="종점 목표 잔량 15%" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+            <SeekBar android:id="@+id/seekFinishTarget" android:layout_width="match_parent" android:layout_height="44dp" android:max="25" android:progress="10" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="5% ~ 30% 범위 · 코파일럿의 여유/주의/위험 판단 기준" android:textColor="@color/text_secondary" android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp">
+            <TextView android:id="@+id/tvCourseStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="고도 0m · GPS -" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <Switch android:id="@+id/switchVoice" android:layout_width="match_parent" android:layout_height="48dp" android:checked="true" android:text="음성 안내" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <Button android:id="@+id/btnVoiceLevel" android:layout_width="match_parent" android:layout_height="48dp" android:text="안내 수준: 기본" />
+            <Switch android:id="@+id/switchKeepScreen" android:layout_width="match_parent" android:layout_height="48dp" android:text="화면 항상 켜기" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <Button android:id="@+id/btnSpeakNow" android:layout_width="match_parent" android:layout_height="48dp" android:text="현재 안내 다시 듣기" />
+            <Button android:id="@+id/btnRideReport" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:text="주행 리포트 보기" />
+            <Button android:id="@+id/btnVersionInfo" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:text="버전 / 변경사항" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp">
+            <Switch android:id="@+id/switchTestMode" android:layout_width="match_parent" android:layout_height="48dp" android:text="테스트 모드 · GPS 대신 슬라이더" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <TextView android:id="@+id/tvTestKm" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="테스트 위치 0.0 km" android:textColor="@color/text_secondary" android:textSize="13sp" />
+            <SeekBar android:id="@+id/seekTestKm" android:layout_width="match_parent" android:layout_height="48dp" android:enabled="false" android:max="1353" android:progress="0" />
+            <Button android:id="@+id/btnResetProgress" android:layout_width="match_parent" android:layout_height="48dp" android:text="새 주행 시작 · 기록 초기화" />
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvVersion" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Jangsu Battery Pilot v0.5.0" android:textColor="@color/accent" android:textSize="12sp" android:textStyle="bold" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:layout_marginBottom="24dp" android:text="※ AMFLOW PL 800Wh + 장수 280 스테이지1 전용 계획. 실제 배터리 음성 입력 후에는 현재 구간의 소비속도를 학습해 예측을 보정합니다. 다음 계획 충전 이후에는 새 구간 기준으로 다시 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+    </LinearLayout>
+</ScrollView>
