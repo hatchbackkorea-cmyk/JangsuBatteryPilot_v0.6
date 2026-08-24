@@ -97,6 +97,7 @@ class CourseRepository(context: Context) {
         if (meta.builtIn) return false
         File(dir, meta.fileName).delete()
         prefs.edit().remove(customPoiKey(id)).apply()
+        ChargingStationStore(app).clear(id)
         val remaining = readIndex().filterNot { it.id == id }
         writeIndex(remaining)
         if (prefs.getString(KEY_ACTIVE, null) == id) {

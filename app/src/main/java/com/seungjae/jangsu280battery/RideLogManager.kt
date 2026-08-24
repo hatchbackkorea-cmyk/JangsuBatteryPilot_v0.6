@@ -151,7 +151,12 @@ class RideLogManager(context: Context) {
         return "${ride.courseName}\n진행 ${RideFormatter.one(maxKm)} km · ${if (h > 0) "${h}시간 ${m}분" else "${m}분"}\n이동 평균 ${if (avg > 0f) RideFormatter.one(avg.toDouble()) + " km/h" else "-"}\n로그는 주행 중 계속 자동 저장 중입니다."
     }
 
-    fun finalizeRide(course: CourseData, actualStore: BatteryActualStore, learning: BatteryLearningStore): RideArchive {
+    fun finalizeRide(
+        course: CourseData,
+        actualStore: BatteryActualStore,
+        learning: BatteryLearningStore,
+        chargingStations: List<ChargingStation> = emptyList()
+    ): RideArchive {
         val ride = activeRide() ?: error("진행 중인 주행이 없습니다.")
         val end = System.currentTimeMillis()
         recordEvent("RIDE_END", "주행 종료", prefs.getFloat(ACTIVE_MAX_KM, 0f).toDouble(), actualStore.latest()?.percent)
@@ -187,6 +192,13 @@ class RideLogManager(context: Context) {
             put("courseDescentM", course.totalDescentM)
             put("courseHasElevation", course.hasElevation)
             put("learnedSamplesAdded", learned)
+            put("chargingPlan", JSONArray().apply {
+                chargingStations.sortedBy { it.routeKm }.forEach { s -> put(JSONObject().apply {
+                    put("name", s.name); put("routeKm", s.routeKm); put("chargeToPct", s.chargeToPct)
+                    put("source", s.source); put("distanceFromRouteM", s.distanceFromRouteM); put("detourKm", s.detourKm)
+                    if (s.address.isNotBlank()) put("address", s.address)
+                }) }
+            })
             put("events", JSONArray().apply { events.forEach { put(it) } })
             put("actualBattery", JSONArray().apply {
                 actualStore.entries().forEach { e -> put(JSONObject().apply {

@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var courseMeta: CourseMeta
     private lateinit var course: CourseData
     private lateinit var learningStore: BatteryLearningStore
+    private lateinit var chargingStore: ChargingStationStore
     private lateinit var logManager: RideLogManager
     private lateinit var basePlan: BatteryPlan
     private lateinit var actualStore: BatteryActualStore
@@ -102,6 +103,7 @@ class MainActivity : Activity() {
 
         courseRepo = CourseRepository(this)
         learningStore = BatteryLearningStore(this)
+        chargingStore = ChargingStationStore(this)
         logManager = RideLogManager(this)
         actualStore = BatteryActualStore(this)
 
@@ -163,7 +165,7 @@ class MainActivity : Activity() {
             courseMeta = courseRepo.activeMeta()
             course = courseRepo.loadCourse(courseMeta.id)
             loadedCourseId = courseMeta.id
-            basePlan = BatteryPlan(course, learningStore)
+            basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             profileView.setCourse(course)
             val prefs = AppSettings.prefs(this)
@@ -235,7 +237,7 @@ class MainActivity : Activity() {
         if (!logManager.isActive()) return
         stopRideService()
         try {
-            val archive = logManager.finalizeRide(course, actualStore, learningStore)
+            val archive = logManager.finalizeRide(course, actualStore, learningStore, chargingStore.list(courseMeta.id))
             renderRideState()
             AlertDialog.Builder(this)
                 .setTitle("주행 로그 저장 완료")
@@ -630,8 +632,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.8.1"
-    } catch (_: Exception) { "0.8.1" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.9.0"
+    } catch (_: Exception) { "0.9.0" }
 
     override fun onResume() {
         super.onResume()
@@ -642,6 +644,10 @@ class MainActivity : Activity() {
         if (activeId != null && activeId != loadedCourseId && !logManager.isActive()) {
             actualStore.clear()
             loadSelectedCourse(resetProgress = false)
+        } else if (activeId != null && activeId == loadedCourseId && !logManager.isActive() && ::course.isInitialized) {
+            // 코스 메뉴에서 충전소 계획만 바꾼 경우에도 즉시 배터리 판단 기준을 재구성한다.
+            basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId))
+            plan = AdaptiveBatteryPlan(basePlan, actualStore)
         }
         applySettings()
         renderCurrentMode()

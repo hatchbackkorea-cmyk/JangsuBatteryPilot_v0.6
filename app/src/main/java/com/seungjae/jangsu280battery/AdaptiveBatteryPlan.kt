@@ -126,11 +126,13 @@ class AdaptiveBatteryPlan(
     }
 
     fun reserveStatus(currentKm: Double, finishTargetPct: Double): ReserveStatus {
-        val cp = base.currentOrNextCheckpoint(currentKm)
-        val usePlannedCp = base.isLegacyPlannedCourse && cp?.chargeToPct != null
-        val targetName = if (usePlannedCp) cp!!.name else "종점"
-        val targetPct = if (usePlannedCp) cp!!.arrivalPct else finishTargetPct
-        val targetKm = if (usePlannedCp) cp!!.km else base.checkpoints.last().km
+        val cp = base.currentOrNextCheckpoint(currentKm) ?: base.checkpoints.last()
+        val isChargeTarget = cp.chargeToPct != null
+        val targetName = if (isChargeTarget) "다음 충전 · ${cp.name}" else "종점"
+        // 사용자 지정 충전소의 도착 최소잔량은 전역 목표잔량을 사용한다.
+        // 장수 내장 고정 계획은 기존 도착 계획값을 유지한다.
+        val targetPct = if (isChargeTarget && base.isLegacyPlannedCourse) cp.arrivalPct else finishTargetPct.coerceIn(1.0, 99.0)
+        val targetKm = cp.km
         val predicted = forecast(currentKm, targetKm).percent
         val diff = predicted - targetPct
         val label = when {

@@ -55,6 +55,7 @@ class RideService : Service(), LocationListener {
     private lateinit var plan: AdaptiveBatteryPlan
     private lateinit var announcer: VoiceAnnouncer
     private lateinit var learningStore: BatteryLearningStore
+    private lateinit var chargingStore: ChargingStationStore
     private lateinit var logManager: RideLogManager
     private val paceEstimator = PaceEstimator()
     private val passedCheckpointKeys = mutableSetOf<String>()
@@ -70,11 +71,12 @@ class RideService : Service(), LocationListener {
         courseMeta = courseRepo.activeMeta()
         course = courseRepo.loadCourse(courseMeta.id)
         learningStore = BatteryLearningStore(this)
+        chargingStore = ChargingStationStore(this)
         logManager = RideLogManager(this)
         val prefs = AppSettings.prefs(this)
         val lastKm = prefs.getFloat(AppSettings.KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
         matcher = RouteMatcher(course, lastKm)
-        basePlan = BatteryPlan(course, learningStore)
+        basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         actualStore = BatteryActualStore(this)
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
         announcer = VoiceAnnouncer(this).also {

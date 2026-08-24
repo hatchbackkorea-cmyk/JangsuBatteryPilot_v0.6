@@ -42,6 +42,13 @@ data class RoutePoi(
 
 data class ElevationStats(val ascentM: Double, val descentM: Double)
 
+data class RouteLocationMatch(
+    val routeKm: Double,
+    val trackLat: Double,
+    val trackLon: Double,
+    val distanceM: Double
+)
+
 data class MajorClimb(
     val startKm: Double,
     val endKm: Double,
@@ -122,6 +129,21 @@ class CourseData(
     }
 
     fun nextPoi(afterKm: Double): RoutePoi? = pois.firstOrNull { it.routeKm > afterKm + 0.04 }
+
+    /** 주소/웨이포인트 좌표를 GPX 코스 진행거리로 투영한다. */
+    fun nearestRouteLocation(lat: Double, lon: Double): RouteLocationMatch {
+        if (track.isEmpty()) return RouteLocationMatch(0.0, 0.0, 0.0, Double.POSITIVE_INFINITY)
+        var best = track.first()
+        var bestDistance = Double.MAX_VALUE
+        for (p in track) {
+            val d = Geo.distanceMeters(lat, lon, p.lat, p.lon)
+            if (d < bestDistance) {
+                bestDistance = d
+                best = p
+            }
+        }
+        return RouteLocationMatch(best.routeKm, best.lat, best.lon, bestDistance)
+    }
 
     /**
      * 250m 단위 고도 변화를 묶어 다음 주요 업힐을 찾는다.
@@ -313,7 +335,7 @@ class CourseData(
 
             val battery = sortedMapOf<Int, BatteryMarker>()
             val pois = mutableListOf<RoutePoi>()
-            for (w in rawWpts) {
+            rawWpts.forEachIndexed { wptIndex, w ->
                 val m = batteryNameRegex.matchEntire(w.name.trim())
                 if (m != null) {
                     val km = m.groupValues[1].toInt()
@@ -322,9 +344,10 @@ class CourseData(
                     val exact = if (charge != null) exactChargeRegex.find(w.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
                         else exactNormalRegex.find(w.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
                     battery[km] = BatteryMarker(km, exact ?: roundedArrival, charge, w.lat, w.lon)
-                } else if (w.name.isNotBlank()) {
+                } else {
                     val idx = nearestTrackIndex(w.lat, w.lon)
-                    pois += RoutePoi(w.name.replace('_', ' '), track[idx].routeKm, w.lat, w.lon, w.desc, w.type)
+                    val displayName = w.name.replace('_', ' ').ifBlank { "웨이포인트 ${wptIndex + 1}" }
+                    pois += RoutePoi(displayName, track[idx].routeKm, w.lat, w.lon, w.desc, w.type)
                 }
             }
 
