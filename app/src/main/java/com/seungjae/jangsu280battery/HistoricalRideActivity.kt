@@ -189,7 +189,7 @@ class HistoricalRideActivity : Activity() {
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(0, dp(3), 0, dp(3))
             }
-            val text = TextView(this).apply {
+            val pointText = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 13f
@@ -203,7 +203,7 @@ class HistoricalRideActivity : Activity() {
                     renderManualPoints()
                 }
             }
-            row.addView(text)
+            row.addView(pointText)
             row.addView(delete)
             llPoints.addView(row)
         }

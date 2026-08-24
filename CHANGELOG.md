@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.10.1 — Historical Ride Build Fix
+- `HistoricalRideActivity`의 중간 배터리 목록에서 TextView 지역 변수 `text`가 Button의 `text` 속성을 가린 컴파일 오류 수정
+- 기능 변경 없이 v0.10.0의 과거 FIT/GPX 학습 기능 유지
+
 ## 0.10.0 — Historical Ride Learning
 - 설정 메뉴에 `과거 라이딩 학습 가져오기 (FIT / GPX)` 추가
 - FIT 파일 분석: GPS/거리/고도/시간/속도/심박/케이던스/파워(기록된 항목만)
