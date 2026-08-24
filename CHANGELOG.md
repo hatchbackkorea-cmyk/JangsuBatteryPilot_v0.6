@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 0.10.2 — Ride Stats Accuracy Fix
+- FIT 분석은 Record 재계산보다 Session/Lap의 `total_distance`, `total_timer_time`, `total_ascent`, `total_descent`를 우선 사용
+- FIT 고도는 `enhanced_altitude`를 우선 사용하고 Session 통계가 없을 때만 트랙 고도로 보완
+- GPX 획득/손실고도 계산에서 1m 단위 필터를 제거해 완만한 상승이 누락되던 문제 수정
+- GPX는 타임스탬프와 GPS 이동구간으로 이동시간을 계산하고 거리/이동시간으로 평속 계산
+- 과거 라이딩 분석 화면에서 심박/케이던스/파워 표시 제거
+- 분석 결과를 거리 / 획득고도 / 손실고도 / 이동시간 / 평속 중심으로 단순화
+- 기존에 같은 FIT/GPX를 학습했어도 새 분석값으로 교체 학습 가능
+
 ## 0.10.1 — Historical Ride Build Fix
 - `HistoricalRideActivity`의 중간 배터리 목록에서 TextView 지역 변수 `text`가 Button의 `text` 속성을 가린 컴파일 오류 수정
 - 기능 변경 없이 v0.10.0의 과거 FIT/GPX 학습 기능 유지

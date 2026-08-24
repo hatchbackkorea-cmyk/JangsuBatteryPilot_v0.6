@@ -245,8 +245,8 @@ class SettingsActivity : Activity() {
                     "• 테스트 모드 주행은 학습에서 자동 제외\n" +
                     "• 개인 배터리 학습 데이터 확인 / 초기화\n" +
                     "• 과거 FIT/GPX 라이딩 가져오기 및 배터리 학습\n" +
-                    "• FIT 심박 / 케이던스 / 파워 데이터 자동 분석\n" +
-                    "• 동일 파일 중복 학습 방지 및 개별 학습 삭제"
+                    "• FIT/GPX 거리 · 이동시간 · 평속 · 획득/손실고도 분석 정확도 개선\n" +
+                    "• 같은 파일도 개선된 분석값으로 재학습 가능"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -254,8 +254,8 @@ class SettingsActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.10.0"
-    } catch (_: Exception) { "0.10.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.10.2"
+    } catch (_: Exception) { "0.10.2" }
 
     private fun applyKeepScreen(enabled: Boolean) {
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

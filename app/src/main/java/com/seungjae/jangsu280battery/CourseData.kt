@@ -123,7 +123,10 @@ class CourseData(
             if (i !in track.indices) break
             if (track[i].routeKm <= track[i - 1].routeKm + 0.00001) continue
             val diff = track[i].ele - track[i - 1].ele
-            if (diff > 1.0) up += diff else if (diff < -1.0) down += -diff
+            // GPX의 고도값 자체가 이미 보정/샘플링된 경우가 많다.
+            // 1m 초과 변화만 세면 완만한 오르막이 거의 전부 누락되므로
+            // 진행한 모든 양/음의 고도 변화를 누적한다.
+            if (diff > 0.0) up += diff else if (diff < 0.0) down += -diff
         }
         return ElevationStats(up, down)
     }
@@ -357,7 +360,7 @@ class CourseData(
                 for (i in 1 until track.size) {
                     if (track[i].routeKm <= track[i - 1].routeKm + 0.00001) continue
                     val d = track[i].ele - track[i - 1].ele
-                    if (d > 1.0) totalUp += d else if (d < -1.0) totalDown += -d
+                    if (d > 0.0) totalUp += d else if (d < 0.0) totalDown += -d
                 }
             }
 

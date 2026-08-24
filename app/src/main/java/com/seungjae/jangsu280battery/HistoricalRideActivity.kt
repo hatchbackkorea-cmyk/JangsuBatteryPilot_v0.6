@@ -121,11 +121,9 @@ class HistoricalRideActivity : Activity() {
                     etEnd.setText("")
                     etUsed.setText("")
                     val duplicate = rideStore.findByHash(parsed.fileHash)
+                    btnTrain.isEnabled = true
                     if (duplicate != null) {
-                        btnTrain.isEnabled = false
-                        tvAnalysis.append("\n\n⚠ 이미 학습에 사용한 파일입니다: ${duplicate.fileName}")
-                    } else {
-                        btnTrain.isEnabled = true
+                        tvAnalysis.append("\n\nℹ 이전 분석/학습 기록이 있습니다. 다시 학습하면 기존 값을 새 분석값으로 교체합니다.")
                     }
                 }.onFailure { e ->
                     panelBattery.visibility = View.GONE
@@ -211,11 +209,8 @@ class HistoricalRideActivity : Activity() {
 
     private fun trainSelectedRide() {
         val a = analysis ?: return
-        if (rideStore.findByHash(a.fileHash) != null) {
-            Toast.makeText(this, "이미 학습한 파일입니다.", Toast.LENGTH_LONG).show()
-            btnTrain.isEnabled = false
-            return
-        }
+        // 같은 파일이라도 분석 알고리즘이 개선된 버전에서는 다시 학습할 수 있다.
+        // 실제 교체는 사용자가 최종 확인에서 '학습에 사용'을 누른 뒤 수행한다.
 
         val startPct = etStart.text.toString().trim().toDoubleOrNull() ?: 100.0
         val directUsed = etUsed.text.toString().trim().toDoubleOrNull()
@@ -251,7 +246,7 @@ class HistoricalRideActivity : Activity() {
         val orderedEntries = entries.sortedWith(compareBy<Pair<Int, ActualBatteryEntry>> { it.second.routeKm }.thenBy { it.first })
             .map { it.second }
 
-        val sessionId = "history_${a.fileHash}"
+        val sessionId = "history_v2_${a.fileHash}"
         val modeled = learningStore.baseConsumption(a.distanceKm, a.ascentM)
         val actualUsed = startPct - endPct
         val factor = if (modeled > 0.1) actualUsed / modeled else 1.0
@@ -266,6 +261,13 @@ class HistoricalRideActivity : Activity() {
             .setTitle("학습 전 최종 확인")
             .setMessage(message)
             .setPositiveButton("학습에 사용") { _, _ ->
+                // 동일 파일의 예전 파서 학습값이 있으면 먼저 제거하고 새 분석값으로 교체한다.
+                rideStore.findByHash(a.fileHash)?.let { old ->
+                    learningStore.removeSession(old.id)
+                    rideStore.remove(old.id)
+                }
+                // 같은 v2 세션이 남아 있는 경우도 안전하게 제거한다.
+                learningStore.removeSession(sessionId)
                 val count = learningStore.trainHistoricalRide(sessionId, a.course, orderedEntries)
                 if (count <= 0) {
                     learningStore.removeSession(sessionId)
@@ -281,12 +283,10 @@ class HistoricalRideActivity : Activity() {
                         importedAtMs = System.currentTimeMillis(),
                         distanceKm = a.distanceKm,
                         ascentM = a.ascentM,
+                        descentM = a.descentM,
                         durationSec = a.durationSec,
                         usedBatteryPct = actualUsed,
                         avgSpeedKph = a.avgSpeedKph,
-                        avgHeartRate = a.avgHeartRate,
-                        avgCadence = a.avgCadence,
-                        avgPower = a.avgPower,
                         sampleCount = count
                     )
                 )
@@ -327,14 +327,15 @@ class HistoricalRideActivity : Activity() {
             val details = TextView(this).apply {
                 setTextColor(getColor(R.color.text_secondary))
                 textSize = 12f
-                val sensors = mutableListOf<String>()
-                record.avgHeartRate?.let { sensors += "심박 ${it.toInt()}" }
-                record.avgCadence?.let { sensors += "케이던스 ${it.toInt()}" }
-                record.avgPower?.let { sensors += "파워 ${it.toInt()}W" }
                 text = buildString {
-                    append("${RideFormatter.one(record.distanceKm)} km · +${record.ascentM.toInt()}m · 배터리 ${formatPct(record.usedBatteryPct)}% 사용")
-                    append("\n학습 ${record.sampleCount}개 · ${dateFormat.format(Date(record.importedAtMs))}")
-                    if (sensors.isNotEmpty()) append("\n${sensors.joinToString(" · ")}")
+                    append("${String.format(Locale.US, "%.2f", record.distanceKm)} km · +${record.ascentM.toInt()}m / -${record.descentM.toInt()}m")
+                    record.durationSec?.takeIf { it > 0 }?.let { sec ->
+                        val h = sec / 3600
+                        val m = (sec % 3600) / 60
+                        append(" · 이동 ${if (h > 0) "${h}시간 ${m}분" else "${m}분"}")
+                    }
+                    record.avgSpeedKph?.let { append(" · 평속 ${String.format(Locale.US, "%.1f", it)}km/h") }
+                    append("\n배터리 ${formatPct(record.usedBatteryPct)}% 사용 · 학습 ${record.sampleCount}개 · ${dateFormat.format(Date(record.importedAtMs))}")
                 }
             }
             val delete = Button(this).apply {

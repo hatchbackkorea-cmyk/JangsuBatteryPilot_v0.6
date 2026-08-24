@@ -13,12 +13,10 @@ data class HistoricalRideRecord(
     val importedAtMs: Long,
     val distanceKm: Double,
     val ascentM: Double,
+    val descentM: Double,
     val durationSec: Long?,
     val usedBatteryPct: Double,
     val avgSpeedKph: Double?,
-    val avgHeartRate: Double?,
-    val avgCadence: Double?,
-    val avgPower: Double?,
     val sampleCount: Int
 )
 
@@ -45,12 +43,10 @@ class HistoricalRideStore(context: Context) {
                     importedAtMs = o.optLong("importedAtMs", 0L),
                     distanceKm = o.optDouble("distanceKm", 0.0),
                     ascentM = o.optDouble("ascentM", 0.0),
+                    descentM = o.optDouble("descentM", 0.0),
                     durationSec = if (o.has("durationSec") && !o.isNull("durationSec")) o.optLong("durationSec") else null,
                     usedBatteryPct = o.optDouble("usedBatteryPct", 0.0),
                     avgSpeedKph = nullableDouble(o, "avgSpeedKph"),
-                    avgHeartRate = nullableDouble(o, "avgHeartRate"),
-                    avgCadence = nullableDouble(o, "avgCadence"),
-                    avgPower = nullableDouble(o, "avgPower"),
                     sampleCount = o.optInt("sampleCount", 0)
                 )
             }.sortedByDescending { it.importedAtMs }
@@ -86,12 +82,10 @@ class HistoricalRideStore(context: Context) {
                 put("importedAtMs", r.importedAtMs)
                 put("distanceKm", r.distanceKm)
                 put("ascentM", r.ascentM)
+                put("descentM", r.descentM)
                 if (r.durationSec == null) put("durationSec", JSONObject.NULL) else put("durationSec", r.durationSec)
                 put("usedBatteryPct", r.usedBatteryPct)
                 putNullable("avgSpeedKph", r.avgSpeedKph)
-                putNullable("avgHeartRate", r.avgHeartRate)
-                putNullable("avgCadence", r.avgCadence)
-                putNullable("avgPower", r.avgPower)
                 put("sampleCount", r.sampleCount)
             })
         }
