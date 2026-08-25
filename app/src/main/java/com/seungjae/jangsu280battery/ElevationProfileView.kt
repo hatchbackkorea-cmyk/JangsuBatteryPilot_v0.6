@@ -112,7 +112,6 @@ class ElevationProfileView @JvmOverloads constructor(
         canvas.drawPath(path, linePaint)
 
         val markerKms = buildList {
-            addAll(c.batteryMarkers.values.filter { it.chargeToPct != null }.map { it.km.toDouble() })
             addAll(c.supplyPois.map { it.routeKm })
             add(c.totalKm)
         }.distinct().sorted()

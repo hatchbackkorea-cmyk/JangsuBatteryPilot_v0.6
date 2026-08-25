@@ -17,11 +17,16 @@ data class ActualBatteryEntry(
     val kind: ActualEntryKind
 )
 
+data class ActualSaveResult(
+    val saved: ActualBatteryEntry,
+    val replaced: ActualBatteryEntry?
+)
+
 class BatteryActualStore(context: Context) {
     companion object {
         private const val PREFS = "actual_battery_state"
         private const val KEY_HISTORY = "history_json"
-        private const val MAX_HISTORY = 30
+        private const val MAX_HISTORY = 200
     }
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -50,11 +55,11 @@ class BatteryActualStore(context: Context) {
 
     fun latest(): ActualBatteryEntry? = entries().lastOrNull()
 
-    fun save(percent: Double, routeKm: Double, kind: ActualEntryKind): ActualBatteryEntry {
+    fun save(percent: Double, routeKm: Double, kind: ActualEntryKind, timestampMs: Long = System.currentTimeMillis()): ActualBatteryEntry {
         val item = ActualBatteryEntry(
             percent = percent.coerceIn(0.0, 100.0),
             routeKm = routeKm.coerceAtLeast(0.0),
-            timestampMs = System.currentTimeMillis(),
+            timestampMs = timestampMs,
             kind = kind
         )
         val list = entries().toMutableList().apply {
@@ -63,6 +68,35 @@ class BatteryActualStore(context: Context) {
         }
         write(list)
         return item
+    }
+
+    /**
+     * 일반 주행 중 배터리 재입력 안전장치.
+     * 직전 RIDING 입력 후 10초 이내라면 직전 값은 무효화하고 새 값/새 위치/새 시간을 저장한다.
+     * 충전 ARRIVAL/POST_CHARGE 이벤트에는 적용하지 않는다.
+     */
+    fun saveRidingReplacingRecent(
+        percent: Double,
+        routeKm: Double,
+        timestampMs: Long = System.currentTimeMillis(),
+        replaceWindowMs: Long = 10_000L
+    ): ActualSaveResult {
+        val list = entries().toMutableList()
+        val previous = list.lastOrNull()
+        val replace = previous?.takeIf {
+            it.kind == ActualEntryKind.RIDING && timestampMs >= it.timestampMs && timestampMs - it.timestampMs <= replaceWindowMs
+        }
+        if (replace != null) list.removeAt(list.lastIndex)
+        val item = ActualBatteryEntry(
+            percent = percent.coerceIn(0.0, 100.0),
+            routeKm = routeKm.coerceAtLeast(0.0),
+            timestampMs = timestampMs,
+            kind = ActualEntryKind.RIDING
+        )
+        list.add(item)
+        while (list.size > MAX_HISTORY) list.removeAt(0)
+        write(list)
+        return ActualSaveResult(item, replace)
     }
 
     fun undoLast(): ActualBatteryEntry? {

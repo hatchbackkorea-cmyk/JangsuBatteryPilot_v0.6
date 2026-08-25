@@ -38,6 +38,7 @@ class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
+        LearningMigration.ensureV0110FreshStart(this)
 
         courseRepo = CourseRepository(this)
         logManager = RideLogManager(this)
@@ -184,7 +185,7 @@ class SettingsActivity : Activity() {
         val count = learningStore.samples().size
         val historical = historicalRideStore.records()
         tvLearningSummary.text = if (count == 0) {
-            "학습 데이터 없음 · 기본 배터리 모델 사용 중"
+            "학습 데이터 없음 · 중립 초기 모델 사용 중"
         } else {
             "저장된 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}"
         }
@@ -202,6 +203,7 @@ class SettingsActivity : Activity() {
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
                 historicalRideStore.clear()
+                HistoricalRideDataStore(this).clearAll()
                 refreshLearningSummary()
                 Toast.makeText(this, "배터리 학습 데이터를 초기화했습니다.", Toast.LENGTH_SHORT).show()
             }
@@ -236,17 +238,13 @@ class SettingsActivity : Activity() {
             .setTitle("GPX Battery Copilot")
             .setMessage(
                 "v${appVersionName()}\n\n" +
-                    "• 종점 목표 잔량 1~99%\n" +
-                    "• 음성 자동 안내를 km 간격 / 분 간격으로 직접 설정\n" +
-                    "• 설정 및 테스트 기능을 별도 설정 메뉴로 분리\n" +
-                    "• GPX 코스 관리를 별도 코스 메뉴로 분리\n" +
-                    "• 충전 타이머 제거\n" +
-                    "• 주행 저장 후 학습 사용 여부를 직접 선택\n" +
-                    "• 테스트 모드 주행은 학습에서 자동 제외\n" +
-                    "• 개인 배터리 학습 데이터 확인 / 초기화\n" +
-                    "• 과거 FIT/GPX 라이딩 가져오기 및 배터리 학습\n" +
-                    "• FIT/GPX 거리 · 이동시간 · 평속 · 획득/손실고도 분석 정확도 개선\n" +
-                    "• 같은 파일도 개선된 분석값으로 재학습 가능"
+                    "• v0.11.0부터 배터리 학습을 0에서 새로 시작\n" +
+                    "• 일반 배터리 10초 이내 재입력은 직전값 자동 무효화\n" +
+                    "• 충전 시작/완료 단일 버튼 + 확인/취소\n" +
+                    "• FIT 원본과 GPS·고도·속도·케이던스·라이더/모터 파워 시계열 보존\n" +
+                    "• 심박 데이터는 수집/학습에서 제외\n" +
+                    "• FIT/GPX 거리 · 이동시간 · 평속 · 획득/손실고도 분석\n" +
+                    "• 좌우 스와이프 4페이지 · 피드백 데이터 기반 준비"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -254,8 +252,8 @@ class SettingsActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.10.2"
-    } catch (_: Exception) { "0.10.2" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.11.0"
+    } catch (_: Exception) { "0.11.0" }
 
     private fun applyKeepScreen(enabled: Boolean) {
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

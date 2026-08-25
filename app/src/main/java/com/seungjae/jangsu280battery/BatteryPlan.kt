@@ -1,7 +1,6 @@
 package com.seungjae.jangsu280battery
 
 import kotlin.math.abs
-import kotlin.math.floor
 
 
 data class BatteryEstimate(
@@ -33,38 +32,23 @@ class BatteryPlan(
     private val learning: BatteryLearningStore,
     chargingStations: List<ChargingStation> = emptyList()
 ) {
-    private val markers = course.batteryMarkers
     private val configuredStations = chargingStations
         .filter { it.routeKm > 0.25 && it.routeKm < course.totalKm - 0.15 }
         .sortedBy { it.routeKm }
         .distinctBy { (it.routeKm * 100).toInt() }
 
-    /** 사용자가 충전 계획을 지정하면 장수 내장 고정 계획보다 사용자 계획을 우선한다. */
-    val isLegacyPlannedCourse: Boolean = configuredStations.isEmpty() &&
-        markers.size >= 20 && markers.containsKey(50) && markers.containsKey(75) && markers.containsKey(100)
+    /** v0.11.0부터 모든 코스는 동일한 중립 모델 + 실제 학습 데이터만 사용한다. */
+    val isLegacyPlannedCourse: Boolean = false
 
     val hasConfiguredChargingStations: Boolean get() = configuredStations.isNotEmpty()
 
-    val checkpoints: List<Checkpoint> = when {
-        isLegacyPlannedCourse -> listOf(
-            checkpointFromMarker(50, "1보급소 1차", 70.0),
-            checkpointFromMarker(75, "1보급소 복귀", 70.0),
-            checkpointFromMarker(100, "점심 / 충전", 75.0),
-            Checkpoint(course.totalKm, "종점", markers[135]?.arrivalPct ?: 15.0, null)
-        )
-        configuredStations.isNotEmpty() -> buildConfiguredCheckpoints()
-        else -> listOf(Checkpoint(course.totalKm, "종점", genericEstimateFromStart(course.totalKm), null))
+    val checkpoints: List<Checkpoint> = if (configuredStations.isNotEmpty()) {
+        buildConfiguredCheckpoints()
+    } else {
+        listOf(Checkpoint(course.totalKm, "종점", genericEstimateFromStart(course.totalKm), null))
     }
 
-    val segments: List<BatterySegment> = when {
-        isLegacyPlannedCourse -> listOf(
-            BatterySegment(0.0, 50.0, 100.0, checkpoints[0].arrivalPct, "출발 → 1보급소 1차"),
-            BatterySegment(50.0, 75.0, checkpoints[0].chargeToPct ?: 70.0, checkpoints[1].arrivalPct, "싱글1 루프"),
-            BatterySegment(75.0, 100.0, checkpoints[1].chargeToPct ?: 70.0, checkpoints[2].arrivalPct, "1보급소 → 점심"),
-            BatterySegment(100.0, course.totalKm, checkpoints[2].chargeToPct ?: 75.0, checkpoints.last().arrivalPct, "점심 → 종점")
-        )
-        else -> buildGenericSegments()
-    }
+    val segments: List<BatterySegment> = buildGenericSegments()
 
     private fun buildConfiguredCheckpoints(): List<Checkpoint> {
         val out = mutableListOf<Checkpoint>()
@@ -107,66 +91,33 @@ class BatteryPlan(
         return result
     }
 
-    private fun checkpointFromMarker(km: Int, name: String, fallbackCharge: Double): Checkpoint {
-        val m = markers[km]
-        return Checkpoint(km.toDouble(), name, m?.arrivalPct ?: legacyArrivalAt(km), m?.chargeToPct ?: fallbackCharge)
-    }
 
     fun estimate(routeKm: Double): BatteryEstimate {
         val km = routeKm.coerceIn(0.0, course.totalKm)
-        if (!isLegacyPlannedCourse) {
-            val cp = checkpointAt(km, 0.10)
-            if (cp?.chargeToPct != null) {
-                return BatteryEstimate(
-                    cp.arrivalPct,
-                    "${cp.name}: 도착 예상 ${cp.arrivalPct.toInt()}% → ${cp.chargeToPct.toInt()}% 충전",
-                    atChargePoint = true,
-                    calibrated = learning.samples().isNotEmpty()
-                )
-            }
-            val segment = segmentFor(km)
-            val priorCp = checkpoints.lastOrNull { it.chargeToPct != null && it.km < km - 0.10 }
-            val startKm = priorCp?.km ?: 0.0
-            val startPct = priorCp?.chargeToPct ?: 100.0
-            val use = learning.estimateConsumption(course, startKm, km)
-            val p = (startPct - use).coerceIn(0.0, 100.0)
-            val learned = learning.samples().isNotEmpty()
+        val cp = checkpointAt(km, 0.10)
+        if (cp?.chargeToPct != null) {
             return BatteryEstimate(
-                percent = p,
-                note = if (hasConfiguredChargingStations) "GPX + 선택 충전소 계획${if (learned) " + 개인 학습" else ""}" else if (learned) "GPX 거리·상승 + 개인 주행 학습 모델" else "GPX 거리·상승 + 장수 실측 기반 기본 모델",
-                calibrated = learned
+                cp.arrivalPct,
+                "${cp.name}: 도착 예상 ${cp.arrivalPct.toInt()}% → ${cp.chargeToPct.toInt()}% 충전",
+                atChargePoint = true,
+                calibrated = learning.samples().isNotEmpty()
             )
         }
-
-        if (km <= 0.0) return BatteryEstimate(100.0, "출발 100% 기준 · 장수 계획")
-        for (cp in checkpoints) {
-            if (cp.chargeToPct != null && abs(km - cp.km) <= 0.10) {
-                return BatteryEstimate(cp.arrivalPct, "${cp.name}: ${cp.arrivalPct.toInt()}% → ${cp.chargeToPct.toInt()}% 충전", true)
-            }
-        }
-        if (km >= 135.0) {
-            val p = markers[135]?.arrivalPct ?: 15.0
-            return BatteryEstimate(p, "종점 목표 약 ${p.toInt()}%")
-        }
-
-        val leftKm = floor(km).toInt().coerceAtLeast(0)
-        val rightKm = (leftKm + 1).coerceAtMost(135)
-        val frac = (km - leftKm).coerceIn(0.0, 1.0)
-        val leftMarker = markers[leftKm]
-        val chargeStart = leftMarker?.chargeToPct
-        val leftPct = if (chargeStart != null && km > leftKm + 0.10) chargeStart else legacyArrivalAt(leftKm)
-        val rightPct = legacyArrivalAt(rightKm)
-        val p = leftPct + (rightPct - leftPct) * frac
-        return BatteryEstimate(p.coerceIn(0.0, 100.0), "장수 GPX 1km 배터리 계획값")
+        val priorCp = checkpoints.lastOrNull { it.chargeToPct != null && it.km < km - 0.10 }
+        val startKm = priorCp?.km ?: 0.0
+        val startPct = priorCp?.chargeToPct ?: 100.0
+        val use = learning.estimateConsumption(course, startKm, km)
+        val p = (startPct - use).coerceIn(0.0, 100.0)
+        val learned = learning.samples().isNotEmpty()
+        return BatteryEstimate(
+            percent = p,
+            note = if (hasConfiguredChargingStations) "GPX + 선택 충전소 계획${if (learned) " + 개인 학습" else ""}"
+                else if (learned) "GPX 거리·상승 + 개인 주행 학습 모델" else "GPX 거리·상승 중립 기본 모델",
+            calibrated = learned
+        )
     }
 
-    fun travelReferencePercent(routeKm: Double): Double {
-        val km = routeKm.coerceIn(0.0, course.totalKm)
-        if (!isLegacyPlannedCourse) return estimate(km).percent
-        val segment = segmentFor(km)
-        if (abs(km - segment.startKm) <= 0.12) return segment.startPct
-        return estimate(km).percent
-    }
+    fun travelReferencePercent(routeKm: Double): Double = estimate(routeKm.coerceIn(0.0, course.totalKm)).percent
 
     fun segmentFor(routeKm: Double): BatterySegment {
         val km = routeKm.coerceIn(0.0, course.totalKm)
@@ -177,16 +128,11 @@ class BatteryPlan(
         if (toKm <= fromKm) return 0.0
         val from = fromKm.coerceIn(0.0, course.totalKm)
         val to = toKm.coerceIn(from, course.totalKm)
-        if (!isLegacyPlannedCourse) {
-            if (hasChargeStrictlyBeforeTarget(from, to)) return 0.0
-            var use = learning.estimateConsumption(course, from, to)
-            val targetCp = checkpoints.firstOrNull { it.chargeToPct != null && abs(it.km - to) <= 0.12 && it.km > from + 0.10 }
-            if (targetCp != null) use += detourUsePct(targetCp.detourKm)
-            return use.coerceAtLeast(0.0)
-        }
-        val segment = segmentFor(from)
-        if (to > segment.endKm + 0.12) return 0.0
-        return (travelReferencePercent(from) - estimate(to).percent).coerceAtLeast(0.0)
+        if (hasChargeStrictlyBeforeTarget(from, to)) return 0.0
+        var use = learning.estimateConsumption(course, from, to)
+        val targetCp = checkpoints.firstOrNull { it.chargeToPct != null && abs(it.km - to) <= 0.12 && it.km > from + 0.10 }
+        if (targetCp != null) use += detourUsePct(targetCp.detourKm)
+        return use.coerceAtLeast(0.0)
     }
 
     fun confidenceRange(routeKm: Double, margin: Double = 4.0): ClosedFloatingPointRange<Double> {
@@ -230,12 +176,9 @@ class BatteryPlan(
         return "현재 소비 페이스 유지"
     }
 
-    fun predictedTotalUsePct(): Double = if (isLegacyPlannedCourse) {
-        segments.sumOf { (it.startPct - it.targetArrivalPct).coerceAtLeast(0.0) }
-    } else learning.estimateConsumption(course, 0.0, course.totalKm)
+    fun predictedTotalUsePct(): Double = learning.estimateConsumption(course, 0.0, course.totalKm)
 
     fun recommendedChargeKm(finishTargetPct: Double = 15.0): Double? {
-        if (isLegacyPlannedCourse) return checkpoints.firstOrNull { it.chargeToPct != null }?.km
         if (configuredStations.isNotEmpty()) return null
         val allowedUse = 100.0 - finishTargetPct.coerceIn(1.0, 99.0)
         val totalUse = predictedTotalUsePct()
@@ -250,11 +193,10 @@ class BatteryPlan(
     }
 
     fun modelLabel(): String = when {
-        isLegacyPlannedCourse -> "장수 전용 1km 계획 모델"
         configuredStations.isNotEmpty() && learning.samples().isNotEmpty() -> "GPX + 선택 충전소 + 개인 소비 학습"
         configuredStations.isNotEmpty() -> "GPX + 선택 충전소 계획"
         learning.samples().isNotEmpty() -> "GPX + 개인 소비 학습"
-        else -> "GPX + 장수 실측 기본 모델"
+        else -> "GPX + 중립 기본 모델"
     }
 
     private fun genericEstimateFromStart(km: Double): Double =
@@ -267,8 +209,4 @@ class BatteryPlan(
         return (detourKm * averagePctPerKm).coerceAtLeast(0.0)
     }
 
-    private fun legacyArrivalAt(k: Int): Double = when (k) {
-        0 -> 100.0
-        else -> markers[k]?.arrivalPct ?: markers.entries.minByOrNull { abs(it.key - k) }?.value?.arrivalPct ?: 0.0
-    }
 }

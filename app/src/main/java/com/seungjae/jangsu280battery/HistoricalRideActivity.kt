@@ -25,6 +25,7 @@ class HistoricalRideActivity : Activity() {
     private lateinit var learningStore: BatteryLearningStore
     private lateinit var rideStore: HistoricalRideStore
     private lateinit var logManager: RideLogManager
+    private lateinit var dataStore: HistoricalRideDataStore
 
     private lateinit var panelAnalysis: View
     private lateinit var panelBattery: View
@@ -38,6 +39,7 @@ class HistoricalRideActivity : Activity() {
     private lateinit var btnTrain: Button
 
     private var pendingType = HistoricalSourceType.FIT
+    private var pendingUri: android.net.Uri? = null
     private var analysis: HistoricalRideAnalysis? = null
     private val manualPoints = mutableListOf<ManualPoint>()
     private var nextPointOrder = 0
@@ -45,10 +47,12 @@ class HistoricalRideActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_historical_ride)
+        LearningMigration.ensureV0110FreshStart(this)
 
         learningStore = BatteryLearningStore(this)
         rideStore = HistoricalRideStore(this)
         logManager = RideLogManager(this)
+        dataStore = HistoricalRideDataStore(this)
 
         panelAnalysis = findViewById(R.id.panelHistoricalAnalysis)
         panelBattery = findViewById(R.id.panelHistoricalBattery)
@@ -102,6 +106,7 @@ class HistoricalRideActivity : Activity() {
     }
 
     private fun analyzeUri(uri: android.net.Uri) {
+        pendingUri = uri
         panelAnalysis.visibility = View.VISIBLE
         panelBattery.visibility = View.GONE
         tvAnalysis.text = "${pendingType.label} 파일 분석 중…"
@@ -215,6 +220,10 @@ class HistoricalRideActivity : Activity() {
         val startPct = etStart.text.toString().trim().toDoubleOrNull() ?: 100.0
         val directUsed = etUsed.text.toString().trim().toDoubleOrNull()
         val enteredEnd = etEnd.text.toString().trim().toDoubleOrNull()
+        val sortedManual = manualPoints.sortedWith(compareBy<ManualPoint> { it.routeKm }.thenBy { it.order })
+        val hasManualCharge = sortedManual.zipWithNext().any { (x, y) ->
+            kotlin.math.abs(x.routeKm - y.routeKm) <= 0.02 && y.percent > x.percent + 0.5
+        }
         if (startPct !in 1.0..100.0) {
             Toast.makeText(this, "시작 배터리는 1~100%로 입력해 주세요.", Toast.LENGTH_LONG).show()
             return
@@ -224,37 +233,50 @@ class HistoricalRideActivity : Activity() {
             enteredEnd != null -> enteredEnd
             else -> null
         }
-        if (directUsed != null && directUsed !in 0.8..100.0) {
-            Toast.makeText(this, "총 사용 배터리는 0.8~100%로 입력해 주세요.", Toast.LENGTH_LONG).show()
+        if (directUsed != null && directUsed !in 0.8..startPct) {
+            Toast.makeText(this, "충전이 없는 기록의 총 사용 배터리는 0.8% 이상, 시작 배터리 이하로 입력해 주세요.", Toast.LENGTH_LONG).show()
             return
         }
-        if (endPct == null || endPct !in 0.0..100.0 || endPct >= startPct - 0.7) {
+        if (directUsed != null && hasManualCharge) {
+            Toast.makeText(this, "중간 충전이 있는 기록은 총 사용량 대신 종료 배터리를 입력해 주세요. 충전별 소비량은 체크포인트에서 자동 계산합니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (endPct == null || endPct !in 0.0..100.0 || (!hasManualCharge && endPct >= startPct - 0.7)) {
             Toast.makeText(this, "종료 배터리 또는 총 사용량을 확인해 주세요.", Toast.LENGTH_LONG).show()
             return
         }
 
-        val entries = mutableListOf<Pair<Int, ActualBatteryEntry>>()
-        var seq = 0
         val baseTime = System.currentTimeMillis()
-        entries += seq to ActualBatteryEntry(startPct, 0.0, baseTime + seq, ActualEntryKind.RIDING)
-        seq++
-        manualPoints.sortedWith(compareBy<ManualPoint> { it.routeKm }.thenBy { it.order }).forEach { p ->
-            entries += seq to ActualBatteryEntry(p.percent, p.routeKm, baseTime + seq, ActualEntryKind.RIDING)
-            seq++
+        fun timelineTime(km: Double, order: Int): Long {
+            val nearest = a.telemetry.minByOrNull { kotlin.math.abs(it.routeKm - km) }?.timestampMs
+            return (nearest ?: baseTime) + order
         }
-        entries += seq to ActualBatteryEntry(endPct, a.distanceKm, baseTime + seq, ActualEntryKind.RIDING)
-        val orderedEntries = entries.sortedWith(compareBy<Pair<Int, ActualBatteryEntry>> { it.second.routeKm }.thenBy { it.first })
-            .map { it.second }
+        val orderedEntries = mutableListOf<ActualBatteryEntry>()
+        orderedEntries += ActualBatteryEntry(startPct, 0.0, timelineTime(0.0, 0), ActualEntryKind.RIDING)
+        sortedManual.forEachIndexed { index, p ->
+            var kind = ActualEntryKind.RIDING
+            val prev = sortedManual.getOrNull(index - 1)
+            val next = sortedManual.getOrNull(index + 1)
+            if (next != null && kotlin.math.abs(next.routeKm - p.routeKm) <= 0.02 && next.percent > p.percent + 0.5) {
+                kind = ActualEntryKind.ARRIVAL
+            } else if (prev != null && kotlin.math.abs(prev.routeKm - p.routeKm) <= 0.02 && p.percent > prev.percent + 0.5) {
+                kind = ActualEntryKind.POST_CHARGE
+            }
+            orderedEntries += ActualBatteryEntry(p.percent, p.routeKm, timelineTime(p.routeKm, index + 1), kind)
+        }
+        orderedEntries += ActualBatteryEntry(endPct, a.distanceKm, timelineTime(a.distanceKm, sortedManual.size + 1), ActualEntryKind.RIDING)
 
         val sessionId = "history_v2_${a.fileHash}"
         val modeled = learningStore.baseConsumption(a.distanceKm, a.ascentM)
-        val actualUsed = startPct - endPct
+        val actualUsed = orderedEntries.zipWithNext().sumOf { (x, y) ->
+            if (y.routeKm > x.routeKm + 0.05) (x.percent - y.percent).coerceAtLeast(0.0) else 0.0
+        }
         val factor = if (modeled > 0.1) actualUsed / modeled else 1.0
         val message = buildString {
             append(a.summaryText())
-            append("\n\n배터리 ${formatPct(startPct)}% → ${formatPct(endPct)}% · 사용 ${formatPct(actualUsed)}%")
+            append("\n\n배터리 ${formatPct(startPct)}% → ${formatPct(endPct)}% · 소비구간 합계 ${formatPct(actualUsed)}%")
             if (manualPoints.isNotEmpty()) append("\n중간 기록 ${manualPoints.size}개 포함")
-            append("\n기본 모델 대비 전체 소비 약 ×${String.format(Locale.US, "%.2f", factor)}")
+            append("\n중립 모델 대비 전체 소비 약 ×${String.format(Locale.US, "%.2f", factor)}")
             append("\n\n이 기록을 개인 배터리 예측 학습에 반영할까요?")
         }
         AlertDialog.Builder(this)
@@ -268,9 +290,23 @@ class HistoricalRideActivity : Activity() {
                 }
                 // 같은 v2 세션이 남아 있는 경우도 안전하게 제거한다.
                 learningStore.removeSession(sessionId)
-                val count = learningStore.trainHistoricalRide(sessionId, a.course, orderedEntries)
+                val sourceUri = pendingUri
+                val stored = try {
+                    if (sourceUri != null) dataStore.save(sourceUri, a, orderedEntries) else null
+                } catch (e: Exception) {
+                    Toast.makeText(this, "원본/시계열 저장 실패: ${e.message ?: "저장소 오류"}", Toast.LENGTH_LONG).show()
+                    null
+                }
+                val count = learningStore.trainHistoricalRide(
+                    sessionId = sessionId,
+                    course = a.course,
+                    entries = orderedEntries,
+                    telemetry = a.telemetry,
+                    qualityScore = a.dataQualityScore
+                )
                 if (count <= 0) {
                     learningStore.removeSession(sessionId)
+                    dataStore.remove(a.fileHash)
                     Toast.makeText(this, "학습 가능한 구간을 만들지 못했습니다. 배터리 값과 거리를 확인해 주세요.", Toast.LENGTH_LONG).show()
                     return@setPositiveButton
                 }
@@ -287,7 +323,10 @@ class HistoricalRideActivity : Activity() {
                         durationSec = a.durationSec,
                         usedBatteryPct = actualUsed,
                         avgSpeedKph = a.avgSpeedKph,
-                        sampleCount = count
+                        sampleCount = count,
+                        telemetryPointCount = a.telemetry.size,
+                        dataQualityScore = a.dataQualityScore,
+                        originalStored = stored?.original?.exists() == true
                     )
                 )
                 Toast.makeText(this, "과거 라이딩을 ${count}개 학습 샘플로 반영했습니다.", Toast.LENGTH_LONG).show()
@@ -335,7 +374,9 @@ class HistoricalRideActivity : Activity() {
                         append(" · 이동 ${if (h > 0) "${h}시간 ${m}분" else "${m}분"}")
                     }
                     record.avgSpeedKph?.let { append(" · 평속 ${String.format(Locale.US, "%.1f", it)}km/h") }
-                    append("\n배터리 ${formatPct(record.usedBatteryPct)}% 사용 · 학습 ${record.sampleCount}개 · ${dateFormat.format(Date(record.importedAtMs))}")
+                    append("\n배터리 ${formatPct(record.usedBatteryPct)}% 사용 · 학습 ${record.sampleCount}개 · 품질 ${record.dataQualityScore}%")
+                    if (record.telemetryPointCount > 0) append(" · 시계열 ${record.telemetryPointCount}점")
+                    append(" · ${dateFormat.format(Date(record.importedAtMs))}")
                 }
             }
             val delete = Button(this).apply {
@@ -357,6 +398,7 @@ class HistoricalRideActivity : Activity() {
             .setPositiveButton("삭제") { _, _ ->
                 learningStore.removeSession(record.id)
                 rideStore.remove(record.id)
+                dataStore.remove(record.fileHash)
                 renderStoredRides()
                 Toast.makeText(this, "해당 라이딩의 학습 데이터를 삭제했습니다.", Toast.LENGTH_SHORT).show()
             }

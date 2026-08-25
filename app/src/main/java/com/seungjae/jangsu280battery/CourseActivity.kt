@@ -66,6 +66,13 @@ class CourseActivity : Activity() {
         btnWaypointCharge.setOnClickListener { showWaypointPicker(repo.activeMeta()) }
         btnAddCharge.setOnClickListener { showAddStationOptions(repo.activeMeta()) }
         btnAutoCharge.setOnClickListener { addRecommendedStation(repo.activeMeta()) }
+        tvActive.setOnClickListener {
+            if (logManager.isActive()) {
+                Toast.makeText(this, "주행 중에는 코스를 변경할 수 없습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                showCoursePicker()
+            }
+        }
         renderCourses()
     }
 
@@ -77,7 +84,7 @@ class CourseActivity : Activity() {
     private fun renderCourses() {
         val active = repo.activeMeta()
         val activeElev = if (active.hasElevation) "▲${active.totalAscentM.roundToInt()}m · ▼${active.totalDescentM.roundToInt()}m" else "고도 데이터 없음"
-        tvActive.text = "현재 선택 · ${active.name}\n${RideFormatter.one(active.totalKm)} km · $activeElev"
+        tvActive.text = "${active.name}  ▼\n${RideFormatter.one(active.totalKm)} km · $activeElev\n탭하여 코스 변경"
 
         val riding = logManager.isActive()
         btnImport.isEnabled = !riding
@@ -93,7 +100,39 @@ class CourseActivity : Activity() {
 
         renderChargingPlan(active, riding)
         container.removeAllViews()
-        repo.listCourses().forEach { meta -> container.addView(buildCourseRow(meta, active.id, riding)) }
+        // 기본 장수280 코스는 상단 선택 박스에서 선택한다. 하단에는 가져온 GPX 관리만 표시한다.
+        val alternatives = repo.listCourses().filter { !it.builtIn && it.id != active.id }
+        if (alternatives.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "가져온 다른 GPX가 없습니다. 코스 변경은 위의 현재 코스 박스를 탭하세요."
+                textSize = 12f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, dp(6), 0, dp(4))
+            })
+        } else {
+            alternatives.forEach { meta -> container.addView(buildCourseRow(meta, active.id, riding)) }
+        }
+    }
+
+
+    private fun showCoursePicker() {
+        if (logManager.isActive()) return
+        val courses = repo.listCourses()
+        if (courses.isEmpty()) return
+        val activeId = repo.activeMeta().id
+        val labels = courses.map { meta ->
+            val selected = if (meta.id == activeId) "✓ " else ""
+            val base = if (meta.builtIn) " · 기본" else ""
+            "$selected${meta.name}$base\n${RideFormatter.one(meta.totalKm)} km"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("코스 선택")
+            .setItems(labels) { _, which ->
+                val selected = courses[which]
+                if (selected.id != activeId) selectCourse(selected)
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun renderChargingPlan(meta: CourseMeta, riding: Boolean) {

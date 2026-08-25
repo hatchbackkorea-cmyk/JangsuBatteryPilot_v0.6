@@ -1,7 +1,7 @@
 package com.seungjae.jangsu280battery
 
 sealed class VoiceCommand {
-    data class Battery(val percent: Int, val forcePostCharge: Boolean = false) : VoiceCommand()
+    data class Battery(val percent: Int) : VoiceCommand()
     data class FinishTarget(val percent: Int) : VoiceCommand()
     data class SetVoiceEnabled(val enabled: Boolean) : VoiceCommand()
     data class SetDistanceInterval(val km: Int) : VoiceCommand()
@@ -61,16 +61,11 @@ object VoiceCommandParser {
             return VoiceCommand.SetVoiceEnabled(true)
         }
 
-        // 충전 후 잔량. 충전 타이머는 제거됐지만 충전 완료값은 새 배터리 기준점으로 계속 활용한다.
-        if (percent != null && hasPostChargeContext(t)) {
-            return VoiceCommand.Battery(percent, forcePostCharge = true)
-        }
-        if (percent != null && hasBatteryContext(t)) {
-            return VoiceCommand.Battery(percent, forcePostCharge = false)
-        }
-        if (percent != null && isImplicitBatteryStatement(t)) {
-            return VoiceCommand.Battery(percent, forcePostCharge = false)
-        }
+        // 충전 시작/완료 잔량은 확인/취소가 있는 전용 버튼에서만 저장한다.
+        // 충전 문맥을 일반 주행 배터리로 잘못 넣으면 학습 데이터가 오염될 수 있으므로 음성 저장하지 않는다.
+        if (percent != null && hasPostChargeContext(t)) return VoiceCommand.Unknown
+        if (percent != null && hasBatteryContext(t)) return VoiceCommand.Battery(percent)
+        if (percent != null && isImplicitBatteryStatement(t)) return VoiceCommand.Battery(percent)
 
         if (hasAny(t, "주행시작", "라이딩시작", "기록시작", "출발할게", "출발하자")) return VoiceCommand.RideStart
         if (hasAny(t, "주행종료", "라이딩종료", "기록종료", "라이딩끝", "주행끝", "오늘라이딩끝")) return VoiceCommand.RideStop
@@ -89,7 +84,7 @@ object VoiceCommandParser {
         // 큰 마이크에서 짧게 숫자만 말하면 배터리 값으로 해석.
         if (percent != null && !looksLikeDistanceOrTimeQuestion(t)) {
             val compact = t.replace(Regex("[^0-9가-힣]"), "")
-            if (compact.length <= 12) return VoiceCommand.Battery(percent, forcePostCharge = false)
+            if (compact.length <= 12) return VoiceCommand.Battery(percent)
         }
 
         return VoiceCommand.Unknown

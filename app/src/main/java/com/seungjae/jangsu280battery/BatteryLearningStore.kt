@@ -3,7 +3,6 @@ package com.seungjae.jangsu280battery
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.math.roundToInt
 
 enum class TerrainBucket(val label: String) { FLAT("평지/완만"), ROLLING("구릉"), CLIMB("업힐") }
 
@@ -14,7 +13,13 @@ data class BatteryLearningSample(
     val distanceKm: Double,
     val ascentM: Double,
     val timestampMs: Long,
-    val sessionId: String
+    val sessionId: String,
+    /** FIT에서 보존된 보조 설명 변수. 현재 예측식에 억지로 직접 대입하지 않는다. */
+    val riderWh: Double = 0.0,
+    val motorWh: Double = 0.0,
+    val avgSpeedKph: Double? = null,
+    val motorActiveRatio: Double = 0.0,
+    val qualityScore: Int = 100
 )
 
 class BatteryLearningStore(context: Context) {
@@ -22,10 +27,11 @@ class BatteryLearningStore(context: Context) {
         private const val PREFS = "battery_learning_v1"
         private const val KEY_SAMPLES = "samples"
         private const val KEY_TRAINED = "trained_sessions"
-        private const val MAX_SAMPLES = 60
+        private const val MAX_SAMPLES = 240
 
-        const val FLAT_PCT_PER_KM = 0.65
-        const val ASCENT_PCT_PER_M = 0.035
+        // v0.11.0 중립 seed. 장수280 실측값으로 미리 보정한 계수가 아니다.
+        const val FLAT_PCT_PER_KM = 0.45
+        const val ASCENT_PCT_PER_M = 0.028
     }
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -44,9 +50,9 @@ class BatteryLearningStore(context: Context) {
     }
 
     fun learnedFactor(bucket: TerrainBucket): Double {
-        val specific = samples().filter { it.bucket == bucket }.takeLast(12)
+        val specific = samples().filter { it.bucket == bucket }.takeLast(16)
         if (specific.isNotEmpty()) return weightedFactor(specific)
-        val all = samples().takeLast(15)
+        val all = samples().takeLast(20)
         return if (all.isNotEmpty()) weightedFactor(all) else 1.0
     }
 
@@ -56,18 +62,17 @@ class BatteryLearningStore(context: Context) {
         if (end <= start) return 0.0
         var x = start
         var total = 0.0
-        val stepKm = 0.5
         while (x < end - 0.0001) {
-            val nx = (x + stepKm).coerceAtMost(end)
+            val nx = (x + 0.5).coerceAtMost(end)
             val dist = nx - x
             val ascent = course.elevationBetween(x, nx).ascentM
-            val base = baseConsumption(dist, ascent)
-            total += base * learnedFactor(bucket(dist, ascent))
+            total += baseConsumption(dist, ascent) * learnedFactor(bucket(dist, ascent))
             x = nx
         }
         return total
     }
 
+    /** 앱 실주행에서 확정된 배터리 체크포인트만 학습한다. */
     fun trainFromRide(sessionId: String, course: CourseData, entries: List<ActualBatteryEntry>): Int {
         if (sessionId.isBlank() || isTrained(sessionId)) return 0
         val ordered = entries.sortedBy { it.timestampMs }
@@ -77,8 +82,8 @@ class BatteryLearningStore(context: Context) {
             val b = ordered[i]
             val dist = b.routeKm - a.routeKm
             val used = a.percent - b.percent
+            // 충전 전→후는 배터리가 증가하므로 자동 제외된다.
             if (dist < 0.7 || used < 0.8) continue
-            // 충전 직전→충전 후처럼 배터리가 증가한 쌍은 used가 음수라 이미 제외된다.
             val ascent = course.elevationBetween(a.routeKm, b.routeKm).ascentM
             val modeled = baseConsumption(dist, ascent)
             if (modeled < 0.5) continue
@@ -93,25 +98,29 @@ class BatteryLearningStore(context: Context) {
                 sessionId = sessionId
             )
         }
-        if (newSamples.isNotEmpty()) {
-            val merged = (samples() + newSamples).takeLast(MAX_SAMPLES)
-            writeSamples(merged)
-        }
+        if (newSamples.isNotEmpty()) writeSamples((samples() + newSamples).takeLast(MAX_SAMPLES))
         markTrained(sessionId)
         return newSamples.size
     }
 
-
     /**
-     * 과거 FIT/GPX 파일의 배터리 기록을 학습한다.
-     * 실제 배터리 지점 사이의 총 소비량만 알고 있으므로, 해당 구간을 0.5km 단위로 나눈 뒤
-     * 지형 버킷별 기본 소비량 비율에 따라 동일한 전체 보정계수를 적용한다.
+     * FIT/GPX 과거 라이딩을 학습한다. 실제 배터리 지점 사이의 총 소비량을 0.5km 블록에 배분한다.
+     * 모터 파워가 충분한 FIT은 모터 출력 에너지 분포 75% + 중립 지형식 25%로 배분하고,
+     * 파워가 없거나 결측이면 중립 지형식만 사용한다. rider/motor 에너지는 샘플에도 보존한다.
      */
-    fun trainHistoricalRide(sessionId: String, course: CourseData, entries: List<ActualBatteryEntry>): Int {
+    fun trainHistoricalRide(
+        sessionId: String,
+        course: CourseData,
+        entries: List<ActualBatteryEntry>,
+        telemetry: List<HistoricalTelemetryPoint> = emptyList(),
+        qualityScore: Int = 100
+    ): Int {
         if (sessionId.isBlank() || isTrained(sessionId)) return 0
-        val ordered = entries.withIndex().sortedWith(compareBy<IndexedValue<ActualBatteryEntry>> { it.value.routeKm }.thenBy { it.index })
+        val ordered = entries.withIndex()
+            .sortedWith(compareBy<IndexedValue<ActualBatteryEntry>> { it.value.routeKm }.thenBy { it.index })
             .map { it.value }
         val newSamples = mutableListOf<BatteryLearningSample>()
+
         for (i in 1 until ordered.size) {
             val a = ordered[i - 1]
             val b = ordered[i]
@@ -119,40 +128,101 @@ class BatteryLearningStore(context: Context) {
             val used = a.percent - b.percent
             if (dist < 0.7 || used < 0.8) continue
 
-            data class BucketAgg(var base: Double = 0.0, var distance: Double = 0.0, var ascent: Double = 0.0)
-            val aggs = TerrainBucket.values().associateWith { BucketAgg() }.toMutableMap()
+            data class Block(
+                val bucket: TerrainBucket,
+                val distance: Double,
+                val ascent: Double,
+                val base: Double,
+                val telemetry: TelemetrySegmentStats
+            )
+            data class Agg(
+                var base: Double = 0.0,
+                var allocatedUse: Double = 0.0,
+                var distance: Double = 0.0,
+                var ascent: Double = 0.0,
+                var riderWh: Double = 0.0,
+                var motorWh: Double = 0.0,
+                var speedWeighted: Double = 0.0,
+                var speedDistance: Double = 0.0,
+                var activeWeighted: Double = 0.0,
+                var activeDistance: Double = 0.0
+            )
+
+            val blocks = mutableListOf<Block>()
             var x = a.routeKm.coerceIn(0.0, course.totalKm)
             val end = b.routeKm.coerceIn(x, course.totalKm)
             while (x < end - 0.0001) {
                 val nx = (x + 0.5).coerceAtMost(end)
                 val d = nx - x
                 val ascent = course.elevationBetween(x, nx).ascentM
-                val bkt = bucket(d, ascent)
-                val agg = aggs.getValue(bkt)
-                agg.base += baseConsumption(d, ascent)
-                agg.distance += d
-                agg.ascent += ascent
+                val ts = if (telemetry.isNotEmpty()) {
+                    TelemetryMath.segmentStats(telemetry, x, nx)
+                } else {
+                    TelemetrySegmentStats(0.0, 0.0, null, 0.0, 0.0, 0.0, 0.0)
+                }
+                blocks += Block(
+                    bucket = bucket(d, ascent),
+                    distance = d,
+                    ascent = ascent,
+                    base = baseConsumption(d, ascent),
+                    telemetry = ts
+                )
                 x = nx
             }
-            val modeled = aggs.values.sumOf { it.base }
+
+            val modeled = blocks.sumOf { it.base }
             if (modeled < 0.5) continue
-            val factor = (used / modeled).coerceIn(0.45, 2.20)
+            val totalMotorWh = blocks.sumOf { it.telemetry.motorWh }
+            val totalValidMotorSec = blocks.sumOf { it.telemetry.validPowerSeconds }
+            // Avinox처럼 모터 파워가 충분히 기록된 FIT은 실제 모터 출력 에너지 분포를 주된 배분 근거로 쓴다.
+            // motor_power는 배터리 입력전력과 동일하지 않으므로 1:1 환산하지 않고, 지형 기본식 25%를 섞어 과적합을 막는다.
+            val useMotorAllocation = totalMotorWh >= 5.0 && totalValidMotorSec >= 30.0
+            val aggs = TerrainBucket.values().associateWith { Agg() }.toMutableMap()
+
+            blocks.forEach { block ->
+                val baseShare = (block.base / modeled).coerceIn(0.0, 1.0)
+                val motorShare = if (useMotorAllocation && totalMotorWh > 0.0) {
+                    (block.telemetry.motorWh / totalMotorWh).coerceIn(0.0, 1.0)
+                } else baseShare
+                val allocationShare = if (useMotorAllocation) motorShare * 0.75 + baseShare * 0.25 else baseShare
+                val agg = aggs.getValue(block.bucket)
+                agg.base += block.base
+                agg.allocatedUse += used * allocationShare
+                agg.distance += block.distance
+                agg.ascent += block.ascent
+                agg.riderWh += block.telemetry.riderWh
+                agg.motorWh += block.telemetry.motorWh
+                block.telemetry.avgSpeedKph?.let {
+                    agg.speedWeighted += it * block.distance
+                    agg.speedDistance += block.distance
+                }
+                if (block.telemetry.validPowerSeconds > 0.0) {
+                    agg.activeWeighted += block.telemetry.motorActiveRatio * block.distance
+                    agg.activeDistance += block.distance
+                }
+            }
+
             aggs.forEach { (bkt, agg) ->
-                if (agg.distance < 0.25 || agg.base < 0.15) return@forEach
+                if (agg.distance < 0.25 || agg.base < 0.15 || agg.allocatedUse <= 0.0) return@forEach
+                val factor = (agg.allocatedUse / agg.base).coerceIn(0.45, 2.20)
                 newSamples += BatteryLearningSample(
                     bucket = bkt,
                     factor = factor,
-                    pctPerKm = (agg.base * factor) / agg.distance,
+                    pctPerKm = agg.allocatedUse / agg.distance,
                     distanceKm = agg.distance,
                     ascentM = agg.ascent,
                     timestampMs = b.timestampMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                    sessionId = sessionId
+                    sessionId = sessionId,
+                    riderWh = agg.riderWh,
+                    motorWh = agg.motorWh,
+                    avgSpeedKph = if (agg.speedDistance > 0.0) agg.speedWeighted / agg.speedDistance else null,
+                    motorActiveRatio = if (agg.activeDistance > 0.0) agg.activeWeighted / agg.activeDistance else 0.0,
+                    qualityScore = qualityScore.coerceIn(0, 100)
                 )
             }
         }
-        if (newSamples.isNotEmpty()) {
-            writeSamples((samples() + newSamples).takeLast(MAX_SAMPLES))
-        }
+
+        if (newSamples.isNotEmpty()) writeSamples((samples() + newSamples).takeLast(MAX_SAMPLES))
         markTrained(sessionId)
         return newSamples.size
     }
@@ -164,8 +234,7 @@ class BatteryLearningStore(context: Context) {
         val before = samples()
         val after = before.filterNot { it.sessionId == sessionId }
         if (after.size != before.size) writeSamples(after)
-        val set = trainedSessions().apply { remove(sessionId) }
-        prefs.edit().putStringSet(KEY_TRAINED, set).apply()
+        prefs.edit().putStringSet(KEY_TRAINED, trainedSessions().apply { remove(sessionId) }).apply()
         return before.size - after.size
     }
 
@@ -182,7 +251,12 @@ class BatteryLearningStore(context: Context) {
                     distanceKm = o.optDouble("distanceKm", 0.0),
                     ascentM = o.optDouble("ascentM", 0.0),
                     timestampMs = o.optLong("timestampMs", 0L),
-                    sessionId = o.optString("sessionId", "")
+                    sessionId = o.optString("sessionId", ""),
+                    riderWh = o.optDouble("riderWh", 0.0),
+                    motorWh = o.optDouble("motorWh", 0.0),
+                    avgSpeedKph = if (o.has("avgSpeedKph") && !o.isNull("avgSpeedKph")) o.optDouble("avgSpeedKph") else null,
+                    motorActiveRatio = o.optDouble("motorActiveRatio", 0.0),
+                    qualityScore = o.optInt("qualityScore", 100).coerceIn(0, 100)
                 )
             }
         } catch (_: Exception) { emptyList() }
@@ -190,14 +264,14 @@ class BatteryLearningStore(context: Context) {
 
     fun summaryText(): String {
         val s = samples()
-        if (s.isEmpty()) return "개인 소비 학습 없음 · 장수 실측 기반 기본 모델 사용"
+        if (s.isEmpty()) return "개인 소비 학습 없음 · 중립 초기 모델 사용"
         val lines = mutableListOf("개인 소비 학습 ${s.size}개 구간")
         TerrainBucket.values().forEach { b ->
-            val subset = s.filter { it.bucket == b }.takeLast(12)
+            val subset = s.filter { it.bucket == b }.takeLast(16)
             if (subset.isNotEmpty()) {
                 val factor = weightedFactor(subset)
                 val ppk = subset.map { it.pctPerKm }.average()
-                lines += "${b.label}: ${String.format(java.util.Locale.US, "%.2f", ppk)}%/km · 기본모델×${String.format(java.util.Locale.US, "%.2f", factor)} (${subset.size}회)"
+                lines += "${b.label}: ${String.format(java.util.Locale.US, "%.2f", ppk)}%/km · 중립모델×${String.format(java.util.Locale.US, "%.2f", factor)} (${subset.size}회)"
             }
         }
         return lines.joinToString("\n")
@@ -212,29 +286,45 @@ class BatteryLearningStore(context: Context) {
         var weight = 0.0
         items.forEachIndexed { index, s ->
             val recency = 1.0 + index.toDouble() / items.size.coerceAtLeast(1)
-            val distanceWeight = s.distanceKm.coerceIn(1.0, 20.0).let { 0.5 + it / 20.0 }
-            val w = recency * distanceWeight
+            val distanceWeight = 0.5 + s.distanceKm.coerceIn(1.0, 20.0) / 20.0
+            val qualityWeight = 0.25 + 0.75 * (s.qualityScore.coerceIn(0, 100) / 100.0)
+            val w = recency * distanceWeight * qualityWeight
             sum += s.factor * w
             weight += w
         }
-        return if (weight > 0) (sum / weight).coerceIn(0.55, 1.80) else 1.0
+        return if (weight > 0.0) (sum / weight).coerceIn(0.55, 1.80) else 1.0
     }
 
     private fun writeSamples(items: List<BatteryLearningSample>) {
         val arr = JSONArray()
-        items.forEach { s -> arr.put(JSONObject().apply {
-            put("bucket", s.bucket.name); put("factor", s.factor); put("pctPerKm", s.pctPerKm)
-            put("distanceKm", s.distanceKm); put("ascentM", s.ascentM); put("timestampMs", s.timestampMs); put("sessionId", s.sessionId)
-        }) }
+        items.forEach { s ->
+            arr.put(JSONObject().apply {
+                put("bucket", s.bucket.name)
+                put("factor", s.factor)
+                put("pctPerKm", s.pctPerKm)
+                put("distanceKm", s.distanceKm)
+                put("ascentM", s.ascentM)
+                put("timestampMs", s.timestampMs)
+                put("sessionId", s.sessionId)
+                put("riderWh", s.riderWh)
+                put("motorWh", s.motorWh)
+                if (s.avgSpeedKph == null) put("avgSpeedKph", JSONObject.NULL) else put("avgSpeedKph", s.avgSpeedKph)
+                put("motorActiveRatio", s.motorActiveRatio)
+                put("qualityScore", s.qualityScore)
+            })
+        }
         prefs.edit().putString(KEY_SAMPLES, arr.toString()).apply()
     }
 
-    private fun trainedSessions(): MutableSet<String> = prefs.getStringSet(KEY_TRAINED, emptySet())?.toMutableSet() ?: mutableSetOf()
+    private fun trainedSessions(): MutableSet<String> =
+        prefs.getStringSet(KEY_TRAINED, emptySet())?.toMutableSet() ?: mutableSetOf()
+
     private fun isTrained(id: String): Boolean = trainedSessions().contains(id)
+
     private fun markTrained(id: String) {
         val set = trainedSessions().apply {
             add(id)
-            while (size > 50) remove(first())
+            while (size > 80) remove(first())
         }
         prefs.edit().putStringSet(KEY_TRAINED, set).apply()
     }

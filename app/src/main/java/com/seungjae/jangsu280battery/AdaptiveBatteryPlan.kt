@@ -161,10 +161,4 @@ class AdaptiveBatteryPlan(
     fun modelLabel(): String = base.modelLabel()
     fun isLegacyPlan(): Boolean = base.isLegacyPlannedCourse
 
-    fun classifyInput(routeKm: Double, percent: Double, forcePostCharge: Boolean = false): ActualEntryKind {
-        if (forcePostCharge) return ActualEntryKind.POST_CHARGE
-        val cp = base.checkpointAt(routeKm, 0.40)
-        if (cp?.chargeToPct != null) return if (percent >= cp.chargeToPct - 3.0) ActualEntryKind.POST_CHARGE else ActualEntryKind.ARRIVAL
-        return ActualEntryKind.RIDING
-    }
 }

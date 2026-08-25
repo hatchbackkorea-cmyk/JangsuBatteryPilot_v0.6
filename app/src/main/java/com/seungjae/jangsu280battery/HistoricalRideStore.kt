@@ -4,7 +4,6 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-
 data class HistoricalRideRecord(
     val id: String,
     val fileHash: String,
@@ -17,7 +16,10 @@ data class HistoricalRideRecord(
     val durationSec: Long?,
     val usedBatteryPct: Double,
     val avgSpeedKph: Double?,
-    val sampleCount: Int
+    val sampleCount: Int,
+    val telemetryPointCount: Int = 0,
+    val dataQualityScore: Int = 0,
+    val originalStored: Boolean = false
 )
 
 class HistoricalRideStore(context: Context) {
@@ -47,7 +49,10 @@ class HistoricalRideStore(context: Context) {
                     durationSec = if (o.has("durationSec") && !o.isNull("durationSec")) o.optLong("durationSec") else null,
                     usedBatteryPct = o.optDouble("usedBatteryPct", 0.0),
                     avgSpeedKph = nullableDouble(o, "avgSpeedKph"),
-                    sampleCount = o.optInt("sampleCount", 0)
+                    sampleCount = o.optInt("sampleCount", 0),
+                    telemetryPointCount = o.optInt("telemetryPointCount", 0),
+                    dataQualityScore = o.optInt("dataQualityScore", 0).coerceIn(0, 100),
+                    originalStored = o.optBoolean("originalStored", false)
                 )
             }.sortedByDescending { it.importedAtMs }
         } catch (_: Exception) { emptyList() }
@@ -85,15 +90,14 @@ class HistoricalRideStore(context: Context) {
                 put("descentM", r.descentM)
                 if (r.durationSec == null) put("durationSec", JSONObject.NULL) else put("durationSec", r.durationSec)
                 put("usedBatteryPct", r.usedBatteryPct)
-                putNullable("avgSpeedKph", r.avgSpeedKph)
+                if (r.avgSpeedKph == null) put("avgSpeedKph", JSONObject.NULL) else put("avgSpeedKph", r.avgSpeedKph)
                 put("sampleCount", r.sampleCount)
+                put("telemetryPointCount", r.telemetryPointCount)
+                put("dataQualityScore", r.dataQualityScore)
+                put("originalStored", r.originalStored)
             })
         }
         prefs.edit().putString(KEY_RECORDS, arr.toString()).apply()
-    }
-
-    private fun JSONObject.putNullable(key: String, value: Double?) {
-        if (value == null) put(key, JSONObject.NULL) else put(key, value)
     }
 
     private fun nullableDouble(o: JSONObject, key: String): Double? =
