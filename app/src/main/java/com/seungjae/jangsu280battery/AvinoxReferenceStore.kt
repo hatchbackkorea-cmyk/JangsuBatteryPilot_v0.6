@@ -4,12 +4,12 @@ import android.content.Context
 import org.json.JSONObject
 
 /**
- * DJI Avinox 앱이 특정 GPX 코스에 대해 보여주는 모드별 예상 소비율을
+ * DJI Avinox 앱이 특정 GPX 코스에 대해 보여주는 모드별 전체 코스 예상 소비량을
  * 개인 학습 데이터와 분리해서 보존한다.
  *
  * 이 값은 실제 주행 정답이나 학습 샘플이 아니라 외부 기준(benchmark)이다.
  * BatteryPlan은 사용자가 선택한 모드의 값이 있을 때만 제한된 가중치로
- * 전체 코스 소비량의 prior로 사용한다.
+ * 전체 코스 누적 소비량의 prior로 사용한다. 100% 초과값은 배터리 여러 팩 분량을 뜻한다.
  */
 enum class AvinoxRideMode(val label: String) {
     ECO("ECO"),
@@ -32,7 +32,7 @@ data class AvinoxCourseReference(
         AvinoxRideMode.AUTO -> autoPct
         AvinoxRideMode.TRAIL -> trailPct
         AvinoxRideMode.TURBO -> turboPct
-    }?.takeIf { it in 0.1..100.0 }
+    }?.takeIf { it.isFinite() && it >= 0.1 }
 
     fun selectedValue(): Double? = selectedMode?.let(::value)
 
@@ -126,7 +126,7 @@ class AvinoxReferenceStore(context: Context) {
 
     private fun key(courseId: String) = KEY_PREFIX + courseId
 
-    private fun clean(v: Double?): Double? = v?.takeIf { it.isFinite() && it in 0.1..100.0 }
+    private fun clean(v: Double?): Double? = v?.takeIf { it.isFinite() && it >= 0.1 }
 
     private fun nullablePct(o: JSONObject, name: String): Double? =
         if (o.has(name) && !o.isNull(name)) clean(o.optDouble(name)) else null

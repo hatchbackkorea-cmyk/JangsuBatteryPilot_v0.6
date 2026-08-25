@@ -413,7 +413,7 @@ class MainActivity : Activity() {
         tvCourseQuickSelect.text = "${courseMeta.name}  ▼\n${RideFormatter.one(courseMeta.totalKm)} km · $elev\n$source · 개인 학습 ${learned}개 구간 적용"
         val ref = avinoxReferenceStore.get(courseMeta.id)
         tvAvinoxReferenceSummary.text = if (ref == null) {
-            "입력 없음 · GPX + 개인 학습 모델만 사용\nAvinox 앱의 같은 GPX 모드별 예상 소비율을 외부 기준으로 저장할 수 있습니다."
+            "입력 없음 · GPX + 개인 학습 모델만 사용\nAvinox 앱의 같은 GPX 모드별 전체 코스 예상 소비량을 외부 기준으로 저장할 수 있습니다. 100% 초과도 가능합니다."
         } else {
             val selected = ref.selectedMode
             val selectedValue = ref.selectedValue()
@@ -445,7 +445,7 @@ class MainActivity : Activity() {
             setPadding(px(18), px(8), px(18), px(4))
         }
         root.addView(TextView(this).apply {
-            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 예상 소비율을 입력하세요.\n실제 주행 학습과 섞지 않고 외부 기준으로 별도 저장합니다."
+            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n실제 주행 학습과 섞지 않고 외부 기준으로 별도 저장합니다."
             textSize = 13f
             setTextColor(getColor(R.color.text_secondary))
             setPadding(0, 0, 0, px(8))
@@ -462,7 +462,7 @@ class MainActivity : Activity() {
                 gravity = android.view.Gravity.CENTER_VERTICAL
             })
             val input = EditText(this).apply {
-                hint = "%"
+                hint = "% · 100 초과 가능"
                 inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
                 setText(current?.value(mode)?.let { cleanPctText(it) }.orEmpty())
                 textSize = 17f
@@ -511,7 +511,7 @@ class MainActivity : Activity() {
         root.addView(modesRow)
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Avinox 모드별 예상 소비율")
+            .setTitle("Avinox 전체 코스 예상 소비량")
             .setView(root)
             .setPositiveButton("저장", null)
             .setNegativeButton("취소", null)
@@ -524,13 +524,13 @@ class MainActivity : Activity() {
                     val text = inputs.getValue(mode).text.toString().trim()
                     if (text.isBlank()) return null
                     val value = text.toDoubleOrNull()
-                    if (value == null || value !in 0.1..100.0) throw IllegalArgumentException("${mode.label} 값은 0.1~100%로 입력하세요.")
+                    if (value == null || !value.isFinite() || value < 0.1) throw IllegalArgumentException("${mode.label} 값은 0.1% 이상의 숫자로 입력하세요. 100% 초과도 가능합니다.")
                     return value
                 }
                 try {
                     val values = AvinoxRideMode.values().associateWith(::read)
                     if (values.values.all { it == null }) {
-                        Toast.makeText(this, "최소 한 모드의 예상 소비율을 입력하세요.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "최소 한 모드의 전체 코스 예상 소비량을 입력하세요.", Toast.LENGTH_SHORT).show()
                         return@setOnClickListener
                     }
                     val selected = radioIds.entries.firstOrNull { it.value == modesRow.checkedRadioButtonId }?.key
@@ -1372,8 +1372,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.13.0"
-    } catch (_: Exception) { "0.13.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.13.1"
+    } catch (_: Exception) { "0.13.1" }
 
     override fun onResume() {
         super.onResume()

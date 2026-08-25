@@ -44,8 +44,9 @@ class BatteryPlan(
     val hasConfiguredChargingStations: Boolean get() = configuredStations.isNotEmpty()
 
     /**
-     * Avinox GPX 예상 소비율은 실제 학습 샘플과 분리된 외부 기준이다.
-     * 선택 모드 값이 있을 때만 전체 코스 소비량의 prior로 제한적으로 사용하고,
+     * Avinox GPX 전체 코스 예상 소비량은 실제 학습 샘플과 분리된 외부 기준이다.
+     * 선택 모드 값이 있을 때만 전체 코스 누적 소비량의 prior로 제한적으로 사용한다.
+     * 100% 초과값(예: 254%)도 배터리 2.54팩 분량의 에너지 요구량으로 그대로 허용하고,
      * 실제 개인 학습이 쌓일수록 가중치를 자동으로 낮춘다.
      */
     private val internalModelTotalUsePct: Double by lazy {
@@ -65,14 +66,14 @@ class BatteryPlan(
         val internal = internalModelTotalUsePct
         val external = activeAvinoxUsePct
         if (external == null || internal <= 0.05) internal
-        else (internal * (1.0 - avinoxWeight) + external * avinoxWeight).coerceIn(0.0, 100.0)
+        else (internal * (1.0 - avinoxWeight) + external * avinoxWeight).coerceAtLeast(0.0)
     }
     private val externalScale: Double by lazy {
         if (internalModelTotalUsePct <= 0.05) 1.0
         else (requestedBlendedTotalUsePct / internalModelTotalUsePct).coerceIn(0.70, 1.35)
     }
     private val plannedModelTotalUsePct: Double by lazy {
-        (internalModelTotalUsePct * externalScale).coerceIn(0.0, 100.0)
+        (internalModelTotalUsePct * externalScale).coerceAtLeast(0.0)
     }
 
     private fun modelConsumption(fromKm: Double, toKm: Double): Double =
@@ -249,7 +250,7 @@ class BatteryPlan(
     private fun genericEstimateFromStart(km: Double): Double =
         (100.0 - modelConsumption(0.0, km.coerceIn(0.0, course.totalKm))).coerceIn(0.0, 100.0)
 
-    /** 코스 이탈 우회거리는 GPX 평균 예상 소비율로 보수적으로 환산한다. */
+    /** 코스 이탈 우회거리는 전체 코스 평균 예상 소비량을 km당 소비량으로 환산한다. */
     private fun detourUsePct(detourKm: Double): Double {
         if (detourKm <= 0.0 || course.totalKm <= 0.1) return 0.0
         val averagePctPerKm = predictedTotalUsePct() / course.totalKm
