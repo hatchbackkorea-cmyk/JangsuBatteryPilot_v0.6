@@ -252,8 +252,8 @@ class SettingsActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.11.2"
-    } catch (_: Exception) { "0.11.2" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.12.0"
+    } catch (_: Exception) { "0.12.0" }
 
     private fun applyKeepScreen(enabled: Boolean) {
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

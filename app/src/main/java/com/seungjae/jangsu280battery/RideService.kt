@@ -53,6 +53,7 @@ class RideService : Service(), LocationListener {
     private lateinit var basePlan: BatteryPlan
     private lateinit var actualStore: BatteryActualStore
     private lateinit var plan: AdaptiveBatteryPlan
+    private lateinit var pacingAdvisor: EnergyPacingAdvisor
     private lateinit var announcer: VoiceAnnouncer
     private lateinit var learningStore: BatteryLearningStore
     private lateinit var chargingStore: ChargingStationStore
@@ -79,6 +80,7 @@ class RideService : Service(), LocationListener {
         basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         actualStore = BatteryActualStore(this)
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
+        pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
         announcer = VoiceAnnouncer(this).also {
             it.enabled = AppSettings.voiceEnabled(this)
             it.configure(AppSettings.distanceIntervalKm(this), AppSettings.timeIntervalMin(this), lastKm)
@@ -122,7 +124,8 @@ class RideService : Service(), LocationListener {
                 val stats = course.elevationAhead(km, 10.0)
                 val finishTarget = AppSettings.finishTarget(this)
                 val reserve = plan.reserveStatus(km, finishTarget)
-                announcer.speakNow(announcer.summaryText(km, battery, cp, stats, reserve))
+                val pacing = pacingAdvisor.advice(km, 0.0, reserve)
+                announcer.speakNow(announcer.summaryText(km, battery, cp, stats, reserve, pacing))
             }
             ACTION_SPEAK_TEXT -> {
                 val text = intent.getStringExtra(EXTRA_SPEAK_TEXT).orEmpty()
@@ -174,7 +177,8 @@ class RideService : Service(), LocationListener {
         val finishTarget = AppSettings.finishTarget(this)
         val reserve = plan.reserveStatus(match.routeKm, finishTarget)
         val climb = course.nextMajorClimb(match.routeKm)
-        announcer.handle(match.routeKm, battery, cp, poi, stats10, match.offCourseMeters, reserve, climb)
+        val pacing = pacingAdvisor.advice(match.routeKm, speedKmh, reserve)
+        announcer.handle(match.routeKm, battery, cp, poi, stats10, match.offCourseMeters, reserve, climb, pacing)
 
         val nowOff = match.offCourseMeters >= 150.0
         if (nowOff != wasOffCourse) {

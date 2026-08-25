@@ -6,6 +6,17 @@ import org.json.JSONObject
 
 enum class TerrainBucket(val label: String) { FLAT("평지/완만"), ROLLING("구릉"), CLIMB("업힐") }
 
+
+data class LearnedAssistProfile(
+    val bucket: TerrainBucket,
+    val sampleCount: Int,
+    val avgSpeedKph: Double?,
+    val avgMotorPowerW: Double?,
+    val avgRiderPowerW: Double?,
+    val avgCadenceRpm: Double?,
+    val quality: Int
+)
+
 data class BatteryLearningSample(
     val bucket: TerrainBucket,
     val factor: Double,
@@ -18,6 +29,10 @@ data class BatteryLearningSample(
     val riderWh: Double = 0.0,
     val motorWh: Double = 0.0,
     val avgSpeedKph: Double? = null,
+    val avgRiderPowerW: Double? = null,
+    val avgMotorPowerW: Double? = null,
+    val avgActiveMotorPowerW: Double? = null,
+    val avgCadenceRpm: Double? = null,
     val motorActiveRatio: Double = 0.0,
     val qualityScore: Int = 100
 )
@@ -54,6 +69,48 @@ class BatteryLearningStore(context: Context) {
         if (specific.isNotEmpty()) return weightedFactor(specific)
         val all = samples().takeLast(20)
         return if (all.isNotEmpty()) weightedFactor(all) else 1.0
+    }
+
+    fun assistProfile(bucket: TerrainBucket): LearnedAssistProfile? {
+        val subset = samples()
+            .filter { it.bucket == bucket && it.qualityScore >= 45 }
+            .takeLast(24)
+        if (subset.isEmpty()) return null
+
+        fun weighted(selector: (BatteryLearningSample) -> Double?): Double? {
+            var sum = 0.0
+            var weight = 0.0
+            subset.forEachIndexed { index, sample ->
+                val value = selector(sample) ?: return@forEachIndexed
+                if (!value.isFinite()) return@forEachIndexed
+                val recency = 0.75 + (index + 1).toDouble() / subset.size.coerceAtLeast(1)
+                val distanceWeight = sample.distanceKm.coerceIn(0.5, 15.0)
+                val qualityWeight = (sample.qualityScore.coerceIn(0, 100) / 100.0).coerceAtLeast(0.2)
+                val w = recency * distanceWeight * qualityWeight
+                sum += value * w
+                weight += w
+            }
+            return if (weight > 0.0) sum / weight else null
+        }
+
+        val quality = subset.map { it.qualityScore }.average().toInt().coerceIn(0, 100)
+        return LearnedAssistProfile(
+            bucket = bucket,
+            sampleCount = subset.size,
+            avgSpeedKph = weighted { it.avgSpeedKph }?.takeIf { it in 3.0..60.0 },
+            avgMotorPowerW = weighted { it.avgActiveMotorPowerW ?: it.avgMotorPowerW }?.takeIf { it in 0.0..1500.0 },
+            avgRiderPowerW = weighted { it.avgRiderPowerW }?.takeIf { it in 0.0..1500.0 },
+            avgCadenceRpm = weighted { it.avgCadenceRpm }?.takeIf { it in 20.0..150.0 },
+            quality = quality
+        )
+    }
+
+    fun assistProfileFor(course: CourseData, fromKm: Double, spanKm: Double = 1.0): LearnedAssistProfile? {
+        val end = (fromKm + spanKm.coerceIn(0.3, 3.0)).coerceAtMost(course.totalKm)
+        val dist = (end - fromKm.coerceIn(0.0, course.totalKm)).coerceAtLeast(0.0)
+        if (dist < 0.05) return null
+        val ascent = course.elevationBetween(fromKm, end).ascentM
+        return assistProfile(bucket(dist, ascent))
     }
 
     fun estimateConsumption(course: CourseData, fromKm: Double, toKm: Double): Double {
@@ -145,7 +202,15 @@ class BatteryLearningStore(context: Context) {
                 var speedWeighted: Double = 0.0,
                 var speedDistance: Double = 0.0,
                 var activeWeighted: Double = 0.0,
-                var activeDistance: Double = 0.0
+                var activeDistance: Double = 0.0,
+                var riderPowerWeighted: Double = 0.0,
+                var riderPowerSeconds: Double = 0.0,
+                var motorPowerWeighted: Double = 0.0,
+                var motorPowerSeconds: Double = 0.0,
+                var activeMotorPowerWeighted: Double = 0.0,
+                var activeMotorPowerSeconds: Double = 0.0,
+                var cadenceWeighted: Double = 0.0,
+                var cadenceSeconds: Double = 0.0
             )
 
             val blocks = mutableListOf<Block>()
@@ -199,6 +264,27 @@ class BatteryLearningStore(context: Context) {
                 if (block.telemetry.validPowerSeconds > 0.0) {
                     agg.activeWeighted += block.telemetry.motorActiveRatio * block.distance
                     agg.activeDistance += block.distance
+                    block.telemetry.avgRiderPowerW?.let {
+                        agg.riderPowerWeighted += it * block.telemetry.validPowerSeconds
+                        agg.riderPowerSeconds += block.telemetry.validPowerSeconds
+                    }
+                    block.telemetry.avgMotorPowerW?.let {
+                        agg.motorPowerWeighted += it * block.telemetry.validPowerSeconds
+                        agg.motorPowerSeconds += block.telemetry.validPowerSeconds
+                    }
+                    block.telemetry.avgActiveMotorPowerW?.let { active ->
+                        val activeSeconds = block.telemetry.validPowerSeconds * block.telemetry.motorActiveRatio
+                        if (activeSeconds > 0.0) {
+                            agg.activeMotorPowerWeighted += active * activeSeconds
+                            agg.activeMotorPowerSeconds += activeSeconds
+                        }
+                    }
+                }
+                if (block.telemetry.validCadenceSeconds > 0.0) {
+                    block.telemetry.avgCadenceRpm?.let {
+                        agg.cadenceWeighted += it * block.telemetry.validCadenceSeconds
+                        agg.cadenceSeconds += block.telemetry.validCadenceSeconds
+                    }
                 }
             }
 
@@ -216,6 +302,10 @@ class BatteryLearningStore(context: Context) {
                     riderWh = agg.riderWh,
                     motorWh = agg.motorWh,
                     avgSpeedKph = if (agg.speedDistance > 0.0) agg.speedWeighted / agg.speedDistance else null,
+                    avgRiderPowerW = if (agg.riderPowerSeconds > 0.0) agg.riderPowerWeighted / agg.riderPowerSeconds else null,
+                    avgMotorPowerW = if (agg.motorPowerSeconds > 0.0) agg.motorPowerWeighted / agg.motorPowerSeconds else null,
+                    avgActiveMotorPowerW = if (agg.activeMotorPowerSeconds > 0.0) agg.activeMotorPowerWeighted / agg.activeMotorPowerSeconds else null,
+                    avgCadenceRpm = if (agg.cadenceSeconds > 0.0) agg.cadenceWeighted / agg.cadenceSeconds else null,
                     motorActiveRatio = if (agg.activeDistance > 0.0) agg.activeWeighted / agg.activeDistance else 0.0,
                     qualityScore = qualityScore.coerceIn(0, 100)
                 )
@@ -255,6 +345,10 @@ class BatteryLearningStore(context: Context) {
                     riderWh = o.optDouble("riderWh", 0.0),
                     motorWh = o.optDouble("motorWh", 0.0),
                     avgSpeedKph = if (o.has("avgSpeedKph") && !o.isNull("avgSpeedKph")) o.optDouble("avgSpeedKph") else null,
+                    avgRiderPowerW = if (o.has("avgRiderPowerW") && !o.isNull("avgRiderPowerW")) o.optDouble("avgRiderPowerW") else null,
+                    avgMotorPowerW = if (o.has("avgMotorPowerW") && !o.isNull("avgMotorPowerW")) o.optDouble("avgMotorPowerW") else null,
+                    avgActiveMotorPowerW = if (o.has("avgActiveMotorPowerW") && !o.isNull("avgActiveMotorPowerW")) o.optDouble("avgActiveMotorPowerW") else null,
+                    avgCadenceRpm = if (o.has("avgCadenceRpm") && !o.isNull("avgCadenceRpm")) o.optDouble("avgCadenceRpm") else null,
                     motorActiveRatio = o.optDouble("motorActiveRatio", 0.0),
                     qualityScore = o.optInt("qualityScore", 100).coerceIn(0, 100)
                 )
@@ -271,7 +365,15 @@ class BatteryLearningStore(context: Context) {
             if (subset.isNotEmpty()) {
                 val factor = weightedFactor(subset)
                 val ppk = subset.map { it.pctPerKm }.average()
-                lines += "${b.label}: ${String.format(java.util.Locale.US, "%.2f", ppk)}%/km · 중립모델×${String.format(java.util.Locale.US, "%.2f", factor)} (${subset.size}회)"
+                val profile = assistProfile(b)
+                val pace = profile?.let { p ->
+                    val parts = mutableListOf<String>()
+                    p.avgMotorPowerW?.let { parts += "모터 ${it.toInt()}W" }
+                    p.avgCadenceRpm?.let { parts += "${it.toInt()}rpm" }
+                    p.avgSpeedKph?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it)}km/h" }
+                    if (parts.isNotEmpty()) " · " + parts.joinToString(" · ") else ""
+                }.orEmpty()
+                lines += "${b.label}: ${String.format(java.util.Locale.US, "%.2f", ppk)}%/km · 중립모델×${String.format(java.util.Locale.US, "%.2f", factor)} (${subset.size}회)$pace"
             }
         }
         return lines.joinToString("\n")
@@ -309,6 +411,10 @@ class BatteryLearningStore(context: Context) {
                 put("riderWh", s.riderWh)
                 put("motorWh", s.motorWh)
                 if (s.avgSpeedKph == null) put("avgSpeedKph", JSONObject.NULL) else put("avgSpeedKph", s.avgSpeedKph)
+                if (s.avgRiderPowerW == null) put("avgRiderPowerW", JSONObject.NULL) else put("avgRiderPowerW", s.avgRiderPowerW)
+                if (s.avgMotorPowerW == null) put("avgMotorPowerW", JSONObject.NULL) else put("avgMotorPowerW", s.avgMotorPowerW)
+                if (s.avgActiveMotorPowerW == null) put("avgActiveMotorPowerW", JSONObject.NULL) else put("avgActiveMotorPowerW", s.avgActiveMotorPowerW)
+                if (s.avgCadenceRpm == null) put("avgCadenceRpm", JSONObject.NULL) else put("avgCadenceRpm", s.avgCadenceRpm)
                 put("motorActiveRatio", s.motorActiveRatio)
                 put("qualityScore", s.qualityScore)
             })

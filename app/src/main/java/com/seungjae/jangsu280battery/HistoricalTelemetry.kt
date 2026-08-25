@@ -33,7 +33,12 @@ data class TelemetrySegmentStats(
     val motorActiveRatio: Double,
     val validPowerSeconds: Double,
     val ascentM: Double,
-    val descentM: Double
+    val descentM: Double,
+    val avgRiderPowerW: Double? = null,
+    val avgMotorPowerW: Double? = null,
+    val avgActiveMotorPowerW: Double? = null,
+    val avgCadenceRpm: Double? = null,
+    val validCadenceSeconds: Double = 0.0
 )
 
 object TelemetryMath {
@@ -46,6 +51,14 @@ object TelemetryMath {
         var motorWh = 0.0
         var powerSeconds = 0.0
         var motorActiveSeconds = 0.0
+        var riderPowerWeighted = 0.0
+        var riderPowerSeconds = 0.0
+        var motorPowerWeighted = 0.0
+        var motorPowerSeconds = 0.0
+        var activeMotorPowerWeighted = 0.0
+        var activeMotorPowerSeconds = 0.0
+        var cadenceWeighted = 0.0
+        var cadenceSeconds = 0.0
         var speedWeighted = 0.0
         var speedSeconds = 0.0
         var ascent = 0.0
@@ -60,11 +73,28 @@ object TelemetryMath {
             if (dt != null && a.state !in setOf(TelemetryState.OUTLIER, TelemetryState.SENSOR_GAP) && b.state !in setOf(TelemetryState.OUTLIER, TelemetryState.SENSOR_GAP)) {
                 val rider = listOfNotNull(a.riderPowerW, b.riderPowerW).averageOrNull()
                 val motor = listOfNotNull(a.motorPowerW, b.motorPowerW).averageOrNull()
-                if (rider != null) riderWh += rider.coerceAtLeast(0.0) * dt / 3600.0
+                val cadence = listOfNotNull(a.cadenceRpm, b.cadenceRpm).averageOrNull()
+                if (rider != null) {
+                    val r = rider.coerceAtLeast(0.0)
+                    riderWh += r * dt / 3600.0
+                    riderPowerWeighted += r * dt
+                    riderPowerSeconds += dt
+                }
                 if (motor != null) {
-                    motorWh += motor.coerceAtLeast(0.0) * dt / 3600.0
+                    val m = motor.coerceAtLeast(0.0)
+                    motorWh += m * dt / 3600.0
+                    motorPowerWeighted += m * dt
+                    motorPowerSeconds += dt
                     powerSeconds += dt
-                    if (motor > 5.0) motorActiveSeconds += dt
+                    if (m > 5.0) {
+                        motorActiveSeconds += dt
+                        activeMotorPowerWeighted += m * dt
+                        activeMotorPowerSeconds += dt
+                    }
+                }
+                if (cadence != null && cadence in 20.0..220.0) {
+                    cadenceWeighted += cadence * dt
+                    cadenceSeconds += dt
                 }
                 val speed = listOfNotNull(a.speedKph, b.speedKph).averageOrNull()
                 if (speed != null) {
@@ -86,7 +116,12 @@ object TelemetryMath {
             motorActiveRatio = if (powerSeconds > 0.0) (motorActiveSeconds / powerSeconds).coerceIn(0.0, 1.0) else 0.0,
             validPowerSeconds = powerSeconds,
             ascentM = max(0.0, ascent),
-            descentM = max(0.0, descent)
+            descentM = max(0.0, descent),
+            avgRiderPowerW = if (riderPowerSeconds > 0.0) riderPowerWeighted / riderPowerSeconds else null,
+            avgMotorPowerW = if (motorPowerSeconds > 0.0) motorPowerWeighted / motorPowerSeconds else null,
+            avgActiveMotorPowerW = if (activeMotorPowerSeconds > 0.0) activeMotorPowerWeighted / activeMotorPowerSeconds else null,
+            avgCadenceRpm = if (cadenceSeconds > 0.0) cadenceWeighted / cadenceSeconds else null,
+            validCadenceSeconds = cadenceSeconds
         )
     }
 

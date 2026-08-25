@@ -60,7 +60,8 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
         stats: ElevationStats,
         offCourseMeters: Double,
         reserve: ReserveStatus? = null,
-        majorClimb: MajorClimb? = null
+        majorClimb: MajorClimb? = null,
+        pacing: PacingAdvice? = null
     ) {
         if (!enabled || !ready) return
 
@@ -74,7 +75,10 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
         if (reserve != null && reserve.label != lastRiskLabel) {
             lastRiskLabel = reserve.label
             when (reserve.label) {
-                "위험" -> enqueue("배터리 위험 구간입니다. ${reserve.targetName} 예상 잔량 ${reserve.predictedPct.roundToInt()}퍼센트. 목표보다 ${(-reserve.differencePct).roundToInt()}퍼센트 부족합니다. 보조 강도를 줄이세요.")
+                "위험" -> {
+                    val pace = pacing?.takeIf { it.learned }?.voiceText?.let { " $it" }.orEmpty()
+                    enqueue("배터리 위험 구간입니다. ${reserve.targetName} 예상 잔량 ${reserve.predictedPct.roundToInt()}퍼센트. 목표보다 ${(-reserve.differencePct).roundToInt()}퍼센트 부족합니다. 보조 강도를 줄이세요.$pace")
+                }
                 "주의" -> enqueue("배터리 주의 구간입니다. ${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}퍼센트입니다.")
             }
         }
@@ -152,11 +156,12 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
                 else -> ""
             }
             val batteryLabel = if (battery.calibrated) "실제값 반영 예상 배터리" else "예상 배터리"
-            enqueue("${triggerText}현재 ${String.format(Locale.US, "%.1f", routeKm)}킬로미터. $batteryLabel ${battery.percent.roundToInt()}퍼센트.$terrain$nextText")
+            val pacingText = pacing?.takeIf { it.learned }?.voiceText?.let { " $it" }.orEmpty()
+            enqueue("${triggerText}현재 ${String.format(Locale.US, "%.1f", routeKm)}킬로미터. $batteryLabel ${battery.percent.roundToInt()}퍼센트.$terrain$nextText$pacingText")
         }
     }
 
-    fun summaryText(routeKm: Double, battery: BatteryEstimate, checkpoint: Checkpoint?, stats: ElevationStats, reserve: ReserveStatus? = null): String {
+    fun summaryText(routeKm: Double, battery: BatteryEstimate, checkpoint: Checkpoint?, stats: ElevationStats, reserve: ReserveStatus? = null, pacing: PacingAdvice? = null): String {
         val kmText = String.format(Locale.US, "%.1f", routeKm)
         val cpText = checkpoint?.let {
             val remain = (it.km - routeKm).coerceAtLeast(0.0)
@@ -164,7 +169,8 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
         }.orEmpty()
         val reserveText = reserve?.let { " 상태는 ${it.label}. ${it.targetName} 예상 ${it.predictedPct.roundToInt()}퍼센트입니다." }.orEmpty()
         val batteryLabel = if (battery.calibrated) "실제값을 반영한 예상 배터리" else "예상 배터리"
-        return "현재 $kmText 킬로미터. $batteryLabel ${battery.percent.roundToInt()}퍼센트. 앞으로 10킬로미터 상승 약 ${stats.ascentM.roundToInt()}미터.$cpText$reserveText"
+        val pacingText = pacing?.voiceText?.let { " $it" }.orEmpty()
+        return "현재 $kmText 킬로미터. $batteryLabel ${battery.percent.roundToInt()}퍼센트. 앞으로 10킬로미터 상승 약 ${stats.ascentM.roundToInt()}미터.$cpText$reserveText$pacingText"
     }
 
     private fun enqueue(text: String) {

@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private lateinit var actualStore: BatteryActualStore
     private lateinit var chargingSessionStore: ChargingSessionStore
     private lateinit var plan: AdaptiveBatteryPlan
+    private lateinit var pacingAdvisor: EnergyPacingAdvisor
 
     private lateinit var btnCourseMenu: Button
     private lateinit var btnCourseImportQuick: Button
@@ -240,6 +241,7 @@ class MainActivity : Activity() {
             loadedCourseId = courseMeta.id
             basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
+            pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             profileView.setCourse(course)
             val prefs = AppSettings.prefs(this)
             if (resetProgress) {
@@ -644,6 +646,7 @@ class MainActivity : Activity() {
                 if (::course.isInitialized) {
                     basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
                     plan = AdaptiveBatteryPlan(basePlan, actualStore)
+                    pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
                     renderAtKm(latestRouteKm, testMode)
                 }
                 refreshLearningPage()
@@ -931,7 +934,8 @@ class MainActivity : Activity() {
             " 다음 ${it.name}까지 ${RideFormatter.one((it.km - km).coerceAtLeast(0.0))}킬로미터."
         }.orEmpty()
         val elevText = if (course.hasElevation) "앞으로 10킬로미터 상승 ${stats.ascentM.roundToInt()}미터." else "GPX에 고도 데이터가 없습니다."
-        speakText("현재 ${RideFormatter.one(km)}킬로미터. 예상 배터리 ${battery.percent.roundToInt()}퍼센트. 상태 ${reserve.label}. 종점 예상 ${plan.forecast(km, course.totalKm).percent.roundToInt()}퍼센트. 목표 ${finishTargetPct.roundToInt()}퍼센트. $elevText$cpText")
+        val pacing = pacingAdvisor.advice(km, latestSpeedKmh, reserve)
+        speakText("현재 ${RideFormatter.one(km)}킬로미터. 예상 배터리 ${battery.percent.roundToInt()}퍼센트. 상태 ${reserve.label}. 종점 예상 ${plan.forecast(km, course.totalKm).percent.roundToInt()}퍼센트. 목표 ${finishTargetPct.roundToInt()}퍼센트. $elevText$cpText ${pacing.voiceText}")
     }
 
     private fun speakNextCheckpoint() {
@@ -951,7 +955,9 @@ class MainActivity : Activity() {
         if (!course.hasElevation) return speakText("이 GPX에는 고도 데이터가 없어 업힐 분석을 할 수 없습니다.")
         val climb = course.nextMajorClimb(latestRouteKm) ?: return speakText("앞 22킬로미터 안에는 큰 연속 업힐이 없습니다.")
         val remain = (climb.startKm - latestRouteKm).coerceAtLeast(0.0)
-        speakText("${if (remain <= 0.2) "현재 주요 업힐입니다." else "약 ${RideFormatter.one(remain)}킬로미터 후 주요 업힐입니다."} 길이 ${RideFormatter.one(climb.distanceKm)}킬로미터, 상승 ${climb.ascentM.roundToInt()}미터, 평균 경사 ${String.format(Locale.US, "%.1f", climb.averageGradePct)}퍼센트입니다.")
+        val reserve = plan.reserveStatus(latestRouteKm, finishTargetPct)
+        val pacing = pacingAdvisor.adviceForKm(climb.startKm, reserve)
+        speakText("${if (remain <= 0.2) "현재 주요 업힐입니다." else "약 ${RideFormatter.one(remain)}킬로미터 후 주요 업힐입니다."} 길이 ${RideFormatter.one(climb.distanceKm)}킬로미터, 상승 ${climb.ascentM.roundToInt()}미터, 평균 경사 ${String.format(Locale.US, "%.1f", climb.averageGradePct)}퍼센트입니다. ${pacing.voiceText}")
     }
 
     private fun speakLocationInfo() {
@@ -1121,11 +1127,13 @@ class MainActivity : Activity() {
         }
 
         tvTenKmBattery.text = "10km 후 ${battery10.percent.roundToInt()}%${if (battery10.calibrated) " · 보정" else ""}"
-        tvAssist.text = when {
-            reserve.label == "위험" -> "⚠ ${(-reserve.differencePct).coerceAtLeast(0.0).roundToInt()}% 절약 필요"
-            reserve.label == "주의" -> "목표선 근처 · 업힐 절약"
-            else -> plan.assistText(km, battery, stats10)
+        val pacing = pacingAdvisor.advice(km, latestSpeedKmh, reserve)
+        val reservePrefix = when (reserve.label) {
+            "위험" -> "⚠ 목표보다 ${(-reserve.differencePct).coerceAtLeast(0.0).roundToInt()}% 부족 · 절약 페이스\n"
+            "주의" -> "목표선 근처 · 절약 우선\n"
+            else -> ""
         }
+        tvAssist.text = "${pacing.title}\n$reservePrefix${pacing.displayText}"
         tvAssist.setTextColor(when {
             reserve.label == "위험" -> getColor(R.color.danger)
             reserve.label == "주의" -> getColor(R.color.warn)
@@ -1175,8 +1183,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.11.2"
-    } catch (_: Exception) { "0.11.2" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.12.0"
+    } catch (_: Exception) { "0.12.0" }
 
     override fun onResume() {
         super.onResume()
@@ -1191,6 +1199,7 @@ class MainActivity : Activity() {
             // 코스 메뉴에서 충전소 계획만 바꾼 경우에도 즉시 배터리 판단 기준을 재구성한다.
             basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
+            pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
         }
         applySettings()
         renderCourseQuick()
