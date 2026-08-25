@@ -7,9 +7,10 @@ import org.json.JSONObject
  * DJI Avinox 앱이 특정 GPX 코스에 대해 보여주는 모드별 전체 코스 예상 소비량을
  * 개인 학습 데이터와 분리해서 보존한다.
  *
- * 이 값은 실제 주행 정답이나 학습 샘플이 아니라 외부 기준(benchmark)이다.
- * BatteryPlan은 사용자가 선택한 모드의 값이 있을 때만 제한된 가중치로
- * 전체 코스 누적 소비량의 prior로 사용한다. 100% 초과값은 배터리 여러 팩 분량을 뜻한다.
+ * 이 값은 실제 주행 정답이나 학습 샘플이 아니라 완전히 독립된 외부 기준(benchmark)이다.
+ * v0.14.0부터 BatteryPlan의 예측값에는 0%도 섞지 않는다. selectedMode는
+ * 실시간 대시보드에서 어떤 Avinox 모드를 비교할지 고르는 표시 설정일 뿐이다.
+ * 100% 초과값은 배터리 여러 팩 분량의 전체 코스 누적 에너지 요구량을 뜻한다.
  */
 enum class AvinoxRideMode(val label: String) {
     ECO("ECO"),

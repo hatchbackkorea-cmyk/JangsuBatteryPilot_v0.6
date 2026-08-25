@@ -11,8 +11,8 @@ android {
         applicationId = "com.seungjae.jangsu280battery"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.13.1"
+        versionCode = 23
+        versionName = "0.14.0"
     }
 
     buildTypes {

@@ -11,132 +11,7 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- 0. 코스 / GPX -->
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fillViewport="true">
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center_vertical"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="코스 / GPX"
-                    android:textColor="@color/text_primary"
-                    android:textSize="25sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvCourseQuickSelect"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/panel_accent_bg"
-                    android:padding="14dp"
-                    android:text="현재 코스 선택 ▼"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-                    <Button
-                        android:id="@+id/btnCourseImportQuick"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_weight="1"
-                        android:text="+ GPX 불러오기"
-                        android:textStyle="bold" />
-                    <Button
-                        android:id="@+id/btnCourseMenu"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="7dp"
-                        android:layout_weight="1"
-                        android:text="충전 / 코스 관리"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tvCourseStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="7dp"
-                    android:text="GPS / 코스 상태"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="9dp"
-                    android:background="@drawable/panel_bg"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Avinox 전체 코스 예상 소비량 · 외부 기준"
-                        android:textColor="@color/text_primary"
-                        android:textSize="17sp"
-                        android:textStyle="bold" />
-                    <TextView
-                        android:id="@+id/tvAvinoxReferenceSummary"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:text="입력 없음 · GPX + 개인 학습 모델만 사용"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <Button
-                        android:id="@+id/btnAvinoxReferenceEdit"
-                        android:layout_width="match_parent"
-                        android:layout_height="46dp"
-                        android:layout_marginTop="8dp"
-                        android:text="Avinox 기준값 입력 / 수정"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/panel_bg"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="선택 코스 고도 프로필"
-                        android:textColor="@color/text_primary"
-                        android:textSize="17sp"
-                        android:textStyle="bold" />
-                    <com.seungjae.jangsu280battery.ElevationProfileView
-                        android:id="@+id/profileView"
-                        android:layout_width="match_parent"
-                        android:layout_height="220dp"
-                        android:layout_marginTop="8dp" />
-                    <TextView
-                        android:id="@+id/tvNextPoi"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="다음 포인트"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </ScrollView>
-
-        <!-- 1. 주행 메인 -->
+        <!-- 0. 주행 메인 -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -169,7 +44,7 @@
                         android:id="@+id/tvVersion"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="v0.13.1"
+                        android:text="v0.14.0"
                         android:textColor="@color/text_secondary"
                         android:textSize="9sp" />
                 </LinearLayout>
@@ -275,6 +150,120 @@
                             android:textSize="13sp"
                             android:textStyle="bold" />
                     </LinearLayout>
+                </LinearLayout>
+
+                <!-- v0.14.0 누적 에너지 3자 비교: 충전 후에도 끊기지 않는 소비량 기준 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/panel_accent_bg"
+                    android:orientation="vertical"
+                    android:padding="10dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="누적 에너지 비교"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="충전해도 계속 누적"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="10sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:orientation="horizontal"
+                        android:baselineAligned="false">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="실제 누적"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                            <TextView
+                                android:id="@+id/tvCompareActual"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="—"
+                                android:textColor="@color/text_primary"
+                                android:textSize="23sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="우리 예측"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                            <TextView
+                                android:id="@+id/tvCompareModel"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0%"
+                                android:textColor="@color/accent"
+                                android:textSize="23sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Avinox"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                            <TextView
+                                android:id="@+id/tvCompareAvinox"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="—"
+                                android:textColor="@color/text_primary"
+                                android:textSize="23sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvCompareDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:gravity="center"
+                        android:lineSpacingExtra="1dp"
+                        android:text="누적 충전 +0% · 실제값 입력 전
+종점 누적예상  자체 — · Avinox —"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
                 </LinearLayout>
 
                 <!-- 2열 1행: 배터리 판단 + 실제 배터리 -->
@@ -521,6 +510,131 @@
             </LinearLayout>
         </ScrollView>
 
+        <!-- 1. 코스 / GPX -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="코스 / GPX"
+                    android:textColor="@color/text_primary"
+                    android:textSize="25sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvCourseQuickSelect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/panel_accent_bg"
+                    android:padding="14dp"
+                    android:text="현재 코스 선택 ▼"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+                    <Button
+                        android:id="@+id/btnCourseImportQuick"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:text="+ GPX 불러오기"
+                        android:textStyle="bold" />
+                    <Button
+                        android:id="@+id/btnCourseMenu"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="7dp"
+                        android:layout_weight="1"
+                        android:text="충전 / 코스 관리"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvCourseStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="7dp"
+                    android:text="GPS / 코스 상태"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="9dp"
+                    android:background="@drawable/panel_bg"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Avinox 전체 코스 예상 소비량 · 외부 기준"
+                        android:textColor="@color/text_primary"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/tvAvinoxReferenceSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:text="입력 없음 · GPX + 개인 학습 모델만 사용"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+                    <Button
+                        android:id="@+id/btnAvinoxReferenceEdit"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="8dp"
+                        android:text="Avinox 기준값 입력 / 수정"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/panel_bg"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="선택 코스 고도 프로필"
+                        android:textColor="@color/text_primary"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+                    <com.seungjae.jangsu280battery.ElevationProfileView
+                        android:id="@+id/profileView"
+                        android:layout_width="match_parent"
+                        android:layout_height="220dp"
+                        android:layout_marginTop="8dp" />
+                    <TextView
+                        android:id="@+id/tvNextPoi"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="다음 포인트"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
         <!-- 2. 설정: 별도 메뉴 없이 직접 조작 -->
         <ScrollView
             android:layout_width="match_parent"
@@ -754,7 +868,7 @@
         android:layout_width="match_parent"
         android:layout_height="36dp"
         android:gravity="center"
-        android:text="○  ●  ○  ○  ○   주행"
+        android:text="●  ○  ○  ○  ○   주행"
         android:textColor="@color/text_secondary"
         android:textSize="12sp"
         android:textStyle="bold" />

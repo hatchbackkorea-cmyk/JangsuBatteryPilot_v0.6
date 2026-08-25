@@ -30,8 +30,7 @@ data class BatterySegment(
 class BatteryPlan(
     private val course: CourseData,
     private val learning: BatteryLearningStore,
-    chargingStations: List<ChargingStation> = emptyList(),
-    private val avinoxReference: AvinoxCourseReference? = null
+    chargingStations: List<ChargingStation> = emptyList()
 ) {
     private val configuredStations = chargingStations
         .filter { it.routeKm > 0.25 && it.routeKm < course.totalKm - 0.15 }
@@ -43,47 +42,19 @@ class BatteryPlan(
 
     val hasConfiguredChargingStations: Boolean get() = configuredStations.isNotEmpty()
 
-    /**
-     * Avinox GPX 전체 코스 예상 소비량은 실제 학습 샘플과 분리된 외부 기준이다.
-     * 선택 모드 값이 있을 때만 전체 코스 누적 소비량의 prior로 제한적으로 사용한다.
-     * 100% 초과값(예: 254%)도 배터리 2.54팩 분량의 에너지 요구량으로 그대로 허용하고,
-     * 실제 개인 학습이 쌓일수록 가중치를 자동으로 낮춘다.
-     */
+    /** v0.14.0: BatteryPlan은 Avinox를 전혀 받지 않는다. 자체 데이터만으로 예측한다. */
     private val internalModelTotalUsePct: Double by lazy {
         learning.estimateConsumption(course, 0.0, course.totalKm).coerceAtLeast(0.0)
     }
-    private val activeAvinoxUsePct: Double? by lazy { avinoxReference?.selectedValue() }
-    private val avinoxWeight: Double by lazy {
-        if (activeAvinoxUsePct == null) 0.0 else when (learning.samples().size) {
-            0 -> 0.45
-            1, 2 -> 0.30
-            in 3..5 -> 0.20
-            in 6..11 -> 0.12
-            else -> 0.08
-        }
-    }
-    private val requestedBlendedTotalUsePct: Double by lazy {
-        val internal = internalModelTotalUsePct
-        val external = activeAvinoxUsePct
-        if (external == null || internal <= 0.05) internal
-        else (internal * (1.0 - avinoxWeight) + external * avinoxWeight).coerceAtLeast(0.0)
-    }
-    private val externalScale: Double by lazy {
-        if (internalModelTotalUsePct <= 0.05) 1.0
-        else (requestedBlendedTotalUsePct / internalModelTotalUsePct).coerceIn(0.70, 1.35)
-    }
-    private val plannedModelTotalUsePct: Double by lazy {
-        (internalModelTotalUsePct * externalScale).coerceAtLeast(0.0)
-    }
 
     private fun modelConsumption(fromKm: Double, toKm: Double): Double =
-        (learning.estimateConsumption(course, fromKm, toKm) * externalScale).coerceAtLeast(0.0)
+        learning.estimateConsumption(course, fromKm, toKm).coerceAtLeast(0.0)
 
     fun internalTotalUsePct(): Double = internalModelTotalUsePct
-    fun avinoxUsePct(): Double? = activeAvinoxUsePct
-    fun avinoxMode(): AvinoxRideMode? = avinoxReference?.selectedMode?.takeIf { avinoxReference.value(it) != null }
-    fun avinoxWeightPct(): Int = (avinoxWeight * 100.0).toInt()
-    fun hasAvinoxReference(): Boolean = activeAvinoxUsePct != null
+    fun cumulativeInternalUsePct(routeKm: Double): Double =
+        learning.estimateConsumption(course, 0.0, routeKm.coerceIn(0.0, course.totalKm)).coerceAtLeast(0.0)
+    fun internalConsumption(fromKm: Double, toKm: Double): Double =
+        modelConsumption(fromKm, toKm)
 
     val checkpoints: List<Checkpoint> = if (configuredStations.isNotEmpty()) {
         buildConfiguredCheckpoints()
@@ -154,9 +125,9 @@ class BatteryPlan(
         val learned = learning.samples().isNotEmpty()
         return BatteryEstimate(
             percent = p,
-            note = if (hasConfiguredChargingStations) "GPX + 선택 충전소 계획${if (learned) " + 개인 학습" else ""}${if (hasAvinoxReference()) " + Avinox 기준" else ""}"
-                else if (learned) "GPX 거리·상승 + 개인 주행 학습 모델${if (hasAvinoxReference()) " + Avinox 기준" else ""}"
-                else "GPX 거리·상승 중립 기본 모델${if (hasAvinoxReference()) " + Avinox 기준" else ""}",
+            note = if (hasConfiguredChargingStations) "GPX + 선택 충전소 계획${if (learned) " + 개인 학습" else ""}"
+                else if (learned) "GPX 거리·상승 + 개인 주행 학습 모델"
+                else "GPX 거리·상승 중립 기본 모델",
             calibrated = learned
         )
     }
@@ -220,7 +191,7 @@ class BatteryPlan(
         return "현재 소비 페이스 유지"
     }
 
-    fun predictedTotalUsePct(): Double = plannedModelTotalUsePct
+    fun predictedTotalUsePct(): Double = internalModelTotalUsePct
 
     fun recommendedChargeKm(finishTargetPct: Double = 15.0): Double? {
         if (configuredStations.isNotEmpty()) return null
@@ -243,8 +214,7 @@ class BatteryPlan(
             learning.samples().isNotEmpty() -> "GPX + 개인 소비 학습"
             else -> "GPX + 중립 기본 모델"
         }
-        val avinox = avinoxMode()?.let { mode -> " + Avinox ${mode.label} 외부기준" }.orEmpty()
-        return core + avinox
+        return core
     }
 
     private fun genericEstimateFromStart(km: Double): Double =

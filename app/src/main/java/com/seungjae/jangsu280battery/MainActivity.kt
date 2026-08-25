@@ -67,6 +67,10 @@ class MainActivity : Activity() {
     private lateinit var tvCurrentKm: TextView
     private lateinit var tvBattery: TextView
     private lateinit var tvBatteryRange: TextView
+    private lateinit var tvCompareActual: TextView
+    private lateinit var tvCompareModel: TextView
+    private lateinit var tvCompareAvinox: TextView
+    private lateinit var tvCompareDetail: TextView
     private lateinit var progressBattery: ProgressBar
     private lateinit var tvRiskStatus: TextView
     private lateinit var tvRiskDetail: TextView
@@ -197,6 +201,10 @@ class MainActivity : Activity() {
         tvCurrentKm = findViewById(R.id.tvCurrentKm)
         tvBattery = findViewById(R.id.tvBattery)
         tvBatteryRange = findViewById(R.id.tvBatteryRange)
+        tvCompareActual = findViewById(R.id.tvCompareActual)
+        tvCompareModel = findViewById(R.id.tvCompareModel)
+        tvCompareAvinox = findViewById(R.id.tvCompareAvinox)
+        tvCompareDetail = findViewById(R.id.tvCompareDetail)
         progressBattery = findViewById(R.id.progressBattery)
         tvRiskStatus = findViewById(R.id.tvRiskStatus)
         tvRiskDetail = findViewById(R.id.tvRiskDetail)
@@ -249,7 +257,7 @@ class MainActivity : Activity() {
             courseMeta = courseRepo.activeMeta()
             course = courseRepo.loadCourse(courseMeta.id)
             loadedCourseId = courseMeta.id
-            basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id), avinoxReferenceStore.get(courseMeta.id))
+            basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             profileView.setCourse(course)
@@ -313,13 +321,9 @@ class MainActivity : Activity() {
 
     private fun recordAvinoxReferenceEvent() {
         val ref = avinoxReferenceStore.get(courseMeta.id) ?: return
-        val selected = basePlan.avinoxMode()
-        val detail = if (selected == null) {
-            "${ref.compactValues()} · 비교만 · 예측 미적용"
-        } else {
-            "${ref.compactValues()} · 적용 ${selected.label} ${formatPct(basePlan.avinoxUsePct() ?: 0.0)} · " +
-                "가중 ${basePlan.avinoxWeightPct()}% · 내부 ${formatPct(basePlan.internalTotalUsePct())} → 계획 ${formatPct(basePlan.predictedTotalUsePct())}"
-        }
+        val selected = ref.selectedMode?.takeIf { ref.value(it) != null }
+        val modeText = selected?.let { "실시간 비교 ${it.label} ${formatPct(ref.value(it)!!)}" } ?: "비교 표시 안 함"
+        val detail = "${ref.compactValues()} · $modeText · 자체예측/개인학습 미적용"
         logManager.recordEvent("AVINOX_BENCHMARK", detail, 0.0, actualStore.latest()?.percent)
     }
 
@@ -413,17 +417,11 @@ class MainActivity : Activity() {
         tvCourseQuickSelect.text = "${courseMeta.name}  ▼\n${RideFormatter.one(courseMeta.totalKm)} km · $elev\n$source · 개인 학습 ${learned}개 구간 적용"
         val ref = avinoxReferenceStore.get(courseMeta.id)
         tvAvinoxReferenceSummary.text = if (ref == null) {
-            "입력 없음 · GPX + 개인 학습 모델만 사용\nAvinox 앱의 같은 GPX 모드별 전체 코스 예상 소비량을 외부 기준으로 저장할 수 있습니다. 100% 초과도 가능합니다."
+            "입력 없음 · 자체 예측만 사용\nAvinox 전체 코스 소비량은 외부 비교용으로만 저장하며 학습/예측에는 섞지 않습니다. 100% 초과 입력 가능."
         } else {
-            val selected = ref.selectedMode
-            val selectedValue = ref.selectedValue()
-            val active = if (selected != null && selectedValue != null) "현재 기준 ${selected.label} ${formatPct(selectedValue)}" else "비교만 · 배터리 예측에는 미적용"
-            val internal = if (::basePlan.isInitialized) basePlan.internalTotalUsePct() else Double.NaN
-            val planned = if (::basePlan.isInitialized) basePlan.predictedTotalUsePct() else Double.NaN
-            val compare = if (internal.isFinite() && planned.isFinite() && selectedValue != null) {
-                "\n내부모델 ${formatPct(internal)} → 계획기준 ${formatPct(planned)} · Avinox 가중 ${basePlan.avinoxWeightPct()}%"
-            } else ""
-            "${ref.compactValues()}\n$active$compare\n※ 실제 학습값과 분리된 외부 기준값"
+            val selected = ref.selectedMode?.takeIf { ref.value(it) != null }
+            val compare = selected?.let { "실시간 비교: ${it.label} ${formatPct(ref.value(it)!!)}" } ?: "실시간 비교 표시 안 함"
+            "${ref.compactValues()}\n$compare\n※ Avinox는 외부 benchmark · 자체 예측/개인 학습에 0% 반영"
         }
         val riding = logManager.isActive()
         tvCourseQuickSelect.isEnabled = !riding
@@ -445,7 +443,7 @@ class MainActivity : Activity() {
             setPadding(px(18), px(8), px(18), px(4))
         }
         root.addView(TextView(this).apply {
-            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n실제 주행 학습과 섞지 않고 외부 기준으로 별도 저장합니다."
+            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n이 값은 외부 비교용입니다. 자체 예측이나 개인 학습에는 절대 섞이지 않습니다."
             textSize = 13f
             setTextColor(getColor(R.color.text_secondary))
             setPadding(0, 0, 0, px(8))
@@ -474,7 +472,7 @@ class MainActivity : Activity() {
         }
 
         root.addView(TextView(this).apply {
-            text = "주행 계획에 참고할 모드"
+            text = "실시간 화면에서 비교할 모드"
             textSize = 14f
             setTextColor(getColor(R.color.text_primary))
             setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -484,7 +482,7 @@ class MainActivity : Activity() {
         val compareOnlyId = View.generateViewId()
         radioGroup.addView(RadioButton(this).apply {
             id = compareOnlyId
-            text = "비교만 · 예측에 미적용"
+            text = "비교 표시 안 함"
             textSize = 13f
         }, RadioGroup.LayoutParams(RadioGroup.LayoutParams.MATCH_PARENT, px(42)))
         val modesRow = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
@@ -550,7 +548,7 @@ class MainActivity : Activity() {
                     renderCourseQuick()
                     renderAtKm(latestRouteKm, testMode)
                     dialog.dismiss()
-                    val savedMsg = if (selected == null) "Avinox 예상값을 비교 기준으로 저장했습니다." else "Avinox ${selected.label} 기준을 계획 보조값으로 적용했습니다."
+                    val savedMsg = if (selected == null) "Avinox 예상값을 외부 비교 데이터로 저장했습니다." else "Avinox ${selected.label}을 실시간 비교 모드로 설정했습니다. 자체 예측에는 반영하지 않습니다."
                     Toast.makeText(this, savedMsg, Toast.LENGTH_LONG).show()
                 } catch (e: IllegalArgumentException) {
                     Toast.makeText(this, e.message ?: "입력값을 확인하세요.", Toast.LENGTH_LONG).show()
@@ -569,7 +567,7 @@ class MainActivity : Activity() {
     }
 
     private fun rebuildPlanFromCurrentCourse() {
-        basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id), avinoxReferenceStore.get(courseMeta.id))
+        basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
         pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
     }
@@ -832,7 +830,7 @@ class MainActivity : Activity() {
                 HistoricalRideStore(this).clear()
                 HistoricalRideDataStore(this).clearAll()
                 if (::course.isInitialized) {
-                    basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id), avinoxReferenceStore.get(courseMeta.id))
+                    basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
                     plan = AdaptiveBatteryPlan(basePlan, actualStore)
                     pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
                     renderAtKm(latestRouteKm, testMode)
@@ -1056,7 +1054,7 @@ class MainActivity : Activity() {
     }
 
     private fun setupSwipePager() {
-        pagerFlipper.displayedChild = 1
+        pagerFlipper.displayedChild = 0
         updatePagerIndicator()
         pagerGesture = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
@@ -1096,7 +1094,7 @@ class MainActivity : Activity() {
     }
 
     private fun updatePagerIndicator() {
-        val labels = arrayOf("코스", "주행", "설정", "학습", "피드백")
+        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백")
         val dots = (0..4).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
         tvPagerIndicator.text = "$dots   ${labels[pagerFlipper.displayedChild]}"
     }
@@ -1223,6 +1221,36 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && action != RideService.ACTION_STOP) startForegroundService(intent) else startService(intent)
     }
 
+    private fun renderEnergyComparison(km: Double) {
+        val ref = avinoxReferenceStore.get(courseMeta.id)
+        val snapshot = EnergyComparisonCalculator.snapshot(
+            routeKm = km,
+            course = course,
+            base = basePlan,
+            adaptive = plan,
+            actualEntries = actualStore.entries(),
+            avinoxReference = ref
+        )
+        tvCompareActual.text = snapshot.actualConsumedPct?.let(::formatPct) ?: "—"
+        tvCompareModel.text = formatPct(snapshot.modelConsumedPct)
+        tvCompareAvinox.text = snapshot.avinoxConsumedPct?.let(::formatPct) ?: "—"
+
+        val actualDiffModel = snapshot.actualConsumedPct?.let { actual ->
+            val diff = actual - snapshot.modelConsumedPct
+            "실제-자체 ${signedPct(diff)}"
+        } ?: "실제값 입력 전"
+        val avinoxName = snapshot.avinoxMode?.label ?: "미선택"
+        val avinoxTotal = snapshot.avinoxProjectedTotalPct?.let(::formatPct) ?: "—"
+        tvCompareDetail.text =
+            "누적 충전 +${formatPct(snapshot.chargedAddedPct)} · $actualDiffModel · 보정 ${String.format(Locale.US, "%.2f", snapshot.modelFactor)}x\n" +
+            "종점 누적예상  자체 ${formatPct(snapshot.modelProjectedTotalPct)} · Avinox $avinoxName $avinoxTotal"
+    }
+
+    private fun signedPct(value: Double): String {
+        val sign = if (value >= 0.0) "+" else ""
+        return sign + formatPct(value)
+    }
+
     private fun renderAtKm(kmValue: Double, simulated: Boolean) {
         val km = kmValue.coerceIn(0.0, course.totalKm)
         latestRouteKm = km
@@ -1243,8 +1271,8 @@ class MainActivity : Activity() {
         tvBattery.setTextColor(batteryColor(battery.percent))
         progressBattery.progress = pct
         progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(batteryColor(battery.percent))
-        val avinoxTag = basePlan.avinoxMode()?.let { " · Avinox ${it.label}" }.orEmpty()
-        tvBatteryRange.text = "예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%${if (battery.calibrated) " · 실측보정" else ""}$avinoxTag"
+        tvBatteryRange.text = "예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%${if (battery.calibrated) " · 실측보정" else ""}"
+        renderEnergyComparison(km)
 
         tvRiskStatus.text = reserve.label
         tvRiskStatus.setTextColor(when (reserve.label) {
@@ -1372,8 +1400,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.13.1"
-    } catch (_: Exception) { "0.13.1" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.14.0"
+    } catch (_: Exception) { "0.14.0" }
 
     override fun onResume() {
         super.onResume()
@@ -1386,7 +1414,7 @@ class MainActivity : Activity() {
             loadSelectedCourse(resetProgress = false)
         } else if (activeId != null && activeId == loadedCourseId && !logManager.isActive() && ::course.isInitialized) {
             // 코스 메뉴에서 충전소 계획만 바꾼 경우에도 즉시 배터리 판단 기준을 재구성한다.
-            basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId), avinoxReferenceStore.get(activeId))
+            basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
         }
