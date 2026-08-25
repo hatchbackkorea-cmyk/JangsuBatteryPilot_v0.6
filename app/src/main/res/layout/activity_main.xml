@@ -765,6 +765,62 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/panel_accent_bg"
+                    android:orientation="vertical"
+                    android:padding="13dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="실험 / 앱 업데이트"
+                        android:textColor="@color/text_primary"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Avinox BLE 값은 검증 전까지 개인학습과 배터리 예측에 사용하지 않습니다."
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnPageBleDiagnostic"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:text="🧪 Avinox BLE 진단 시작"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvPageUpdateStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="9dp"
+                        android:text="현재 앱 버전 확인 중…"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <Switch
+                        android:id="@+id/switchPageBetaUpdates"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:text="테스트판 업데이트 포함"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+
+                    <Button
+                        android:id="@+id/btnPageCheckUpdate"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:text="최신 업데이트 확인" />
+                </LinearLayout>
+
                 <Button
                     android:id="@+id/btnPageResetProgress"
                     android:layout_width="match_parent"

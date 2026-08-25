@@ -114,6 +114,10 @@ class MainActivity : Activity() {
     private lateinit var tvPageTestKm: TextView
     private lateinit var seekPageTestKm: SeekBar
     private lateinit var tvPageSettingsHint: TextView
+    private lateinit var btnPageBleDiagnostic: Button
+    private lateinit var tvPageUpdateStatus: TextView
+    private lateinit var switchPageBetaUpdates: Switch
+    private lateinit var btnPageCheckUpdate: Button
     private lateinit var btnPageResetProgress: Button
     private lateinit var tvLearningPageSummary: TextView
     private lateinit var btnLearningFit: Button
@@ -260,6 +264,10 @@ class MainActivity : Activity() {
         tvPageTestKm = findViewById(R.id.tvPageTestKm)
         seekPageTestKm = findViewById(R.id.seekPageTestKm)
         tvPageSettingsHint = findViewById(R.id.tvPageSettingsHint)
+        btnPageBleDiagnostic = findViewById(R.id.btnPageBleDiagnostic)
+        tvPageUpdateStatus = findViewById(R.id.tvPageUpdateStatus)
+        switchPageBetaUpdates = findViewById(R.id.switchPageBetaUpdates)
+        btnPageCheckUpdate = findViewById(R.id.btnPageCheckUpdate)
         btnPageResetProgress = findViewById(R.id.btnPageResetProgress)
         tvLearningPageSummary = findViewById(R.id.tvLearningPageSummary)
         btnLearningFit = findViewById(R.id.btnLearningFit)
@@ -789,7 +797,45 @@ class MainActivity : Activity() {
             updateInlineSettingsLabels()
             if (testMode) renderCurrentMode()
         })
+        btnPageBleDiagnostic.setOnClickListener {
+            startActivity(Intent(this, BleDiagnosticActivity::class.java))
+        }
+        switchPageBetaUpdates.isChecked = AppSettings.betaUpdates(this)
+        switchPageBetaUpdates.setOnCheckedChangeListener { _, checked ->
+            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_BETA_UPDATES, checked).apply()
+            refreshInlineUpdateStatus()
+        }
+        btnPageCheckUpdate.setOnClickListener { checkForUpdateInline() }
+        refreshInlineUpdateStatus()
         btnPageResetProgress.setOnClickListener { resetProgressQuick() }
+    }
+
+    private fun refreshInlineUpdateStatus(extra: String? = null) {
+        val channel = if (AppSettings.betaUpdates(this)) "테스트판 포함" else "안정판"
+        val repo = UpdateManager.repository()
+        tvPageUpdateStatus.text = buildString {
+            append("현재 v${UpdateManager.currentVersion(this@MainActivity)} · $channel")
+            if (repo.isNotBlank()) append(" · $repo")
+            if (!extra.isNullOrBlank()) append("\n$extra")
+        }
+    }
+
+    private fun checkForUpdateInline() {
+        btnPageCheckUpdate.isEnabled = false
+        refreshInlineUpdateStatus("GitHub에서 최신 릴리스를 확인 중…")
+        UpdateManager.checkAsync(this) { result ->
+            btnPageCheckUpdate.isEnabled = true
+            result.onSuccess { info ->
+                if (info == null) {
+                    refreshInlineUpdateStatus("최신 버전입니다.")
+                } else {
+                    refreshInlineUpdateStatus("새 버전 v${info.versionName} 사용 가능")
+                    UpdateManager.showUpdateDialog(this, info)
+                }
+            }.onFailure { e ->
+                refreshInlineUpdateStatus("업데이트 확인 실패 · ${e.message ?: "네트워크/설정을 확인하세요"}")
+            }
+        }
     }
 
     private fun simpleSeekListener(onChanged: (Int) -> Unit) = object : SeekBar.OnSeekBarChangeListener {
