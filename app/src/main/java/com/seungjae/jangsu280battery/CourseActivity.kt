@@ -32,6 +32,7 @@ class CourseActivity : Activity() {
     private lateinit var logManager: RideLogManager
     private lateinit var chargingStore: ChargingStationStore
     private lateinit var learningStore: BatteryLearningStore
+    private lateinit var avinoxReferenceStore: AvinoxReferenceStore
     private lateinit var container: LinearLayout
     private lateinit var chargingContainer: LinearLayout
     private lateinit var tvActive: TextView
@@ -50,6 +51,7 @@ class CourseActivity : Activity() {
         logManager = RideLogManager(this)
         chargingStore = ChargingStationStore(this)
         learningStore = BatteryLearningStore(this)
+        avinoxReferenceStore = AvinoxReferenceStore(this)
         container = findViewById(R.id.courseListContainer)
         chargingContainer = findViewById(R.id.chargingStationContainer)
         tvActive = findViewById(R.id.tvCourseMenuActive)
@@ -141,7 +143,7 @@ class CourseActivity : Activity() {
         val waypointCount = course.pois.count { !it.userAdded }
         btnWaypointCharge.text = "웨이포인트 선택 ($waypointCount)"
 
-        val recommended = if (stations.isEmpty()) BatteryPlan(course, learningStore).recommendedChargeKm(AppSettings.finishTarget(this)) else null
+        val recommended = if (stations.isEmpty()) BatteryPlan(course, learningStore, emptyList(), avinoxReferenceStore.get(meta.id)).recommendedChargeKm(AppSettings.finishTarget(this)) else null
         tvChargingSummary.text = when {
             stations.isNotEmpty() -> "충전소 ${stations.size}개 · 배터리 판단은 다음 충전소 우선"
             recommended != null -> "충전소 없음 · 현재는 종점 기준 · 권장 검토 ${RideFormatter.one(recommended)}km 부근"
@@ -508,7 +510,7 @@ class CourseActivity : Activity() {
                 .show()
             return
         }
-        val km = BatteryPlan(course, learningStore).recommendedChargeKm(AppSettings.finishTarget(this))
+        val km = BatteryPlan(course, learningStore, emptyList(), avinoxReferenceStore.get(meta.id)).recommendedChargeKm(AppSettings.finishTarget(this))
         if (km == null) {
             AlertDialog.Builder(this)
                 .setTitle("자동 충전 분석")
@@ -648,7 +650,7 @@ class CourseActivity : Activity() {
                             .setNegativeButton("나중에", null)
                             .show()
                     } else {
-                        val recommended = BatteryPlan(course, learningStore).recommendedChargeKm(AppSettings.finishTarget(this))
+                        val recommended = BatteryPlan(course, learningStore, emptyList(), avinoxReferenceStore.get(meta.id)).recommendedChargeKm(AppSettings.finishTarget(this))
                         AlertDialog.Builder(this)
                             .setTitle("GPX 불러오기 완료")
                             .setMessage(if (recommended != null) "웨이포인트가 없습니다.\n예측상 ${RideFormatter.one(recommended)}km 부근에서 충전 계획을 검토할 수 있습니다.\n주소·km·고도 프로필로 충전소를 추가하세요." else "웨이포인트가 없습니다. 주소·km·고도 프로필로 충전소를 추가할 수 있습니다.")

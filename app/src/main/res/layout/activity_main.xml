@@ -77,6 +77,37 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="9dp"
+                    android:background="@drawable/panel_bg"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Avinox 예상 소비율 · 외부 기준"
+                        android:textColor="@color/text_primary"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/tvAvinoxReferenceSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:text="입력 없음 · GPX + 개인 학습 모델만 사용"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+                    <Button
+                        android:id="@+id/btnAvinoxReferenceEdit"
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="8dp"
+                        android:text="Avinox 기준값 입력 / 수정"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:background="@drawable/panel_bg"
                     android:orientation="vertical"
@@ -138,7 +169,7 @@
                         android:id="@+id/tvVersion"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="v0.12.0"
+                        android:text="v0.13.0"
                         android:textColor="@color/text_secondary"
                         android:textSize="9sp" />
                 </LinearLayout>

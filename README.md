@@ -1,8 +1,8 @@
-# GPX Battery Copilot v0.12.0
+# GPX Battery Copilot v0.13.0
 
 오프라인 우선 GPX 라이딩 배터리 코파일럿입니다. 장수280은 내장 예비 코스일 뿐이며, 사용자가 불러와 선택한 **어떤 GPX 코스든** 저장된 개인 학습 데이터를 적용해 배터리 예측과 어시스트를 계산합니다.
 
-## v0.12.0 핵심
+## v0.13.0 핵심
 
 - Avinox 전원 OFF/절전으로 FIT가 여러 개 생겨도 `FIT 여러 개 가져오기`에서 한 번에 선택해 하나의 실제 라이딩 세션으로 결합
 - 여러 FIT을 시간순으로 정렬하고 위치 연속성, 시간 공백, 기록 겹침을 자동 검사
@@ -30,10 +30,23 @@
 - 충전은 `충전 시작 ↔ 충전 완료` 단일 버튼과 확인/취소 방식
 - 원본 FIT/GPX + telemetry.csv + battery_events.csv 보존
 
+## v0.13.0 Avinox Benchmark Fusion
+
+Avinox 앱이 같은 GPX를 분석해 보여주는 ECO / AUTO / TRAIL / TURBO 예상 소비율을 코스별 외부 기준으로 저장할 수 있습니다.
+
+- `비교만`: 값은 보존하지만 배터리 예측에는 반영하지 않음
+- 특정 모드 선택: 해당 모드 예상 소비율을 제한된 가중치로 BatteryPlan의 전체 소비 prior에 사용
+- 개인 실제 학습이 늘수록 Avinox 가중치는 자동으로 낮아짐
+- 실제 배터리 입력과 실주행 학습이 항상 더 높은 우선순위를 가짐
+- 코스 화면에서 내부모델 / Avinox 기준 / 최종 계획값을 분리해서 표시
+- Avinox 예상값은 학습 데이터 초기화와 별개로 보존되며 코스 삭제 때만 함께 삭제
+
+예: Avinox 앱이 같은 GPX에서 `ECO 29% · AUTO 44% · TRAIL 45% · TURBO 50%`를 보여줬다면 그대로 입력한 뒤, `비교만` 또는 실제 주행 계획 모드를 선택할 수 있습니다.
+
 ## Version
 
-- versionName: `0.12.0`
-- versionCode: `20`
+- versionName: `0.13.0`
+- versionCode: `21`
 
 
 ## v0.12.0 GPX Energy Pacing Assist

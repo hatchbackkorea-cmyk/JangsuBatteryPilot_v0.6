@@ -20,6 +20,9 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.text.InputType
 import android.widget.ProgressBar
 import android.widget.SeekBar
@@ -49,12 +52,15 @@ class MainActivity : Activity() {
     private lateinit var basePlan: BatteryPlan
     private lateinit var actualStore: BatteryActualStore
     private lateinit var chargingSessionStore: ChargingSessionStore
+    private lateinit var avinoxReferenceStore: AvinoxReferenceStore
     private lateinit var plan: AdaptiveBatteryPlan
     private lateinit var pacingAdvisor: EnergyPacingAdvisor
 
     private lateinit var btnCourseMenu: Button
     private lateinit var btnCourseImportQuick: Button
     private lateinit var tvCourseQuickSelect: TextView
+    private lateinit var tvAvinoxReferenceSummary: TextView
+    private lateinit var btnAvinoxReferenceEdit: Button
     private lateinit var btnRideToggle: Button
     private lateinit var btnChargeToggle: Button
     private lateinit var tvGpsStatus: TextView
@@ -146,6 +152,7 @@ class MainActivity : Activity() {
         logManager = RideLogManager(this)
         actualStore = BatteryActualStore(this)
         chargingSessionStore = ChargingSessionStore(this)
+        avinoxReferenceStore = AvinoxReferenceStore(this)
 
         if (!logManager.isActive()) {
             actualStore.clear()
@@ -160,6 +167,7 @@ class MainActivity : Activity() {
         btnCourseMenu.setOnClickListener { startActivity(Intent(this, CourseActivity::class.java)) }
         btnCourseImportQuick.setOnClickListener { importGpxQuick() }
         tvCourseQuickSelect.setOnClickListener { showCoursePickerQuick() }
+        btnAvinoxReferenceEdit.setOnClickListener { showAvinoxReferenceDialog() }
         btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else startRide() }
         btnChargeToggle.setOnClickListener { toggleCharging() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
@@ -181,6 +189,8 @@ class MainActivity : Activity() {
         btnCourseMenu = findViewById(R.id.btnCourseMenu)
         btnCourseImportQuick = findViewById(R.id.btnCourseImportQuick)
         tvCourseQuickSelect = findViewById(R.id.tvCourseQuickSelect)
+        tvAvinoxReferenceSummary = findViewById(R.id.tvAvinoxReferenceSummary)
+        btnAvinoxReferenceEdit = findViewById(R.id.btnAvinoxReferenceEdit)
         btnRideToggle = findViewById(R.id.btnRideToggle)
         btnChargeToggle = findViewById(R.id.btnChargeToggle)
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
@@ -239,7 +249,7 @@ class MainActivity : Activity() {
             courseMeta = courseRepo.activeMeta()
             course = courseRepo.loadCourse(courseMeta.id)
             loadedCourseId = courseMeta.id
-            basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
+            basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id), avinoxReferenceStore.get(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             profileView.setCourse(course)
@@ -294,10 +304,23 @@ class MainActivity : Activity() {
         latestSpeedKmh = 0.0
         latestOffCourseM = 0.0
         logManager.start(courseMeta)
+        recordAvinoxReferenceEvent()
         renderRideState()
         renderAtKm(0.0, testMode)
         if (!testMode) ensurePermissionsAndStart()
         Toast.makeText(this, "주행 기록을 시작했습니다. GPS 로그는 계속 자동 저장됩니다.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun recordAvinoxReferenceEvent() {
+        val ref = avinoxReferenceStore.get(courseMeta.id) ?: return
+        val selected = basePlan.avinoxMode()
+        val detail = if (selected == null) {
+            "${ref.compactValues()} · 비교만 · 예측 미적용"
+        } else {
+            "${ref.compactValues()} · 적용 ${selected.label} ${formatPct(basePlan.avinoxUsePct() ?: 0.0)} · " +
+                "가중 ${basePlan.avinoxWeightPct()}% · 내부 ${formatPct(basePlan.internalTotalUsePct())} → 계획 ${formatPct(basePlan.predictedTotalUsePct())}"
+        }
+        logManager.recordEvent("AVINOX_BENCHMARK", detail, 0.0, actualStore.latest()?.percent)
     }
 
     private fun confirmEndRide() {
@@ -388,10 +411,175 @@ class MainActivity : Activity() {
         val learned = learningStore.samples().size
         val source = if (courseMeta.builtIn) "기본 예비 코스" else "가져온 GPX"
         tvCourseQuickSelect.text = "${courseMeta.name}  ▼\n${RideFormatter.one(courseMeta.totalKm)} km · $elev\n$source · 개인 학습 ${learned}개 구간 적용"
+        val ref = avinoxReferenceStore.get(courseMeta.id)
+        tvAvinoxReferenceSummary.text = if (ref == null) {
+            "입력 없음 · GPX + 개인 학습 모델만 사용\nAvinox 앱의 같은 GPX 모드별 예상 소비율을 외부 기준으로 저장할 수 있습니다."
+        } else {
+            val selected = ref.selectedMode
+            val selectedValue = ref.selectedValue()
+            val active = if (selected != null && selectedValue != null) "현재 기준 ${selected.label} ${formatPct(selectedValue)}" else "비교만 · 배터리 예측에는 미적용"
+            val internal = if (::basePlan.isInitialized) basePlan.internalTotalUsePct() else Double.NaN
+            val planned = if (::basePlan.isInitialized) basePlan.predictedTotalUsePct() else Double.NaN
+            val compare = if (internal.isFinite() && planned.isFinite() && selectedValue != null) {
+                "\n내부모델 ${formatPct(internal)} → 계획기준 ${formatPct(planned)} · Avinox 가중 ${basePlan.avinoxWeightPct()}%"
+            } else ""
+            "${ref.compactValues()}\n$active$compare\n※ 실제 학습값과 분리된 외부 기준값"
+        }
         val riding = logManager.isActive()
         tvCourseQuickSelect.isEnabled = !riding
         btnCourseImportQuick.isEnabled = !riding
+        btnAvinoxReferenceEdit.isEnabled = !riding
     }
+
+    private fun showAvinoxReferenceDialog() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 중에는 Avinox 기준을 변경할 수 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = avinoxReferenceStore.get(courseMeta.id)
+        val density = resources.displayMetrics.density
+        fun px(dp: Int) = (dp * density).roundToInt()
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(18), px(8), px(18), px(4))
+        }
+        root.addView(TextView(this).apply {
+            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 예상 소비율을 입력하세요.\n실제 주행 학습과 섞지 않고 외부 기준으로 별도 저장합니다."
+            textSize = 13f
+            setTextColor(getColor(R.color.text_secondary))
+            setPadding(0, 0, 0, px(8))
+        })
+
+        val inputs = linkedMapOf<AvinoxRideMode, EditText>()
+        AvinoxRideMode.values().forEach { mode ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(TextView(this).apply {
+                text = mode.label
+                textSize = 16f
+                setTextColor(getColor(R.color.text_primary))
+                layoutParams = LinearLayout.LayoutParams(0, px(52), 0.42f)
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            })
+            val input = EditText(this).apply {
+                hint = "%"
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setText(current?.value(mode)?.let { cleanPctText(it) }.orEmpty())
+                textSize = 17f
+                layoutParams = LinearLayout.LayoutParams(0, px(52), 0.58f)
+            }
+            inputs[mode] = input
+            row.addView(input)
+            root.addView(row)
+        }
+
+        root.addView(TextView(this).apply {
+            text = "주행 계획에 참고할 모드"
+            textSize = 14f
+            setTextColor(getColor(R.color.text_primary))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, px(8), 0, px(2))
+        })
+        val radioGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val compareOnlyId = View.generateViewId()
+        radioGroup.addView(RadioButton(this).apply {
+            id = compareOnlyId
+            text = "비교만 · 예측에 미적용"
+            textSize = 13f
+        }, RadioGroup.LayoutParams(RadioGroup.LayoutParams.MATCH_PARENT, px(42)))
+        val modesRow = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
+        val radioIds = linkedMapOf<AvinoxRideMode, Int>()
+        AvinoxRideMode.values().forEach { mode ->
+            val id = View.generateViewId()
+            radioIds[mode] = id
+            modesRow.addView(RadioButton(this).apply {
+                this.id = id
+                text = mode.label
+                textSize = 12f
+            }, RadioGroup.LayoutParams(0, px(44), 1f))
+        }
+        // 안드로이드 RadioGroup은 중첩 그룹끼리 단일선택을 공유하지 않으므로 직접 동기화한다.
+        modesRow.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId != -1) radioGroup.check(-1)
+        }
+        radioGroup.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == compareOnlyId) modesRow.check(-1)
+        }
+        if (current?.selectedMode == null) radioGroup.check(compareOnlyId)
+        else radioIds[current.selectedMode]?.let { modesRow.check(it) }
+        root.addView(radioGroup)
+        root.addView(modesRow)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Avinox 모드별 예상 소비율")
+            .setView(root)
+            .setPositiveButton("저장", null)
+            .setNegativeButton("취소", null)
+            .setNeutralButton("기준 삭제", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                fun read(mode: AvinoxRideMode): Double? {
+                    val text = inputs.getValue(mode).text.toString().trim()
+                    if (text.isBlank()) return null
+                    val value = text.toDoubleOrNull()
+                    if (value == null || value !in 0.1..100.0) throw IllegalArgumentException("${mode.label} 값은 0.1~100%로 입력하세요.")
+                    return value
+                }
+                try {
+                    val values = AvinoxRideMode.values().associateWith(::read)
+                    if (values.values.all { it == null }) {
+                        Toast.makeText(this, "최소 한 모드의 예상 소비율을 입력하세요.", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                    val selected = radioIds.entries.firstOrNull { it.value == modesRow.checkedRadioButtonId }?.key
+                    if (selected != null && values[selected] == null) {
+                        Toast.makeText(this, "선택한 모드의 소비율을 먼저 입력하세요.", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                    avinoxReferenceStore.save(
+                        courseId = courseMeta.id,
+                        ecoPct = values[AvinoxRideMode.ECO],
+                        autoPct = values[AvinoxRideMode.AUTO],
+                        trailPct = values[AvinoxRideMode.TRAIL],
+                        turboPct = values[AvinoxRideMode.TURBO],
+                        selectedMode = selected
+                    )
+                    rebuildPlanFromCurrentCourse()
+                    renderCourseQuick()
+                    renderAtKm(latestRouteKm, testMode)
+                    dialog.dismiss()
+                    val savedMsg = if (selected == null) "Avinox 예상값을 비교 기준으로 저장했습니다." else "Avinox ${selected.label} 기준을 계획 보조값으로 적용했습니다."
+                    Toast.makeText(this, savedMsg, Toast.LENGTH_LONG).show()
+                } catch (e: IllegalArgumentException) {
+                    Toast.makeText(this, e.message ?: "입력값을 확인하세요.", Toast.LENGTH_LONG).show()
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                avinoxReferenceStore.clear(courseMeta.id)
+                rebuildPlanFromCurrentCourse()
+                renderCourseQuick()
+                renderAtKm(latestRouteKm, testMode)
+                dialog.dismiss()
+                Toast.makeText(this, "이 코스의 Avinox 외부 기준을 삭제했습니다.", Toast.LENGTH_SHORT).show()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun rebuildPlanFromCurrentCourse() {
+        basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id), avinoxReferenceStore.get(courseMeta.id))
+        plan = AdaptiveBatteryPlan(basePlan, actualStore)
+        pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+    }
+
+    private fun cleanPctText(value: Double): String {
+        val rounded = kotlin.math.round(value)
+        return if (abs(value - rounded) < 0.05) rounded.toInt().toString() else String.format(Locale.US, "%.1f", value)
+    }
+
+    private fun formatPct(value: Double): String = cleanPctText(value) + "%"
 
     private fun showCoursePickerQuick() {
         if (logManager.isActive()) {
@@ -644,7 +832,7 @@ class MainActivity : Activity() {
                 HistoricalRideStore(this).clear()
                 HistoricalRideDataStore(this).clearAll()
                 if (::course.isInitialized) {
-                    basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
+                    basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id), avinoxReferenceStore.get(courseMeta.id))
                     plan = AdaptiveBatteryPlan(basePlan, actualStore)
                     pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
                     renderAtKm(latestRouteKm, testMode)
@@ -1055,7 +1243,8 @@ class MainActivity : Activity() {
         tvBattery.setTextColor(batteryColor(battery.percent))
         progressBattery.progress = pct
         progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(batteryColor(battery.percent))
-        tvBatteryRange.text = "예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%${if (battery.calibrated) " · 실측보정" else ""}"
+        val avinoxTag = basePlan.avinoxMode()?.let { " · Avinox ${it.label}" }.orEmpty()
+        tvBatteryRange.text = "예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%${if (battery.calibrated) " · 실측보정" else ""}$avinoxTag"
 
         tvRiskStatus.text = reserve.label
         tvRiskStatus.setTextColor(when (reserve.label) {
@@ -1183,8 +1372,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.12.0"
-    } catch (_: Exception) { "0.12.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.13.0"
+    } catch (_: Exception) { "0.13.0" }
 
     override fun onResume() {
         super.onResume()
@@ -1197,7 +1386,7 @@ class MainActivity : Activity() {
             loadSelectedCourse(resetProgress = false)
         } else if (activeId != null && activeId == loadedCourseId && !logManager.isActive() && ::course.isInitialized) {
             // 코스 메뉴에서 충전소 계획만 바꾼 경우에도 즉시 배터리 판단 기준을 재구성한다.
-            basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId))
+            basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId), avinoxReferenceStore.get(activeId))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
         }
