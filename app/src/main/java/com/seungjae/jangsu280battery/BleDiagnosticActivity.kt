@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
@@ -253,7 +254,7 @@ class BleDiagnosticActivity : Activity() {
 
     private fun renderDevices() {
         deviceList.removeAllViews()
-        val sorted = devices.values.sortedWith(compareByDescending<SeenDevice> { likelyAvinox(it.name) }.thenByDescending { it.rssi })
+        val sorted = devices.values.sortedWith(compareByDescending<SeenDevice> { if (likelyAvinox(it.name)) 1 else 0 }.thenByDescending { it.rssi })
         if (sorted.isEmpty()) {
             val t = TextView(this).apply {
                 text = "아직 발견된 BLE 기기가 없습니다."
@@ -283,9 +284,9 @@ class BleDiagnosticActivity : Activity() {
         }
     }
 
-    private fun likelyAvinox(name: String): Int {
+    private fun likelyAvinox(name: String): Boolean {
         val n = name.lowercase(Locale.US)
-        return if (listOf("avinox", "amflow", "dji", "dpc", "drive").any { n.contains(it) }) 1 else 0
+        return listOf("avinox", "amflow", "dji", "dpc", "drive").any { n.contains(it) }
     }
 
     @Suppress("MissingPermission")
@@ -311,7 +312,7 @@ class BleDiagnosticActivity : Activity() {
         tvStatus.text = "연결 중… $connectedLabel"
         appendLog("CONNECT_START,${isoNow()},addr=${seen.address},name=${csv(seen.name)}")
         gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            device.connectGatt(this, false, gattCallback, BluetoothGatt.TRANSPORT_LE)
+            device.connectGatt(this, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } else {
             @Suppress("DEPRECATION")
             device.connectGatt(this, false, gattCallback)
@@ -491,13 +492,14 @@ class BleDiagnosticActivity : Activity() {
             val reasons = matchReasons(value, pct).toMutableList()
             if (key.endsWith(STANDARD_BATTERY_LEVEL.toString(), ignoreCase = true)) reasons.add(0, "표준 Battery Level UUID")
             if (reasons.isNotEmpty()) {
-                val score = reasons.sumOf {
-                    when {
-                        it.contains("표준") -> 100
-                        it.contains("byte=$pct") -> 40
-                        it.contains("uint16=$pct") -> 35
-                        it.contains("/100") -> 25
-                        it.contains("0~255") -> 15
+                var score = 0
+                for (reason in reasons) {
+                    score += when {
+                        reason.contains("표준") -> 100
+                        reason.contains("byte=$pct") -> 40
+                        reason.contains("uint16=$pct") -> 35
+                        reason.contains("/100") -> 25
+                        reason.contains("0~255") -> 15
                         else -> 10
                     }
                 }

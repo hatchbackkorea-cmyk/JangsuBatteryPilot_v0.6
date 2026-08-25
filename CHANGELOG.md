@@ -1,3 +1,11 @@
+# v0.16.1
+
+- BLE Lab GitHub CI compile fix.
+- Avinox-name prioritization helper corrected to Boolean semantics.
+- BLE transport constant corrected to BluetoothDevice.TRANSPORT_LE.
+- Candidate score calculation rewritten to avoid Kotlin sumOf overload ambiguity.
+- No change to BLE diagnostic data isolation: BLE values remain excluded from battery learning.
+
 # Changelog
 
 ## v0.16.0 — 배포/업데이트 기준판 + Avinox BLE Lab
