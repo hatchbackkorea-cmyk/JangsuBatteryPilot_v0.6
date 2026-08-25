@@ -19,7 +19,9 @@ data class HistoricalRideRecord(
     val sampleCount: Int,
     val telemetryPointCount: Int = 0,
     val dataQualityScore: Int = 0,
-    val originalStored: Boolean = false
+    val originalStored: Boolean = false,
+    val fileCount: Int = 1,
+    val gapCount: Int = 0
 )
 
 class HistoricalRideStore(context: Context) {
@@ -52,7 +54,9 @@ class HistoricalRideStore(context: Context) {
                     sampleCount = o.optInt("sampleCount", 0),
                     telemetryPointCount = o.optInt("telemetryPointCount", 0),
                     dataQualityScore = o.optInt("dataQualityScore", 0).coerceIn(0, 100),
-                    originalStored = o.optBoolean("originalStored", false)
+                    originalStored = o.optBoolean("originalStored", false),
+                    fileCount = o.optInt("fileCount", 1).coerceAtLeast(1),
+                    gapCount = o.optInt("gapCount", 0).coerceAtLeast(0)
                 )
             }.sortedByDescending { it.importedAtMs }
         } catch (_: Exception) { emptyList() }
@@ -95,6 +99,8 @@ class HistoricalRideStore(context: Context) {
                 put("telemetryPointCount", r.telemetryPointCount)
                 put("dataQualityScore", r.dataQualityScore)
                 put("originalStored", r.originalStored)
+                put("fileCount", r.fileCount)
+                put("gapCount", r.gapCount)
             })
         }
         prefs.edit().putString(KEY_RECORDS, arr.toString()).apply()

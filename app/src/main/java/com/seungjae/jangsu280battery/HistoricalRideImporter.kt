@@ -20,6 +20,30 @@ import kotlin.math.roundToLong
 
 enum class HistoricalSourceType(val label: String) { FIT("FIT"), GPX("GPX") }
 
+data class HistoricalRideSourcePart(
+    val displayName: String,
+    val fileHash: String,
+    val uri: Uri?,
+    val distanceKm: Double,
+    val ascentM: Double,
+    val descentM: Double,
+    val durationSec: Long?,
+    val startTimestampMs: Long?,
+    val endTimestampMs: Long?,
+    val startLat: Double?,
+    val startLon: Double?,
+    val endLat: Double?,
+    val endLon: Double?
+)
+
+data class HistoricalRideGap(
+    val beforeFile: String,
+    val afterFile: String,
+    val durationSec: Long?,
+    val locationGapM: Double?,
+    val timeOverlapSec: Long = 0L
+)
+
 data class HistoricalRideAnalysis(
     val sourceType: HistoricalSourceType,
     val displayName: String,
@@ -31,6 +55,9 @@ data class HistoricalRideAnalysis(
     /** 심박은 의도적으로 포함하지 않는다. */
     val telemetry: List<HistoricalTelemetryPoint> = emptyList(),
     val dataQualityScore: Int = 0,
+    val sourceParts: List<HistoricalRideSourcePart> = emptyList(),
+    val gaps: List<HistoricalRideGap> = emptyList(),
+    val warnings: List<String> = emptyList(),
     val timestampMs: Long = System.currentTimeMillis()
 ) {
     val distanceKm: Double get() = course.totalKm
@@ -41,12 +68,21 @@ data class HistoricalRideAnalysis(
     fun summaryText(): String {
         val lines = mutableListOf<String>()
         lines += "$displayName · ${sourceType.label}"
+        if (sourceParts.size > 1) {
+            lines += "FIT ${sourceParts.size}개 결합 · 파일 사이 공백 ${gaps.size}회"
+        }
         lines += "거리 ${String.format(Locale.US, "%.2f", distanceKm)} km"
         lines += "획득고도 ${ascentM.roundToLong()} m · 손실고도 ${descentM.roundToLong()} m"
         val timeText = durationSec?.takeIf { it > 0 }?.let(::formatDuration) ?: "—"
         val speedText = avgSpeedKph?.takeIf { it.isFinite() && it >= 0.0 }
             ?.let { String.format(Locale.US, "%.1f km/h", it) } ?: "—"
         lines += "이동시간 $timeText · 평속 $speedText"
+        gaps.forEachIndexed { index, gap ->
+            val pause = gap.durationSec?.takeIf { it > 0 }?.let(::formatDuration) ?: "—"
+            val gapM = gap.locationGapM?.let { String.format(Locale.US, "%.0f m", it) } ?: "—"
+            lines += "파일 공백 ${index + 1}: $pause · 위치차 $gapM"
+        }
+        warnings.take(3).forEach { lines += "⚠ $it" }
         return lines.joinToString("\n")
     }
 
@@ -80,6 +116,151 @@ object HistoricalRideImporter {
 
     fun analyze(context: Context, uri: Uri, requestedType: HistoricalSourceType): HistoricalRideAnalysis {
         val name = displayName(context, uri)
+        val bytes = readBytes(context, uri)
+        val hash = sha256(bytes)
+        val single = when (requestedType) {
+            HistoricalSourceType.FIT -> parseFit(bytes, name, hash)
+            HistoricalSourceType.GPX -> parseGpx(bytes, name, hash)
+        }
+        val first = single.telemetry.firstOrNull()
+        val last = single.telemetry.lastOrNull()
+        return single.copy(sourceParts = listOf(HistoricalRideSourcePart(
+            displayName = name,
+            fileHash = hash,
+            uri = uri,
+            distanceKm = single.distanceKm,
+            ascentM = single.ascentM,
+            descentM = single.descentM,
+            durationSec = single.durationSec,
+            startTimestampMs = single.telemetry.mapNotNull { it.timestampMs }.minOrNull(),
+            endTimestampMs = single.telemetry.mapNotNull { it.timestampMs }.maxOrNull(),
+            startLat = first?.lat, startLon = first?.lon, endLat = last?.lat, endLon = last?.lon
+        )))
+    }
+
+    /**
+     * Avinox가 절전/전원 OFF로 한 라이딩을 여러 FIT으로 나눈 경우를 하나의 실제 세션으로 결합한다.
+     * 파일 자체의 이동거리/상승/이동시간은 합산하고, 파일 사이 공백은 주행 데이터로 꾸며내지 않는다.
+     */
+    fun analyzeMultipleFit(context: Context, uris: List<Uri>): HistoricalRideAnalysis {
+        require(uris.isNotEmpty()) { "FIT 파일을 하나 이상 선택해 주세요." }
+        val singles = uris.map { uri -> analyze(context, uri, HistoricalSourceType.FIT) }
+            .distinctBy { it.fileHash }
+        require(singles.isNotEmpty()) { "유효한 FIT 파일이 없습니다." }
+        if (singles.size == 1) return singles.first()
+
+        val ordered = singles.sortedWith(compareBy<HistoricalRideAnalysis> {
+            it.telemetry.mapNotNull { p -> p.timestampMs }.minOrNull() ?: Long.MAX_VALUE
+        }.thenBy { it.displayName })
+
+        val warnings = mutableListOf<String>()
+        val gaps = mutableListOf<HistoricalRideGap>()
+        val mergedTrack = mutableListOf<TrackPoint>()
+        val mergedTelemetry = mutableListOf<HistoricalTelemetryPoint>()
+        val parts = mutableListOf<HistoricalRideSourcePart>()
+        var offsetKm = 0.0
+
+        ordered.forEachIndexed { index, a ->
+            val source = a.sourceParts.firstOrNull()
+            val times = a.telemetry.mapNotNull { it.timestampMs }
+            val firstTel = a.telemetry.firstOrNull()
+            val lastTel = a.telemetry.lastOrNull()
+            if (index > 0) {
+                val prev = ordered[index - 1]
+                val prevLast = prev.telemetry.lastOrNull()
+                val thisFirst = firstTel
+                val prevEnd = prev.telemetry.mapNotNull { it.timestampMs }.maxOrNull()
+                val thisStart = times.minOrNull()
+                val signedGap = if (prevEnd != null && thisStart != null) (thisStart - prevEnd) / 1000L else null
+                val overlap = signedGap?.takeIf { it < 0 }?.let { -it } ?: 0L
+                val pause = signedGap?.coerceAtLeast(0L)
+                val locationGap = if (prevLast != null && thisFirst != null) {
+                    Geo.distanceMeters(prevLast.lat, prevLast.lon, thisFirst.lat, thisFirst.lon)
+                } else null
+                gaps += HistoricalRideGap(prev.displayName, a.displayName, pause, locationGap, overlap)
+                if (overlap > 30L) warnings += "${prev.displayName}와 ${a.displayName} 기록이 ${overlap}초 겹칩니다."
+                if (pause != null && pause > 6 * 3600L) warnings += "파일 사이 휴식이 6시간을 넘습니다. 같은 세션인지 확인하세요."
+                if (locationGap != null && locationGap > 1000.0) warnings += "파일 연결 위치가 ${locationGap.roundToLong()}m 떨어져 있습니다."
+                require(locationGap == null || locationGap <= 5000.0) {
+                    "선택한 FIT 사이 위치가 5km 이상 떨어져 있습니다. 서로 다른 라이딩 파일이 섞였는지 확인해 주세요."
+                }
+            }
+
+            a.course.track.forEach { p -> mergedTrack += p.copy(routeKm = p.routeKm + offsetKm) }
+            a.telemetry.forEachIndexed { pIndex, p ->
+                val boundaryGap = index > 0 && pIndex == 0
+                mergedTelemetry += p.copy(
+                    routeKm = p.routeKm + offsetKm,
+                    state = if (boundaryGap) TelemetryState.SENSOR_GAP else p.state
+                )
+            }
+            parts += HistoricalRideSourcePart(
+                displayName = a.displayName,
+                fileHash = a.fileHash,
+                uri = source?.uri,
+                distanceKm = a.distanceKm,
+                ascentM = a.ascentM,
+                descentM = a.descentM,
+                durationSec = a.durationSec,
+                startTimestampMs = times.minOrNull(),
+                endTimestampMs = times.maxOrNull(),
+                startLat = firstTel?.lat, startLon = firstTel?.lon, endLat = lastTel?.lat, endLon = lastTel?.lon
+            )
+            offsetKm += a.distanceKm
+        }
+
+        require(mergedTrack.size >= 2 && offsetKm > 0.1) { "결합된 FIT에서 유효한 코스를 만들지 못했습니다." }
+        val combinedHash = sha256(ordered.joinToString("|") { it.fileHash }.toByteArray(Charsets.UTF_8))
+        val durations = ordered.map { it.durationSec }
+        val totalDuration = if (durations.all { it != null }) durations.filterNotNull().sum() else null
+        if (totalDuration == null) warnings += "일부 FIT에 이동시간이 없어 결합 평속을 확정하지 않았습니다."
+        val totalAscent = ordered.sumOf { it.ascentM }
+        val totalDescent = ordered.sumOf { it.descentM }
+        val hasElevation = ordered.all { it.course.hasElevation }
+        if (!hasElevation) warnings += "일부 FIT에 고도 데이터가 없어 결합 세션의 지형 학습 가중치를 낮춥니다."
+        if (ordered.any { it.telemetry.none { p -> p.timestampMs != null } }) {
+            warnings += "일부 FIT에 시간정보가 없어 파일명 순서가 보조 기준으로 사용되었습니다."
+        }
+        val combinedCourse = CourseData(
+            name = "결합 FIT 세션 (${ordered.size}개)",
+            track = mergedTrack,
+            batteryMarkers = emptyMap(),
+            pois = emptyList(),
+            hasElevation = hasElevation,
+            totalAscentM = totalAscent,
+            totalDescentM = totalDescent
+        )
+        val baseQuality = if (ordered.isNotEmpty()) {
+            ordered.sumOf { it.dataQualityScore * it.telemetry.size }.toDouble() / ordered.sumOf { it.telemetry.size }.coerceAtLeast(1)
+        } else 0.0
+        var quality = baseQuality
+        if (!hasElevation) quality -= 12.0
+        if (totalDuration == null) quality -= 10.0
+        gaps.forEach { gap ->
+            if ((gap.locationGapM ?: 0.0) > 1000.0) quality -= 12.0
+            else if ((gap.locationGapM ?: 0.0) > 250.0) quality -= 4.0
+            if (gap.timeOverlapSec > 30) quality -= 10.0
+            if ((gap.durationSec ?: 0L) > 6 * 3600L) quality -= 8.0
+        }
+        val avgSpeed = totalDuration?.takeIf { it > 0 }?.let { combinedCourse.totalKm / (it / 3600.0) }
+        val firstName = ordered.first().displayName.substringBeforeLast('.')
+        return HistoricalRideAnalysis(
+            sourceType = HistoricalSourceType.FIT,
+            displayName = "$firstName 외 ${ordered.size - 1}개 · 결합 세션",
+            fileHash = combinedHash,
+            course = combinedCourse,
+            durationSec = totalDuration,
+            avgSpeedKph = avgSpeed,
+            telemetry = mergedTelemetry,
+            dataQualityScore = quality.roundToLong().toInt().coerceIn(0, 100),
+            sourceParts = parts,
+            gaps = gaps,
+            warnings = warnings.distinct(),
+            timestampMs = parts.mapNotNull { it.startTimestampMs }.minOrNull() ?: System.currentTimeMillis()
+        )
+    }
+
+    private fun readBytes(context: Context, uri: Uri): ByteArray {
         val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
             val out = java.io.ByteArrayOutputStream()
             val buf = ByteArray(32 * 1024)
@@ -94,11 +275,7 @@ object HistoricalRideImporter {
             out.toByteArray()
         } ?: error("선택한 파일을 열 수 없습니다.")
         require(bytes.isNotEmpty()) { "빈 파일입니다." }
-        val hash = sha256(bytes)
-        return when (requestedType) {
-            HistoricalSourceType.FIT -> parseFit(bytes, name, hash)
-            HistoricalSourceType.GPX -> parseGpx(bytes, name, hash)
-        }
+        return bytes
     }
 
     private data class FitRaw(

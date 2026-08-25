@@ -18,6 +18,7 @@ import java.util.Locale
 class HistoricalRideActivity : Activity() {
     companion object {
         private const val REQ_PICK_HISTORY = 4101
+        const val EXTRA_AUTO_PICK_TYPE = "auto_pick_type"
     }
 
     private data class ManualPoint(val routeKm: Double, val percent: Double, val order: Int)
@@ -39,7 +40,7 @@ class HistoricalRideActivity : Activity() {
     private lateinit var btnTrain: Button
 
     private var pendingType = HistoricalSourceType.FIT
-    private var pendingUri: android.net.Uri? = null
+    private var pendingUris: List<android.net.Uri> = emptyList()
     private var analysis: HistoricalRideAnalysis? = null
     private val manualPoints = mutableListOf<ManualPoint>()
     private var nextPointOrder = 0
@@ -77,6 +78,14 @@ class HistoricalRideActivity : Activity() {
             Toast.makeText(this, "주행 기록 중에는 과거 학습 데이터를 가져올 수 없습니다.", Toast.LENGTH_LONG).show()
         }
         renderStoredRides()
+        if (!logManager.isActive()) {
+            val auto = intent.getStringExtra(EXTRA_AUTO_PICK_TYPE)
+            val type = runCatching { HistoricalSourceType.valueOf(auto.orEmpty()) }.getOrNull()
+            if (type != null) {
+                pendingType = type
+                window.decorView.post { pickFile(type) }
+            }
+        }
     }
 
     override fun onResume() {
@@ -88,8 +97,18 @@ class HistoricalRideActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQ_PICK_HISTORY || resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        analyzeUri(uri)
+        val uris = mutableListOf<android.net.Uri>()
+        data?.clipData?.let { clip ->
+            for (i in 0 until clip.itemCount) uris += clip.getItemAt(i).uri
+        }
+        data?.data?.let { if (it !in uris) uris += it }
+        if (uris.isEmpty()) return
+        uris.forEach { uri ->
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        analyzeUris(uris)
     }
 
     private fun pickFile(type: HistoricalSourceType) {
@@ -101,39 +120,63 @@ class HistoricalRideActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             this.type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, type == HistoricalSourceType.FIT)
         }
         startActivityForResult(intent, REQ_PICK_HISTORY)
     }
 
-    private fun analyzeUri(uri: android.net.Uri) {
-        pendingUri = uri
+    private fun analyzeUris(uris: List<android.net.Uri>) {
+        pendingUris = uris.distinct()
         panelAnalysis.visibility = View.VISIBLE
         panelBattery.visibility = View.GONE
-        tvAnalysis.text = "${pendingType.label} 파일 분석 중…"
-        analysis = null
-        manualPoints.clear()
-        renderManualPoints()
         btnTrain.isEnabled = false
+        tvAnalysis.text = if (pendingType == HistoricalSourceType.FIT && pendingUris.size > 1) {
+            "FIT ${pendingUris.size}개를 시간·위치 순서로 검사하고 하나의 라이딩 세션으로 결합하는 중…"
+        } else "파일 분석 중…"
 
         Thread {
-            val result = runCatching { HistoricalRideImporter.analyze(this, uri, pendingType) }
+            val result = runCatching {
+                if (pendingType == HistoricalSourceType.FIT && pendingUris.size > 1) {
+                    HistoricalRideImporter.analyzeMultipleFit(this, pendingUris)
+                } else {
+                    HistoricalRideImporter.analyze(this, pendingUris.first(), pendingType)
+                }
+            }
             runOnUiThread {
-                result.onSuccess { parsed ->
-                    analysis = parsed
-                    tvAnalysis.text = parsed.summaryText()
-                    panelBattery.visibility = View.VISIBLE
+                result.onSuccess { a ->
+                    analysis = a
+                    // importer가 시간순으로 정렬한 실제 원본 URI 순서를 사용한다.
+                    val orderedUris = a.sourceParts.mapNotNull { it.uri }
+                    if (orderedUris.isNotEmpty()) pendingUris = orderedUris
+                    manualPoints.clear()
+                    nextPointOrder = 0
                     etStart.setText("100")
-                    etEnd.setText("")
-                    etUsed.setText("")
-                    val duplicate = rideStore.findByHash(parsed.fileHash)
+                    etEnd.text.clear()
+                    etUsed.text.clear()
+                    panelBattery.visibility = View.VISIBLE
                     btnTrain.isEnabled = true
-                    if (duplicate != null) {
-                        tvAnalysis.append("\n\nℹ 이전 분석/학습 기록이 있습니다. 다시 학습하면 기존 값을 새 분석값으로 교체합니다.")
+                    tvAnalysis.text = buildString {
+                        append(a.summaryText())
+                        append("\n데이터 품질 ${a.dataQualityScore}%")
+                        if (a.sourceParts.size > 1) {
+                            append("\n\n결합 순서")
+                            a.sourceParts.forEachIndexed { index, part ->
+                                append("\n${index + 1}. ${part.displayName} · ${String.format(Locale.US, "%.2f", part.distanceKm)} km")
+                            }
+                            append("\n※ 파일 사이 휴식/전원 OFF 시간은 이동시간과 모터 에너지에 포함하지 않습니다.")
+                        }
+                        if (rideStore.findByHash(a.fileHash) != null) {
+                            append("\n\nℹ 같은 세션의 이전 학습 기록이 있습니다. 다시 학습하면 새 분석값으로 교체합니다.")
+                        }
                     }
+                    renderManualPoints()
                 }.onFailure { e ->
+                    analysis = null
+                    pendingUris = emptyList()
+                    tvAnalysis.text = "분석 실패: ${e.message ?: e.javaClass.simpleName}"
                     panelBattery.visibility = View.GONE
-                    tvAnalysis.text = "분석 실패 · ${e.message ?: "파일 형식을 확인해 주세요."}"
-                    Toast.makeText(this, "파일 분석에 실패했습니다.", Toast.LENGTH_LONG).show()
+                    btnTrain.isEnabled = false
                 }
             }
         }.start()
@@ -266,7 +309,7 @@ class HistoricalRideActivity : Activity() {
         }
         orderedEntries += ActualBatteryEntry(endPct, a.distanceKm, timelineTime(a.distanceKm, sortedManual.size + 1), ActualEntryKind.RIDING)
 
-        val sessionId = "history_v2_${a.fileHash}"
+        val sessionId = "history_v3_${a.fileHash}"
         val modeled = learningStore.baseConsumption(a.distanceKm, a.ascentM)
         val actualUsed = orderedEntries.zipWithNext().sumOf { (x, y) ->
             if (y.routeKm > x.routeKm + 0.05) (x.percent - y.percent).coerceAtLeast(0.0) else 0.0
@@ -288,14 +331,19 @@ class HistoricalRideActivity : Activity() {
                     learningStore.removeSession(old.id)
                     rideStore.remove(old.id)
                 }
-                // 같은 v2 세션이 남아 있는 경우도 안전하게 제거한다.
+                // 같은 v3 세션이 남아 있는 경우도 안전하게 제거한다.
                 learningStore.removeSession(sessionId)
-                val sourceUri = pendingUri
+                val sourceUris = pendingUris
                 val stored = try {
-                    if (sourceUri != null) dataStore.save(sourceUri, a, orderedEntries) else null
+                    if (sourceUris.isNotEmpty()) dataStore.save(sourceUris, a, orderedEntries) else null
                 } catch (e: Exception) {
                     Toast.makeText(this, "원본/시계열 저장 실패: ${e.message ?: "저장소 오류"}", Toast.LENGTH_LONG).show()
-                    null
+                    return@setPositiveButton
+                }
+                val expectedOriginals = a.sourceParts.size.coerceAtLeast(1)
+                if (stored == null || stored.originals.size != expectedOriginals) {
+                    Toast.makeText(this, "원본 FIT/GPX를 모두 보존하지 못해 학습을 취소했습니다. 파일 접근 권한을 확인해 주세요.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
                 }
                 val count = learningStore.trainHistoricalRide(
                     sessionId = sessionId,
@@ -326,7 +374,9 @@ class HistoricalRideActivity : Activity() {
                         sampleCount = count,
                         telemetryPointCount = a.telemetry.size,
                         dataQualityScore = a.dataQualityScore,
-                        originalStored = stored?.original?.exists() == true
+                        originalStored = stored?.originals?.size == a.sourceParts.size.coerceAtLeast(1),
+                        fileCount = a.sourceParts.size.coerceAtLeast(1),
+                        gapCount = a.gaps.size
                     )
                 )
                 Toast.makeText(this, "과거 라이딩을 ${count}개 학습 샘플로 반영했습니다.", Toast.LENGTH_LONG).show()
@@ -361,7 +411,7 @@ class HistoricalRideActivity : Activity() {
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 14f
                 setTypeface(typeface, Typeface.BOLD)
-                text = "${record.sourceType.label} · ${record.fileName}"
+                text = if (record.fileCount > 1) "${record.sourceType.label} ${record.fileCount}개 · ${record.fileName}" else "${record.sourceType.label} · ${record.fileName}"
             }
             val details = TextView(this).apply {
                 setTextColor(getColor(R.color.text_secondary))
@@ -376,6 +426,7 @@ class HistoricalRideActivity : Activity() {
                     record.avgSpeedKph?.let { append(" · 평속 ${String.format(Locale.US, "%.1f", it)}km/h") }
                     append("\n배터리 ${formatPct(record.usedBatteryPct)}% 사용 · 학습 ${record.sampleCount}개 · 품질 ${record.dataQualityScore}%")
                     if (record.telemetryPointCount > 0) append(" · 시계열 ${record.telemetryPointCount}점")
+                    if (record.gapCount > 0) append(" · 휴식/전원OFF ${record.gapCount}회")
                     append(" · ${dateFormat.format(Date(record.importedAtMs))}")
                 }
             }

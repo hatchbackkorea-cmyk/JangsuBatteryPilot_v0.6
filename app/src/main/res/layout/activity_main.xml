@@ -11,7 +11,7 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- 0. 지도 / 코스 -->
+        <!-- 0. 코스 / GPX -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -26,16 +26,50 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="지도 / 코스"
+                    android:text="코스 / GPX"
                     android:textColor="@color/text_primary"
                     android:textSize="25sp"
                     android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/tvCourseQuickSelect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/panel_accent_bg"
+                    android:padding="14dp"
+                    android:text="현재 코스 선택 ▼"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+                    <Button
+                        android:id="@+id/btnCourseImportQuick"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:text="+ GPX 불러오기"
+                        android:textStyle="bold" />
+                    <Button
+                        android:id="@+id/btnCourseMenu"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="7dp"
+                        android:layout_weight="1"
+                        android:text="충전 / 코스 관리"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
                     android:id="@+id/tvCourseStatus"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
+                    android:layout_marginTop="7dp"
                     android:text="GPS / 코스 상태"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
@@ -43,14 +77,14 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     android:background="@drawable/panel_bg"
                     android:orientation="vertical"
                     android:padding="12dp">
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="코스 고도 프로필"
+                        android:text="선택 코스 고도 프로필"
                         android:textColor="@color/text_primary"
                         android:textSize="17sp"
                         android:textStyle="bold" />
@@ -68,14 +102,6 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="13sp" />
                 </LinearLayout>
-
-                <Button
-                    android:id="@+id/btnCourseMenu"
-                    android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:layout_marginTop="12dp"
-                    android:text="코스 / 충전 계획 관리"
-                    android:textStyle="bold" />
             </LinearLayout>
         </ScrollView>
 
@@ -89,10 +115,10 @@
                 android:layout_height="match_parent"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
-                android:paddingLeft="12dp"
-                android:paddingTop="8dp"
-                android:paddingRight="12dp"
-                android:paddingBottom="8dp">
+                android:paddingLeft="10dp"
+                android:paddingTop="7dp"
+                android:paddingRight="10dp"
+                android:paddingBottom="7dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -106,13 +132,13 @@
                         android:layout_weight="1"
                         android:text="주행 대기"
                         android:textColor="@color/text_secondary"
-                        android:textSize="12sp"
+                        android:textSize="13sp"
                         android:textStyle="bold" />
                     <TextView
                         android:id="@+id/tvVersion"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="v0.11.0"
+                        android:text="v0.11.2"
                         android:textColor="@color/text_secondary"
                         android:textSize="9sp" />
                 </LinearLayout>
@@ -123,7 +149,7 @@
                     android:layout_marginTop="5dp"
                     android:background="@drawable/panel_hero_bg"
                     android:orientation="vertical"
-                    android:padding="12dp">
+                    android:padding="11dp">
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -139,7 +165,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="현재 위치"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="11sp" />
+                                android:textSize="12sp" />
                             <TextView
                                 android:id="@+id/tvCurrentKm"
                                 android:layout_width="match_parent"
@@ -147,7 +173,7 @@
                                 android:includeFontPadding="false"
                                 android:text="0.0 km"
                                 android:textColor="@color/text_primary"
-                                android:textSize="31sp"
+                                android:textSize="34sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
                         <LinearLayout
@@ -161,7 +187,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="예측 배터리"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="11sp" />
+                                android:textSize="12sp" />
                             <TextView
                                 android:id="@+id/tvBattery"
                                 android:layout_width="match_parent"
@@ -170,7 +196,7 @@
                                 android:includeFontPadding="false"
                                 android:text="100%"
                                 android:textColor="@color/good"
-                                android:textSize="48sp"
+                                android:textSize="52sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
                     </LinearLayout>
@@ -185,148 +211,144 @@
                         android:id="@+id/tvBatteryRange"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
+                        android:layout_marginTop="2dp"
                         android:text="예상 범위"
                         android:textColor="@color/text_secondary"
-                        android:textSize="11sp" />
+                        android:textSize="12sp" />
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
+                        android:layout_marginTop="4dp"
                         android:orientation="horizontal">
                         <TextView
                             android:id="@+id/tvSpeed"
                             android:layout_width="0dp"
-                            android:layout_height="32dp"
+                            android:layout_height="34dp"
                             android:layout_weight="1"
                             android:background="@drawable/pill_bg"
                             android:gravity="center"
                             android:text="속도 -"
                             android:textColor="@color/text_primary"
-                            android:textSize="12sp" />
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
                         <TextView
                             android:id="@+id/tvFinishEta"
                             android:layout_width="0dp"
-                            android:layout_height="32dp"
+                            android:layout_height="34dp"
                             android:layout_marginStart="6dp"
                             android:layout_weight="1"
                             android:background="@drawable/pill_bg"
                             android:gravity="center"
                             android:text="종점"
                             android:textColor="@color/text_primary"
-                            android:textSize="11sp" />
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 배터리 판단: 큰 상태 + 오른쪽 3단 -->
+                <!-- 2열 1행: 배터리 판단 + 실제 배터리 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:background="@drawable/panel_bg"
-                    android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="11dp">
-                    <TextView
-                        android:id="@+id/tvRiskStatus"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="0.9"
-                        android:text="여유"
-                        android:textColor="@color/good"
-                        android:textSize="34sp"
-                        android:textStyle="bold" />
-                    <TextView
-                        android:id="@+id/tvRiskDetail"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1.1"
-                        android:lineSpacingExtra="2dp"
-                        android:text="종점 20%\n목표 15%\n여유 5%"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <!-- 실제 배터리: 설명문 삭제, 값 + 마이크 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:background="@drawable/panel_bg"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingLeft="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingRight="8dp"
-                    android:paddingBottom="8dp">
+                    android:baselineAligned="false">
                     <LinearLayout
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="match_parent"
                         android:layout_weight="1"
-                        android:orientation="vertical">
+                        android:background="@drawable/panel_bg"
+                        android:gravity="center_vertical"
+                        android:minHeight="122dp"
+                        android:orientation="vertical"
+                        android:padding="10dp">
+                        <TextView
+                            android:id="@+id/tvRiskStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="여유"
+                            android:textColor="@color/good"
+                            android:textSize="32sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/tvRiskDetail"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:lineSpacingExtra="2dp"
+                            android:text="종점 20%\n목표 15%\n여유 5%"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/panel_bg"
+                        android:gravity="center_vertical"
+                        android:minHeight="122dp"
+                        android:orientation="vertical"
+                        android:padding="10dp">
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="실제 배터리"
                             android:textColor="@color/text_secondary"
-                            android:textSize="11sp" />
-                        <TextView
-                            android:id="@+id/tvActualBattery"
+                            android:textSize="12sp" />
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:includeFontPadding="false"
-                            android:text="—"
-                            android:textColor="@color/text_primary"
-                            android:textSize="37sp"
-                            android:textStyle="bold" />
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+                            <TextView
+                                android:id="@+id/tvActualBattery"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:includeFontPadding="false"
+                                android:text="—"
+                                android:textColor="@color/text_primary"
+                                android:textSize="36sp"
+                                android:textStyle="bold" />
+                            <ImageButton
+                                android:id="@+id/btnMicBattery"
+                                android:layout_width="54dp"
+                                android:layout_height="54dp"
+                                android:background="@drawable/mic_button_bg"
+                                android:contentDescription="배터리 음성 입력"
+                                android:padding="14dp"
+                                android:scaleType="fitCenter"
+                                android:src="@drawable/ic_mic" />
+                        </LinearLayout>
+                        <TextView android:id="@+id/tvActualDetail" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+                        <TextView android:id="@+id/tvMicHint" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+                        <Button android:id="@+id/btnUndoActual" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
                     </LinearLayout>
-                    <ImageButton
-                        android:id="@+id/btnMicBattery"
-                        android:layout_width="64dp"
-                        android:layout_height="64dp"
-                        android:background="@drawable/mic_button_bg"
-                        android:contentDescription="배터리 음성 입력"
-                        android:padding="16dp"
-                        android:scaleType="fitCenter"
-                        android:src="@drawable/ic_mic" />
-                    <TextView
-                        android:id="@+id/tvActualDetail"
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:visibility="gone" />
-                    <TextView
-                        android:id="@+id/tvMicHint"
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:visibility="gone" />
-                    <Button
-                        android:id="@+id/btnUndoActual"
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:visibility="gone" />
                 </LinearLayout>
 
-                <!-- 다음 지점: 큰 지점명 + 오른쪽 3단 -->
+                <!-- 2열 2행: 다음 지점 + 다음 업힐 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:background="@drawable/panel_bg"
-                    android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="11dp">
+                    android:baselineAligned="false">
                     <LinearLayout
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="0.9"
-                        android:orientation="vertical">
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:background="@drawable/panel_bg"
+                        android:minHeight="124dp"
+                        android:orientation="vertical"
+                        android:padding="10dp">
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="다음 지점"
                             android:textColor="@color/text_secondary"
-                            android:textSize="11sp" />
+                            android:textSize="12sp" />
                         <TextView
                             android:id="@+id/tvNextCheckpoint"
                             android:layout_width="match_parent"
@@ -335,54 +357,48 @@
                             android:maxLines="2"
                             android:text="종점"
                             android:textColor="@color/text_primary"
-                            android:textSize="24sp"
+                            android:textSize="23sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/tvNextCheckpointDetail"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:lineSpacingExtra="2dp"
+                            android:text="9.2 km 남음\n예상 20%\nETA --:--"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+                        <TextView android:id="@+id/tvEta" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+                    </LinearLayout>
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/panel_bg"
+                        android:minHeight="124dp"
+                        android:orientation="vertical"
+                        android:padding="10dp">
+                        <TextView
+                            android:id="@+id/tvNextClimb"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="다음 업힐"
+                            android:textColor="@color/text_primary"
+                            android:textSize="22sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/tvNextClimbDetail"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="5dp"
+                            android:lineSpacingExtra="2dp"
+                            android:text="1.4 km 후\n길이 2.8 km\n평균 7.5%"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
                             android:textStyle="bold" />
                     </LinearLayout>
-                    <TextView
-                        android:id="@+id/tvNextCheckpointDetail"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1.1"
-                        android:lineSpacingExtra="2dp"
-                        android:text="9.2 km 남음\n종점 예상 20%\nETA --:--"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
-                    <TextView
-                        android:id="@+id/tvEta"
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:visibility="gone" />
-                </LinearLayout>
-
-                <!-- 다음 업힐: 큰 라벨 + 오른쪽 3단 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:background="@drawable/panel_bg"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:padding="11dp">
-                    <TextView
-                        android:id="@+id/tvNextClimb"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="0.9"
-                        android:text="다음 업힐"
-                        android:textColor="@color/text_primary"
-                        android:textSize="23sp"
-                        android:textStyle="bold" />
-                    <TextView
-                        android:id="@+id/tvNextClimbDetail"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1.1"
-                        android:lineSpacingExtra="2dp"
-                        android:text="1.4 km 후\n길이 2.8 km\n평균 7.5%"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -393,47 +409,49 @@
                     <TextView
                         android:id="@+id/tvElevationAhead"
                         android:layout_width="0dp"
-                        android:layout_height="31dp"
+                        android:layout_height="34dp"
                         android:layout_weight="1"
                         android:background="@drawable/pill_bg"
                         android:gravity="center"
                         android:text="10km 고도"
                         android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
                     <TextView
                         android:id="@+id/tvTenKmBattery"
                         android:layout_width="0dp"
-                        android:layout_height="31dp"
+                        android:layout_height="34dp"
                         android:layout_marginStart="6dp"
                         android:layout_weight="1"
                         android:background="@drawable/pill_bg"
                         android:gravity="center"
                         android:text="10km 후"
                         android:textColor="@color/text_primary"
-                        android:textSize="11sp" />
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <TextView
                     android:id="@+id/tvAssist"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
+                    android:layout_marginTop="4dp"
                     android:gravity="center"
                     android:maxLines="2"
                     android:text="페이스 안내"
                     android:textColor="@color/good"
-                    android:textSize="11sp"
+                    android:textSize="13sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/tvChargeStatus"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
+                    android:layout_marginTop="2dp"
                     android:gravity="center"
                     android:text=""
                     android:textColor="@color/accent"
-                    android:textSize="12sp"
+                    android:textSize="13sp"
                     android:textStyle="bold" />
 
                 <LinearLayout
@@ -460,14 +478,14 @@
                 <Button
                     android:id="@+id/btnSpeakNow"
                     android:layout_width="match_parent"
-                    android:layout_height="42dp"
-                    android:layout_marginTop="5dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="4dp"
                     android:text="현재 상태 음성 안내"
                     android:textSize="12sp" />
             </LinearLayout>
         </ScrollView>
 
-        <!-- 2. 설정 / 정보 -->
+        <!-- 2. 설정: 별도 메뉴 없이 직접 조작 -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -477,39 +495,187 @@
                 android:layout_height="match_parent"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
-                android:padding="18dp">
+                android:padding="16dp">
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="설정 / 정보"
+                    android:text="설정"
+                    android:textColor="@color/text_primary"
+                    android:textSize="26sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/panel_bg"
+                    android:orientation="vertical"
+                    android:padding="13dp">
+                    <Switch
+                        android:id="@+id/switchPageVoice"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:text="음성 안내"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+                    <Switch
+                        android:id="@+id/switchPageKeepScreen"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:text="주행 중 화면 켜짐 유지"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+                    <TextView
+                        android:id="@+id/tvPageDistanceInterval"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="7dp"
+                        android:text="거리 기준 안내"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                    <SeekBar
+                        android:id="@+id/seekPageDistanceInterval"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tvPageTimeInterval"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="시간 기준 안내"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                    <SeekBar
+                        android:id="@+id/seekPageTimeInterval"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tvPageFinishTarget"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="종점 목표 잔량"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                    <SeekBar
+                        android:id="@+id/seekPageFinishTarget"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/panel_bg"
+                    android:orientation="vertical"
+                    android:padding="13dp">
+                    <Switch
+                        android:id="@+id/switchPageTestMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:text="테스트 모드"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+                    <TextView
+                        android:id="@+id/tvPageTestKm"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="테스트 위치"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                    <SeekBar
+                        android:id="@+id/seekPageTestKm"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tvPageSettingsHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="선택한 GPX 코스를 기준으로 테스트 위치가 적용됩니다."
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+                <Button
+                    android:id="@+id/btnPageResetProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="8dp"
+                    android:text="현재 코스 진행 위치 초기화" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- 3. 학습: 설정과 분리된 전용 페이지 -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:padding="16dp">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="배터리 학습"
                     android:textColor="@color/text_primary"
                     android:textSize="26sp"
                     android:textStyle="bold" />
                 <TextView
+                    android:id="@+id/tvLearningPageSummary"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="설정과 과거 FIT/GPX 학습은 여기에서 관리합니다."
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
-                <Button
-                    android:id="@+id/btnSettingsMenu"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/panel_bg"
+                    android:padding="14dp"
+                    android:text="학습 데이터 없음"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp" />
+                <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="54dp"
-                    android:layout_marginTop="18dp"
-                    android:text="앱 설정 열기"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="9dp"
+                    android:orientation="horizontal">
+                    <Button
+                        android:id="@+id/btnLearningFit"
+                        android:layout_width="0dp"
+                        android:layout_height="52dp"
+                        android:layout_weight="1"
+                        android:text="FIT 세션 학습"
+                        android:textStyle="bold" />
+                    <Button
+                        android:id="@+id/btnLearningGpx"
+                        android:layout_width="0dp"
+                        android:layout_height="52dp"
+                        android:layout_marginStart="7dp"
+                        android:layout_weight="1"
+                        android:text="GPX 학습"
+                        android:textStyle="bold" />
+                </LinearLayout>
+                <Button
+                    android:id="@+id/btnLearningManage"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="7dp"
+                    android:text="학습 기록 / 체크포인트 관리"
                     android:textStyle="bold" />
                 <Button
-                    android:id="@+id/btnOpenHistorical"
+                    android:id="@+id/btnLearningClear"
                     android:layout_width="match_parent"
-                    android:layout_height="54dp"
-                    android:layout_marginTop="8dp"
-                    android:text="과거 FIT / GPX 학습"
-                    android:textStyle="bold" />
+                    android:layout_height="46dp"
+                    android:layout_marginTop="7dp"
+                    android:text="개인 학습 데이터 초기화" />
             </LinearLayout>
         </ScrollView>
 
-        <!-- 3. 피드백: 지도+그래프 상세 UI는 후속, v0.11.0은 데이터 기반부터 보존 -->
+        <!-- 4. 피드백 -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -533,7 +699,7 @@
                     android:layout_marginTop="10dp"
                     android:background="@drawable/panel_bg"
                     android:padding="14dp"
-                    android:text="v0.11.0은 FIT 원본과 거리·GPS·고도·속도·케이던스·라이더 파워·모터 파워 시계열을 보존합니다.\n\n다음 단계에서 거리/고도 그래프 슬라이드 ↔ 지도 위치 동기화, 배터리 소모 경로 색상, 무동력 다운힐 구분을 이 데이터에 연결합니다."
+                    android:text="FIT 원본과 거리·GPS·고도·속도·케이던스·라이더 파워·모터 파워 시계열을 보존합니다.\n\n향후 거리/고도 그래프 ↔ 지도 위치 동기화, 배터리 소모별 경로 색상, 무동력 다운힐 구분을 이 데이터에 연결합니다."
                     android:textColor="@color/text_primary"
                     android:textSize="14sp" />
                 <Button
@@ -552,7 +718,7 @@
         android:layout_width="match_parent"
         android:layout_height="36dp"
         android:gravity="center"
-        android:text="○  ●  ○  ○   주행"
+        android:text="○  ●  ○  ○  ○   주행"
         android:textColor="@color/text_secondary"
         android:textSize="12sp"
         android:textStyle="bold" />

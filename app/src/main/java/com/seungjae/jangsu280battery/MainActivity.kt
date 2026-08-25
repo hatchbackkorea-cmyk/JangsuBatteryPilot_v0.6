@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.provider.OpenableColumns
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -21,6 +22,8 @@ import android.widget.ImageButton
 import android.widget.EditText
 import android.text.InputType
 import android.widget.ProgressBar
+import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.ViewFlipper
@@ -34,6 +37,7 @@ class MainActivity : Activity() {
         private const val REQ_NOTIFICATIONS = 1002
         private const val REQ_MICROPHONE = 1003
         private const val REQ_SPEECH = 1004
+        private const val REQ_GPX_IMPORT = 1005
     }
 
     private lateinit var courseRepo: CourseRepository
@@ -48,7 +52,8 @@ class MainActivity : Activity() {
     private lateinit var plan: AdaptiveBatteryPlan
 
     private lateinit var btnCourseMenu: Button
-    private lateinit var btnSettingsMenu: Button
+    private lateinit var btnCourseImportQuick: Button
+    private lateinit var tvCourseQuickSelect: TextView
     private lateinit var btnRideToggle: Button
     private lateinit var btnChargeToggle: Button
     private lateinit var tvGpsStatus: TextView
@@ -80,7 +85,24 @@ class MainActivity : Activity() {
     private lateinit var btnSpeakNow: Button
     private lateinit var btnRideReport: Button
     private lateinit var tvChargeStatus: TextView
-    private lateinit var btnOpenHistorical: Button
+    private lateinit var switchPageVoice: Switch
+    private lateinit var switchPageKeepScreen: Switch
+    private lateinit var tvPageDistanceInterval: TextView
+    private lateinit var seekPageDistanceInterval: SeekBar
+    private lateinit var tvPageTimeInterval: TextView
+    private lateinit var seekPageTimeInterval: SeekBar
+    private lateinit var tvPageFinishTarget: TextView
+    private lateinit var seekPageFinishTarget: SeekBar
+    private lateinit var switchPageTestMode: Switch
+    private lateinit var tvPageTestKm: TextView
+    private lateinit var seekPageTestKm: SeekBar
+    private lateinit var tvPageSettingsHint: TextView
+    private lateinit var btnPageResetProgress: Button
+    private lateinit var tvLearningPageSummary: TextView
+    private lateinit var btnLearningFit: Button
+    private lateinit var btnLearningGpx: Button
+    private lateinit var btnLearningManage: Button
+    private lateinit var btnLearningClear: Button
     private lateinit var pagerFlipper: ViewFlipper
     private lateinit var tvPagerIndicator: TextView
     private lateinit var pagerGesture: GestureDetector
@@ -97,6 +119,7 @@ class MainActivity : Activity() {
     private var loadedCourseId: String? = null
     private var voiceInputStartedMs: Long = 0L
     private var voiceInputRouteKm: Double = 0.0
+    private var refreshingSettingsUi = false
 
     private val rideReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -134,26 +157,29 @@ class MainActivity : Activity() {
         applySettings()
 
         btnCourseMenu.setOnClickListener { startActivity(Intent(this, CourseActivity::class.java)) }
-        btnSettingsMenu.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        btnCourseImportQuick.setOnClickListener { importGpxQuick() }
+        tvCourseQuickSelect.setOnClickListener { showCoursePickerQuick() }
         btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else startRide() }
         btnChargeToggle.setOnClickListener { toggleCharging() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnMicBattery.setOnClickListener { requestVoiceCommand() }
         btnUndoActual.setOnClickListener { undoActual() }
         btnRideReport.setOnClickListener { showRideReport() }
-        btnOpenHistorical.setOnClickListener {
-            if (logManager.isActive()) Toast.makeText(this, "주행 종료 후 과거 FIT/GPX 학습을 관리해 주세요.", Toast.LENGTH_LONG).show()
-            else startActivity(Intent(this, HistoricalRideActivity::class.java))
-        }
+        setupInlineSettings()
+        setupLearningPage()
         setupSwipePager()
 
+        renderCourseQuick()
+        refreshInlineSettings()
+        refreshLearningPage()
         renderRideState()
         renderCurrentMode()
     }
 
     private fun bindViews() {
         btnCourseMenu = findViewById(R.id.btnCourseMenu)
-        btnSettingsMenu = findViewById(R.id.btnSettingsMenu)
+        btnCourseImportQuick = findViewById(R.id.btnCourseImportQuick)
+        tvCourseQuickSelect = findViewById(R.id.tvCourseQuickSelect)
         btnRideToggle = findViewById(R.id.btnRideToggle)
         btnChargeToggle = findViewById(R.id.btnChargeToggle)
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
@@ -185,7 +211,24 @@ class MainActivity : Activity() {
         btnSpeakNow = findViewById(R.id.btnSpeakNow)
         btnRideReport = findViewById(R.id.btnRideReport)
         tvChargeStatus = findViewById(R.id.tvChargeStatus)
-        btnOpenHistorical = findViewById(R.id.btnOpenHistorical)
+        switchPageVoice = findViewById(R.id.switchPageVoice)
+        switchPageKeepScreen = findViewById(R.id.switchPageKeepScreen)
+        tvPageDistanceInterval = findViewById(R.id.tvPageDistanceInterval)
+        seekPageDistanceInterval = findViewById(R.id.seekPageDistanceInterval)
+        tvPageTimeInterval = findViewById(R.id.tvPageTimeInterval)
+        seekPageTimeInterval = findViewById(R.id.seekPageTimeInterval)
+        tvPageFinishTarget = findViewById(R.id.tvPageFinishTarget)
+        seekPageFinishTarget = findViewById(R.id.seekPageFinishTarget)
+        switchPageTestMode = findViewById(R.id.switchPageTestMode)
+        tvPageTestKm = findViewById(R.id.tvPageTestKm)
+        seekPageTestKm = findViewById(R.id.seekPageTestKm)
+        tvPageSettingsHint = findViewById(R.id.tvPageSettingsHint)
+        btnPageResetProgress = findViewById(R.id.btnPageResetProgress)
+        tvLearningPageSummary = findViewById(R.id.tvLearningPageSummary)
+        btnLearningFit = findViewById(R.id.btnLearningFit)
+        btnLearningGpx = findViewById(R.id.btnLearningGpx)
+        btnLearningManage = findViewById(R.id.btnLearningManage)
+        btnLearningClear = findViewById(R.id.btnLearningClear)
         pagerFlipper = findViewById(R.id.pagerFlipper)
         tvPagerIndicator = findViewById(R.id.tvPagerIndicator)
     }
@@ -334,6 +377,283 @@ class MainActivity : Activity() {
         if (!active) tvGpsStatus.text = if (testMode) "테스트 모드" else "주행 대기"
     }
 
+
+    private fun renderCourseQuick() {
+        if (!::courseMeta.isInitialized) return
+        val elev = if (courseMeta.hasElevation) {
+            "▲${courseMeta.totalAscentM.roundToInt()}m · ▼${courseMeta.totalDescentM.roundToInt()}m"
+        } else "고도 데이터 없음"
+        val learned = learningStore.samples().size
+        val source = if (courseMeta.builtIn) "기본 예비 코스" else "가져온 GPX"
+        tvCourseQuickSelect.text = "${courseMeta.name}  ▼\n${RideFormatter.one(courseMeta.totalKm)} km · $elev\n$source · 개인 학습 ${learned}개 구간 적용"
+        val riding = logManager.isActive()
+        tvCourseQuickSelect.isEnabled = !riding
+        btnCourseImportQuick.isEnabled = !riding
+    }
+
+    private fun showCoursePickerQuick() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 중에는 코스를 변경할 수 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val courses = courseRepo.listCourses()
+        if (courses.isEmpty()) return
+        val activeId = courseRepo.activeMeta().id
+        val labels = courses.map { meta ->
+            val selected = if (meta.id == activeId) "✓ " else ""
+            val source = if (meta.builtIn) " · 기본" else " · GPX"
+            val elev = if (meta.hasElevation) " · ▲${meta.totalAscentM.roundToInt()}m" else ""
+            "$selected${meta.name}$source\n${RideFormatter.one(meta.totalKm)} km$elev"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("주행 코스 선택")
+            .setMessage("선택한 GPX에 현재 개인 학습 데이터를 적용해 배터리 예측과 어시스트를 다시 계산합니다.")
+            .setItems(labels) { _, which ->
+                val chosen = courses[which]
+                if (chosen.id != activeId) selectCourseQuick(chosen)
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun selectCourseQuick(meta: CourseMeta) {
+        if (logManager.isActive()) return
+        courseRepo.setActive(meta.id)
+        actualStore.clear()
+        chargingSessionStore.clear()
+        if (!loadSelectedCourse(resetProgress = true)) return
+        applySettings()
+        renderCourseQuick()
+        refreshInlineSettings()
+        renderCurrentMode()
+        val learned = learningStore.samples().size
+        Toast.makeText(this, "${meta.name} 선택 · 개인 학습 ${learned}개 구간 적용", Toast.LENGTH_LONG).show()
+    }
+
+    private fun importGpxQuick() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 종료 후 GPX를 변경해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gpx+xml", "application/xml", "text/xml", "application/octet-stream"))
+        }
+        try {
+            startActivityForResult(intent, REQ_GPX_IMPORT)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "파일 선택 앱을 찾지 못했습니다.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleImportedGpx(uri: android.net.Uri) {
+        if (logManager.isActive()) return
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            val meta = courseRepo.importGpx(uri, displayName(uri))
+            actualStore.clear()
+            chargingSessionStore.clear()
+            if (!loadSelectedCourse(resetProgress = true)) return
+            applySettings()
+            renderCourseQuick()
+            refreshInlineSettings()
+            renderCurrentMode()
+            showPagerChild(0)
+            Toast.makeText(this, "GPX 선택 완료 · ${meta.name}\n개인 학습 데이터를 이 코스에 적용합니다.", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "GPX 가져오기 실패: ${e.message ?: "파일을 확인해 주세요."}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun displayName(uri: android.net.Uri): String? {
+        return runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull()
+    }
+
+    private fun setupInlineSettings() {
+        seekPageDistanceInterval.max = 50
+        seekPageTimeInterval.max = 120
+        seekPageFinishTarget.max = 98
+
+        switchPageVoice.setOnCheckedChangeListener { _, checked ->
+            if (refreshingSettingsUi) return@setOnCheckedChangeListener
+            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_VOICE, checked).apply()
+            sendVoiceSettingsToService()
+        }
+        switchPageKeepScreen.setOnCheckedChangeListener { _, checked ->
+            if (refreshingSettingsUi) return@setOnCheckedChangeListener
+            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_KEEP_SCREEN_ON, checked).apply()
+            applyKeepScreenOn(checked)
+        }
+        seekPageDistanceInterval.setOnSeekBarChangeListener(simpleSeekListener { value ->
+            if (refreshingSettingsUi) return@simpleSeekListener
+            AppSettings.prefs(this).edit().putInt(AppSettings.KEY_ANNOUNCE_DISTANCE_KM, value).apply()
+            updateInlineSettingsLabels()
+            sendVoiceSettingsToService()
+        })
+        seekPageTimeInterval.setOnSeekBarChangeListener(simpleSeekListener { value ->
+            if (refreshingSettingsUi) return@simpleSeekListener
+            AppSettings.prefs(this).edit().putInt(AppSettings.KEY_ANNOUNCE_TIME_MIN, value).apply()
+            updateInlineSettingsLabels()
+            sendVoiceSettingsToService()
+        })
+        seekPageFinishTarget.setOnSeekBarChangeListener(simpleSeekListener { value ->
+            if (refreshingSettingsUi) return@simpleSeekListener
+            val pct = (value + 1).coerceIn(1, 99)
+            AppSettings.prefs(this).edit().putInt(AppSettings.KEY_FINISH_TARGET, pct).apply()
+            finishTargetPct = pct.toDouble()
+            updateInlineSettingsLabels()
+            if (::plan.isInitialized) renderAtKm(latestRouteKm, testMode)
+        })
+        switchPageTestMode.setOnCheckedChangeListener { _, checked ->
+            if (refreshingSettingsUi) return@setOnCheckedChangeListener
+            if (logManager.isActive()) {
+                refreshInlineSettings()
+                return@setOnCheckedChangeListener
+            }
+            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
+            testMode = checked
+            refreshInlineSettings()
+            renderCurrentMode()
+        }
+        seekPageTestKm.setOnSeekBarChangeListener(simpleSeekListener { value ->
+            if (refreshingSettingsUi || !switchPageTestMode.isChecked || !::course.isInitialized) return@simpleSeekListener
+            val km = (value / 10.0).coerceIn(0.0, course.totalKm)
+            AppSettings.prefs(this).edit().putFloat(AppSettings.KEY_TEST_KM, km.toFloat()).apply()
+            updateInlineSettingsLabels()
+            if (testMode) renderCurrentMode()
+        })
+        btnPageResetProgress.setOnClickListener { resetProgressQuick() }
+    }
+
+    private fun simpleSeekListener(onChanged: (Int) -> Unit) = object : SeekBar.OnSeekBarChangeListener {
+        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = onChanged(progress)
+        override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+        override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+    }
+
+    private fun refreshInlineSettings() {
+        if (!::course.isInitialized) return
+        refreshingSettingsUi = true
+        try {
+            switchPageVoice.isChecked = AppSettings.voiceEnabled(this)
+            switchPageKeepScreen.isChecked = AppSettings.keepScreenOn(this)
+            seekPageDistanceInterval.progress = AppSettings.distanceIntervalKm(this)
+            seekPageTimeInterval.progress = AppSettings.timeIntervalMin(this)
+            seekPageFinishTarget.progress = AppSettings.finishTarget(this).roundToInt().coerceIn(1, 99) - 1
+            switchPageTestMode.isChecked = AppSettings.testMode(this)
+            seekPageTestKm.max = (course.totalKm * 10.0).roundToInt().coerceAtLeast(1)
+            seekPageTestKm.progress = (AppSettings.testKm(this).coerceIn(0.0, course.totalKm) * 10.0).roundToInt()
+            switchPageTestMode.isEnabled = !logManager.isActive()
+            seekPageTestKm.isEnabled = switchPageTestMode.isChecked && !logManager.isActive()
+            btnPageResetProgress.isEnabled = !logManager.isActive()
+            tvPageSettingsHint.text = if (logManager.isActive()) {
+                "주행 중에는 테스트 모드를 변경할 수 없습니다. 음성 안내와 종점 목표는 즉시 반영됩니다."
+            } else {
+                "선택 코스 · ${courseMeta.name} · 테스트 위치와 모든 예측은 이 GPX 기준으로 계산됩니다."
+            }
+            updateInlineSettingsLabels()
+        } finally {
+            refreshingSettingsUi = false
+        }
+    }
+
+    private fun updateInlineSettingsLabels() {
+        val d = seekPageDistanceInterval.progress
+        tvPageDistanceInterval.text = if (d == 0) "거리 기준 안내 · 사용 안 함" else "거리 기준 안내 · ${d} km마다"
+        val t = seekPageTimeInterval.progress
+        tvPageTimeInterval.text = if (t == 0) "시간 기준 안내 · 사용 안 함" else "시간 기준 안내 · ${t}분마다"
+        tvPageFinishTarget.text = "종점 목표 잔량 ${seekPageFinishTarget.progress + 1}%"
+        val km = (seekPageTestKm.progress / 10.0).coerceIn(0.0, if (::course.isInitialized) course.totalKm else 0.0)
+        tvPageTestKm.text = if (::course.isInitialized) "테스트 위치 ${RideFormatter.one(km)} / ${RideFormatter.one(course.totalKm)} km" else "테스트 위치"
+    }
+
+
+    private fun resetProgressQuick() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 기록 중에는 진행 위치를 초기화할 수 없습니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("현재 코스 진행 위치 초기화")
+            .setMessage("${courseMeta.name}의 진행 위치와 실제 배터리 보정값을 0km 상태로 초기화할까요? 저장된 학습 데이터와 과거 주행 로그는 삭제하지 않습니다.")
+            .setPositiveButton("초기화") { _, _ ->
+                actualStore.clear()
+                chargingSessionStore.clear()
+                AppSettings.prefs(this).edit()
+                    .putFloat(AppSettings.KEY_LAST_KM, 0f)
+                    .putFloat(AppSettings.KEY_TEST_KM, 0f)
+                    .apply()
+                latestRouteKm = 0.0
+                refreshInlineSettings()
+                renderCurrentMode()
+                Toast.makeText(this, "진행 위치를 초기화했습니다.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun setupLearningPage() {
+        btnLearningFit.setOnClickListener { openHistoricalLearning(HistoricalSourceType.FIT) }
+        btnLearningGpx.setOnClickListener { openHistoricalLearning(HistoricalSourceType.GPX) }
+        btnLearningManage.setOnClickListener { openHistoricalLearning(null) }
+        btnLearningClear.setOnClickListener { confirmClearLearningQuick() }
+    }
+
+    private fun openHistoricalLearning(type: HistoricalSourceType?) {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 종료 후 과거 라이딩 학습을 관리해 주세요.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(this, HistoricalRideActivity::class.java)
+        type?.let { intent.putExtra(HistoricalRideActivity.EXTRA_AUTO_PICK_TYPE, it.name) }
+        startActivity(intent)
+    }
+
+    private fun refreshLearningPage() {
+        if (!::learningStore.isInitialized) return
+        val samples = learningStore.samples()
+        val rides = HistoricalRideStore(this).records()
+        tvLearningPageSummary.text = if (samples.isEmpty()) {
+            "학습 데이터 0개 · 중립 초기 모델 사용 중\n\nFIT/GPX를 학습하면 이후 선택하는 모든 GPX 코스의 거리·고도·지형을 개인 소비 특성으로 보정합니다."
+        } else {
+            "학습 라이딩 ${rides.size}개 · 학습 구간 ${samples.size}개\n${learningStore.summaryText()}\n\n현재 선택 코스: ${if (::courseMeta.isInitialized) courseMeta.name else "-"}"
+        }
+        val enabled = !logManager.isActive()
+        btnLearningFit.isEnabled = enabled
+        btnLearningGpx.isEnabled = enabled
+        btnLearningManage.isEnabled = enabled
+        btnLearningClear.isEnabled = enabled && samples.isNotEmpty()
+    }
+
+    private fun confirmClearLearningQuick() {
+        if (logManager.isActive()) return
+        AlertDialog.Builder(this)
+            .setTitle("개인 학습 데이터 초기화")
+            .setMessage("FIT/GPX와 실제 주행에서 만든 개인 배터리 학습 데이터를 모두 삭제할까요? 코스 GPX와 주행 로그는 삭제하지 않습니다.")
+            .setPositiveButton("학습 데이터 삭제") { _, _ ->
+                learningStore.clear()
+                HistoricalRideStore(this).clear()
+                HistoricalRideDataStore(this).clearAll()
+                if (::course.isInitialized) {
+                    basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
+                    plan = AdaptiveBatteryPlan(basePlan, actualStore)
+                    renderAtKm(latestRouteKm, testMode)
+                }
+                refreshLearningPage()
+                renderCourseQuick()
+                Toast.makeText(this, "개인 학습 데이터를 초기화했습니다.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
     private fun requestVoiceCommand() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             speechPendingAfterPermission = true
@@ -364,6 +684,10 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android, retained for minSdk 26 compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_GPX_IMPORT) {
+            if (resultCode == RESULT_OK) data?.data?.let { handleImportedGpx(it) }
+            return
+        }
         if (requestCode != REQ_SPEECH) return
         if (resultCode != RESULT_OK) {
             voiceInputStartedMs = 0L
@@ -550,7 +874,7 @@ class MainActivity : Activity() {
                 val dx = e2.x - start.x
                 val dy = e2.y - start.y
                 if (abs(dx) < 90f || abs(dx) < abs(dy) * 1.25f || abs(velocityX) < 250f) return false
-                if (dx < 0) showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(3))
+                if (dx < 0) showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(4))
                 else showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
                 return true
             }
@@ -558,20 +882,31 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (::pagerGesture.isInitialized) pagerGesture.onTouchEvent(ev)
+        val settingsSliderTouch = ::pagerFlipper.isInitialized && pagerFlipper.displayedChild == 2 && listOf(
+            seekPageDistanceInterval, seekPageTimeInterval, seekPageFinishTarget, seekPageTestKm
+        ).any { isTouchInside(ev, it) }
+        if (::pagerGesture.isInitialized && !settingsSliderTouch) pagerGesture.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
     }
 
+    private fun isTouchInside(ev: MotionEvent, view: View): Boolean {
+        if (!view.isShown) return false
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        return ev.rawX >= loc[0] && ev.rawX <= loc[0] + view.width &&
+            ev.rawY >= loc[1] && ev.rawY <= loc[1] + view.height
+    }
+
     private fun showPagerChild(index: Int) {
-        val target = index.coerceIn(0, 3)
+        val target = index.coerceIn(0, 4)
         if (target == pagerFlipper.displayedChild) return
         pagerFlipper.displayedChild = target
         updatePagerIndicator()
     }
 
     private fun updatePagerIndicator() {
-        val labels = arrayOf("지도/코스", "주행", "설정", "피드백")
-        val dots = (0..3).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
+        val labels = arrayOf("코스", "주행", "설정", "학습", "피드백")
+        val dots = (0..4).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
         tvPagerIndicator.text = "$dots   ${labels[pagerFlipper.displayedChild]}"
     }
 
@@ -840,8 +1175,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.11.0"
-    } catch (_: Exception) { "0.11.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.11.2"
+    } catch (_: Exception) { "0.11.2" }
 
     override fun onResume() {
         super.onResume()
@@ -858,6 +1193,9 @@ class MainActivity : Activity() {
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
         }
         applySettings()
+        renderCourseQuick()
+        refreshInlineSettings()
+        refreshLearningPage()
         renderCurrentMode()
     }
 
