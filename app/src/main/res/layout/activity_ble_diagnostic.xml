@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnBleBack"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="← 설정" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="Avinox BLE 실험실"
+                android:textColor="@color/text_primary"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🧪 학습과 완전히 분리된 진단 기능"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="주변 BLE 장치의 서비스·Characteristic·광고 데이터를 읽어 Avinox 배터리 SOC 후보를 찾습니다. 여기서 읽은 값은 배터리 예측이나 개인학습에 절대 반영하지 않습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="1. 자전거 찾기"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvBleStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="자전거 전원을 켜고 '주변 BLE 검색'을 누르세요. Avinox 앱과 동시 BLE 연결이 막히면 현재 %를 먼저 확인한 뒤 Avinox 앱을 완전히 종료하고 다시 검색하세요."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnBleScan"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="주변 BLE 검색" />
+                <Button
+                    android:id="@+id/btnBleStop"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="검색 중지" />
+            </LinearLayout>
+            <Button
+                android:id="@+id/btnBleDisconnect"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="6dp"
+                android:text="BLE 연결 해제" />
+            <LinearLayout
+                android:id="@+id/bleDeviceList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="2. 현재 배터리 값과 대조"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Avinox 앱이나 자전거 화면에 보이는 현재 배터리 %를 입력합니다. BLE 값 중 같은 숫자 또는 일반적인 스케일 표현을 자동 탐색합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <EditText
+                android:id="@+id/etBleBattery"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="8dp"
+                android:backgroundTint="@color/accent"
+                android:hint="예: 66"
+                android:inputType="number"
+                android:maxLength="3"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:textSize="22sp" />
+            <Button
+                android:id="@+id/btnBleCompare"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="현재 값과 대조" />
+            <TextView
+                android:id="@+id/tvBleCandidate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="후보가 여기에 표시됩니다."
+                android:textColor="@color/good"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="3. 읽힌 원시 데이터"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvBleRaw"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="monospace"
+                android:text="Characteristic 데이터가 아직 없습니다."
+                android:textColor="@color/text_secondary"
+                android:textIsSelectable="true"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="24dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="4. 진단 로그 내보내기"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="첫 실험은 배터리 %를 한 번 대조한 뒤 로그를 저장해 주세요. 가능하면 배터리가 1~2% 변한 뒤 다시 대조하고 같은 세션의 로그를 저장하면 후보를 찾기 훨씬 쉽습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnBleSave"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="8dp"
+                android:text="BLE 진단 로그 저장" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

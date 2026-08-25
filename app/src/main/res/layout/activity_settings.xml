@@ -260,6 +260,79 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Avinox BLE 실험실"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="자전거가 BLE로 내보내는 서비스와 값을 직접 확인합니다. 실험 데이터는 개인 학습이나 배터리 예측에 반영되지 않습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnBleDiagnostic"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="8dp"
+                android:text="🧪 Avinox BLE 진단 시작" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="앱 업데이트"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvUpdateStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="현재 버전 확인 중"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Switch
+                android:id="@+id/switchBetaUpdates"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="4dp"
+                android:text="테스트판(Beta/RC)도 업데이트 대상에 포함"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+            <Button
+                android:id="@+id/btnCheckUpdate"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="최신 업데이트 확인" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="안정판이 기본입니다. 업데이트 확인 시 GitHub의 공개 릴리스 정보만 읽으며, GPX·FIT·위치·배터리·학습 데이터는 외부로 전송하지 않습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
         <Button
             android:id="@+id/btnSettingsVersion"
             android:layout_width="match_parent"

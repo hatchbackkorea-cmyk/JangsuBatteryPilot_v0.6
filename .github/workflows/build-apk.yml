@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,14 +29,13 @@ jobs:
         run: |
           VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
           echo "name=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building version $VERSION"
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Build debug APK for CI validation
+        run: gradle :app:assembleDebug --stacktrace -PupdateRepo="${GITHUB_REPOSITORY}"
 
-      - name: Upload APK artifact
+      - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GPXBatteryCopilot-v${{ steps.version.outputs.name }}-debug-apk
+          name: GPXBatteryCopilot-v${{ steps.version.outputs.name }}-debug-ci
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

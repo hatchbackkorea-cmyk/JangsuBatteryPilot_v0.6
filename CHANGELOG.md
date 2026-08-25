@@ -1,3 +1,22 @@
+# Changelog
+
+## v0.16.0 — 배포/업데이트 기준판 + Avinox BLE Lab
+- 설정에 `Avinox BLE 실험실` 추가: 주변 BLE 기기 검색, GATT 서비스/Characteristic 열람, READ/NOTIFY/INDICATE 원시값 수집
+- Avinox/AMFLOW/DJI로 보이는 장치를 목록 상단에 우선 표시하되 이름이 숨겨진 장치도 놓치지 않도록 전체 BLE 주변기기 표시
+- Avinox 앱/계기판의 현재 배터리 %를 입력하면 raw byte, uint16, 0~255 스케일, /100 스케일 및 표준 Battery Level UUID를 자동 대조해 SOC 후보 점수화
+- 광고 패킷의 manufacturer/service data도 함께 기록해 GATT 연결이 막혀도 배터리 후보 탐색 가능
+- 읽힌 BLE 데이터는 **실험 전용**이며 BatteryPlan/개인학습/실시간 배터리 보정에 절대 반영하지 않음
+- 진단 세션을 텍스트 파일로 내보내 다른 배터리 % 시점의 값 변화 비교 가능
+- 설정 페이지에 `최신 업데이트 확인` 추가
+- GitHub Releases의 새 APK를 앱 안에서 확인 → 다운로드 → Android 설치 화면으로 연결
+- 하루 1회 자동 확인: 새 버전이 있을 때만 알림
+- 기본 `안정판` 채널, 선택 시 Beta/RC 테스트판도 확인
+- 업데이트 확인 과정에서 GPX/FIT/위치/배터리/학습 데이터는 전송하지 않음
+- GitHub Release asset SHA-256 digest가 제공되면 다운로드 파일 추가 검증
+- v0.16.0부터 고정 서명키를 GitHub Secrets로 관리하는 Release workflow 추가
+- 지인 배포를 위한 `SIGNING_AND_RELEASE_SETUP_KO.md`, `DISTRIBUTION_GUIDE_KO.md` 추가
+- 새 설치 사용자의 로컬 데이터/학습은 다른 사용자와 공유되지 않음
+
 ## 0.15.0 — Free Ride + Post-Ride Benchmark
 - 주행 시작 시 `계획주행 / 임의주행` 선택 추가
 - 임의주행은 업로드 GPX, RouteMatcher, 코스 이탈, 체크포인트, 종점 예측과 완전히 분리

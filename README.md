@@ -1,3 +1,22 @@
+# GPX Battery Copilot v0.16.0
+
+## Avinox BLE 실험실
+- 설정 → `Avinox BLE 진단 시작`
+- 주변 BLE 장치를 검색하고 자전거로 의심되는 장치를 눌러 GATT 연결
+- Avinox 앱/계기판의 현재 배터리 %를 입력하고 `현재 값과 대조`
+- 배터리가 1~2% 변한 뒤 같은 절차를 다시 하면 움직이는 Characteristic 후보를 좁힐 수 있음
+- `BLE 진단 로그 저장` 파일을 분석용으로 내보낼 수 있음
+- 이 기능의 데이터는 검증 전까지 개인 학습과 예측에 0% 반영
+- Avinox 앱이 자전거 BLE 연결을 독점하는 경우: 현재 배터리 % 확인 → Avinox 앱 완전 종료 → BLE 실험실에서 검색
+
+## 배포/업데이트 기준판
+- 앱 내 GitHub Release 업데이트 확인/설치
+- 안정판 / 테스트판 채널 분리
+- 고정 서명 Release APK workflow
+- 각 기기의 라이딩·FIT·학습 데이터는 로컬 전용
+- 자세한 최초 설정: `SIGNING_AND_RELEASE_SETUP_KO.md`
+- 지인 배포: `DISTRIBUTION_GUIDE_KO.md`
+
 # Battery Copilot v0.15.0
 
 오프라인 우선 GPX 라이딩 배터리 코파일럿입니다. 장수280은 내장 예비 코스일 뿐이며, 사용자가 불러와 선택한 **어떤 GPX 코스든** 저장된 개인 학습 데이터를 적용해 배터리 예측과 어시스트를 계산합니다.

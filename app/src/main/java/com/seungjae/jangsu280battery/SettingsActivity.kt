@@ -34,6 +34,9 @@ class SettingsActivity : Activity() {
     private lateinit var tvTestKm: TextView
     private lateinit var seekTestKm: SeekBar
     private lateinit var tvTestHint: TextView
+    private lateinit var tvUpdateStatus: TextView
+    private lateinit var switchBetaUpdates: Switch
+    private lateinit var btnCheckUpdate: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +65,11 @@ class SettingsActivity : Activity() {
         tvLearningSummary = findViewById(R.id.tvLearningSummary)
         btnClearLearning = findViewById(R.id.btnClearLearning)
         tvHistoricalLearningSummary = findViewById(R.id.tvHistoricalLearningSummary)
+        tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
+        switchBetaUpdates = findViewById(R.id.switchBetaUpdates)
+        btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
         refreshLearningSummary()
+        setupUpdateUi()
 
         findViewById<TextView>(R.id.tvSettingsCourse).text = runCatching {
             val m = courseRepo.activeMeta()
@@ -142,7 +149,48 @@ class SettingsActivity : Activity() {
         btnClearLearning.setOnClickListener { confirmClearLearning() }
         btnClearLearning.isEnabled = !logManager.isActive()
         if (logManager.isActive()) btnClearLearning.text = "주행 종료 후 학습 데이터 초기화"
+        findViewById<Button>(R.id.btnBleDiagnostic).setOnClickListener {
+            startActivity(Intent(this, BleDiagnosticActivity::class.java))
+        }
         findViewById<Button>(R.id.btnSettingsVersion).setOnClickListener { showVersionInfo() }
+    }
+
+    private fun setupUpdateUi() {
+        switchBetaUpdates.isChecked = AppSettings.betaUpdates(this)
+        refreshUpdateStatus()
+        switchBetaUpdates.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean(AppSettings.KEY_BETA_UPDATES, checked).apply()
+            refreshUpdateStatus()
+        }
+        btnCheckUpdate.setOnClickListener { checkForUpdate() }
+    }
+
+    private fun refreshUpdateStatus(extra: String? = null) {
+        val channel = if (AppSettings.betaUpdates(this)) "테스트판 포함" else "안정판"
+        val repo = UpdateManager.repository()
+        tvUpdateStatus.text = buildString {
+            append("현재 v${UpdateManager.currentVersion(this@SettingsActivity)} · $channel")
+            if (repo.isNotBlank()) append(" · $repo")
+            if (!extra.isNullOrBlank()) append("\n$extra")
+        }
+    }
+
+    private fun checkForUpdate() {
+        btnCheckUpdate.isEnabled = false
+        refreshUpdateStatus("GitHub에서 최신 릴리스를 확인 중…")
+        UpdateManager.checkAsync(this) { result ->
+            btnCheckUpdate.isEnabled = true
+            result.onSuccess { info ->
+                if (info == null) {
+                    refreshUpdateStatus("최신 버전입니다.")
+                } else {
+                    refreshUpdateStatus("새 버전 v${info.versionName} 사용 가능")
+                    UpdateManager.showUpdateDialog(this, info)
+                }
+            }.onFailure { e ->
+                refreshUpdateStatus("업데이트 확인 실패 · ${e.message ?: "네트워크/설정을 확인하세요"}")
+            }
+        }
     }
 
     private fun simpleListener(onChanged: (Int) -> Unit) = object : SeekBar.OnSeekBarChangeListener {
@@ -179,6 +227,10 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (::tvLearningSummary.isInitialized) refreshLearningSummary()
+        if (::tvUpdateStatus.isInitialized) {
+            refreshUpdateStatus()
+            UpdateManager.resumePendingInstall(this)
+        }
     }
 
     private fun refreshLearningSummary() {
@@ -238,13 +290,12 @@ class SettingsActivity : Activity() {
             .setTitle("GPX Battery Copilot")
             .setMessage(
                 "v${appVersionName()}\n\n" +
-                    "• v0.11.0부터 배터리 학습을 0에서 새로 시작\n" +
-                    "• 일반 배터리 10초 이내 재입력은 직전값 자동 무효화\n" +
-                    "• 충전 시작/완료 단일 버튼 + 확인/취소\n" +
-                    "• FIT 원본과 GPS·고도·속도·케이던스·라이더/모터 파워 시계열 보존\n" +
-                    "• 심박 데이터는 수집/학습에서 제외\n" +
-                    "• FIT/GPX 거리 · 이동시간 · 평속 · 획득/손실고도 분석\n" +
-                    "• 좌우 스와이프 4페이지 · 피드백 데이터 기반 준비"
+                    "• GitHub Releases 기반 앱 내 업데이트 확인/다운로드/설치\n" +
+                    "• 안정판 기본 + 선택형 테스트판(Beta/RC) 업데이트 채널\n" +
+                    "• 앱 실행 시 하루 1회 자동 확인 · 새 버전이 있을 때만 안내\n" +
+                    "• 고정 서명 APK로 기존 데이터 유지 업데이트\n" +
+                    "• 업데이트 확인 시 주행/FIT/배터리/학습 데이터 외부 전송 없음\n" +
+                    "• v0.15 임의주행 + FIT/Avinox 사후 비교 기능 유지"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -252,8 +303,8 @@ class SettingsActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.15.0"
-    } catch (_: Exception) { "0.15.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.16.0"
+    } catch (_: Exception) { "0.16.0" }
 
     private fun applyKeepScreen(enabled: Boolean) {
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

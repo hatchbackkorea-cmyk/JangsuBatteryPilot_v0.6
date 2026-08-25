@@ -199,6 +199,7 @@ class MainActivity : Activity() {
         refreshLearningPage()
         renderRideState()
         renderCurrentMode()
+        UpdateManager.maybeCheckOnLaunch(this)
     }
 
     private fun bindViews() {
@@ -1638,11 +1639,12 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.15.0"
-    } catch (_: Exception) { "0.15.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.16.0"
+    } catch (_: Exception) { "0.16.0" }
 
     override fun onResume() {
         super.onResume()
+        UpdateManager.resumePendingInstall(this)
         if (!::courseRepo.isInitialized) return
 
         // 코스 메뉴에서 선택한 코스가 바뀌었으면 즉시 재로딩.
