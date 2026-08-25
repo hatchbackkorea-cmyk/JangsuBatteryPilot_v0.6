@@ -17,7 +17,7 @@ data class EnergyComparisonSnapshot(
  * v0.14.0 비교 전용 계산기.
  * - Avinox는 자체 모델/학습에 절대 주입하지 않는다.
  * - 충전으로 잔량이 다시 올라가도 누적 소비량으로 비교가 계속 이어진다.
- * - 실제 누적 소비량 = 시작 100% + 누적 충전량 - 최신 실제 잔량.
+ * - 실제 누적 소비량 = 첫 실제 SOC + 누적 충전량 - 최신 실제 SOC.
  */
 object EnergyComparisonCalculator {
     fun snapshot(
@@ -31,8 +31,11 @@ object EnergyComparisonCalculator {
         val km = routeKm.coerceIn(0.0, course.totalKm)
         val entries = actualEntries.sortedBy { it.timestampMs }
         val chargeAdded = totalChargeAdded(entries)
+        val firstActual = entries.firstOrNull()
         val latestActual = entries.lastOrNull()
-        val actualConsumed = latestActual?.let { (100.0 + chargeAdded - it.percent).coerceAtLeast(0.0) }
+        val actualConsumed = if (firstActual != null && latestActual != null) {
+            (firstActual.percent + chargeAdded - latestActual.percent).coerceAtLeast(0.0)
+        } else null
 
         val factor = adaptive.calibration(km)?.factor ?: 1.0
         val modelBaseToNow = base.cumulativeInternalUsePct(km)

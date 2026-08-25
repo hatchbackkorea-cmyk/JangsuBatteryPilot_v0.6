@@ -1,3 +1,16 @@
+# Changelog
+
+## v0.16.3 — Avinox BLE SOC 실주행 통합
+- 66%→0x42, 65%→0x41, 64%→0x40 3회 독립 검증 결과를 바탕으로 FFF0/FFF4 Notify의 SOC 필드를 실주행 자동 입력으로 승격
+- 계획주행/임의주행 시작 시 RideService가 Avinox를 자동 검색·연결·재연결
+- SOC는 동일값 2회 연속 수신 후 확정하며 1% 변화마다 실제 배터리 관측값으로 자동 저장
+- 실제 배터리 기록에 source(BLE_AVINOX/MANUAL/CHARGE/IMPORTED)를 추가해 학습 데이터 출처를 감사 가능하게 보존
+- 충전 세션 중 BLE 상승값은 RIDING 관측으로 저장하지 않아 충전량과 소비 구간이 섞이지 않도록 보호
+- 충전 세션 없이 SOC가 상승하면 학습 오염 방지를 위해 RIDING 저장을 차단하고 이벤트 로그에 기록
+- 주행 화면의 마이크 배터리 입력 버튼 제거, 실제 배터리 패널을 'AVINOX 실제 배터리' + BLE 연결 상태 중심으로 재설계
+- BLE 장애 시에만 쓰는 작은 '수동' 비상 입력 버튼 유지
+- 충전 시작/완료 입력창은 최근 Avinox BLE SOC가 있으면 자동으로 채움
+
 # v0.16.2
 
 - 실제 메인 3번째 설정 페이지에 `Avinox BLE 진단 시작` 버튼을 연결했습니다.
@@ -12,7 +25,6 @@
 - Candidate score calculation rewritten to avoid Kotlin sumOf overload ambiguity.
 - No change to BLE diagnostic data isolation: BLE values remain excluded from battery learning.
 
-# Changelog
 
 ## v0.16.0 — 배포/업데이트 기준판 + Avinox BLE Lab
 - 설정에 `Avinox BLE 실험실` 추가: 주변 BLE 기기 검색, GATT 서비스/Characteristic 열람, READ/NOTIFY/INDICATE 원시값 수집

@@ -42,9 +42,10 @@ class AdaptiveBatteryPlan(
         if (all.isEmpty()) return null
 
         val lastPost = all.indexOfLast { it.kind == ActualEntryKind.POST_CHARGE }
-        val startKm = if (lastPost >= 0) all[lastPost].routeKm else 0.0
-        val startPct = if (lastPost >= 0) all[lastPost].percent else 100.0
-        val epoch = if (lastPost >= 0) all.drop(lastPost + 1) else all
+        val baseline = if (lastPost >= 0) all[lastPost] else all.first()
+        val startKm = baseline.routeKm
+        val startPct = baseline.percent
+        val epoch = if (lastPost >= 0) all.drop(lastPost + 1) else all.drop(1)
         val observations = epoch.filter { it.routeKm > startKm + 0.20 }
         val latest = observations.lastOrNull() ?: return null
 

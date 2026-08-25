@@ -41,6 +41,9 @@ class RideService : Service(), LocationListener {
         const val EXTRA_DISTANCE_INTERVAL_KM = "distance_interval_km"
         const val EXTRA_TIME_INTERVAL_MIN = "time_interval_min"
         const val EXTRA_SPEAK_TEXT = "speak_text"
+        const val EXTRA_BLE_SOC = "ble_soc"
+        const val EXTRA_BLE_STATE = "ble_state"
+        const val EXTRA_BLE_UPDATED_MS = "ble_updated_ms"
 
         private const val CHANNEL_ID = "gpx_ride_tracking"
         private const val NOTIFICATION_ID = 280
@@ -59,6 +62,9 @@ class RideService : Service(), LocationListener {
     private lateinit var learningStore: BatteryLearningStore
     private lateinit var chargingStore: ChargingStationStore
     private lateinit var logManager: RideLogManager
+    private lateinit var chargingSessionStore: ChargingSessionStore
+    private lateinit var bleStateStore: AvinoxBleStateStore
+    private lateinit var bleClient: AvinoxBleSocClient
     private val paceEstimator = PaceEstimator()
     private val passedCheckpointKeys = mutableSetOf<String>()
 
@@ -70,6 +76,8 @@ class RideService : Service(), LocationListener {
     private var freeAscentM = 0.0
     private var freeLastLocation: Location? = null
     private var freeLastElevationM: Double? = null
+    private var lastBleRecordedSoc: Int? = null
+    private var latestBleState: String = "BLE 대기"
 
     override fun onCreate() {
         super.onCreate()
@@ -79,11 +87,24 @@ class RideService : Service(), LocationListener {
         learningStore = BatteryLearningStore(this)
         chargingStore = ChargingStationStore(this)
         logManager = RideLogManager(this)
+        chargingSessionStore = ChargingSessionStore(this)
         val prefs = AppSettings.prefs(this)
         val lastKm = prefs.getFloat(AppSettings.KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
         matcher = RouteMatcher(course, lastKm)
         basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         actualStore = BatteryActualStore(this)
+        bleStateStore = AvinoxBleStateStore(this)
+        lastBleRecordedSoc = actualStore.latest()?.percent?.roundToInt()
+        bleClient = AvinoxBleSocClient(this, object : AvinoxBleSocClient.Listener {
+            override fun onBleState(state: String, address: String?) {
+                latestBleState = state
+                broadcastBleState()
+            }
+
+            override fun onSoc(soc: Int, timestampMs: Long, address: String?) {
+                handleBleSoc(soc, timestampMs, address)
+            }
+        })
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
         pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
         announcer = VoiceAnnouncer(this).also {
@@ -130,7 +151,7 @@ class RideService : Service(), LocationListener {
             ACTION_SPEAK_NOW -> {
                 if (logManager.isFreeRide()) {
                     val actual = actualStore.latest()?.percent
-                    val text = if (actual != null) "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}킬로미터. 현재 배터리 ${actual.roundToInt()}퍼센트." else "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}킬로미터. 실제 배터리를 입력해 주세요."
+                    val text = if (actual != null) "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}킬로미터. 현재 배터리 ${actual.roundToInt()}퍼센트." else "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}킬로미터. Avinox BLE 배터리 연결을 기다리는 중입니다."
                     announcer.speakNow(text)
                     return START_STICKY
                 }
@@ -148,7 +169,10 @@ class RideService : Service(), LocationListener {
                 if (text.isNotBlank()) announcer.speakNow(text)
             }
         }
-        if (logManager.isActive()) startLocationUpdates()
+        if (logManager.isActive()) {
+            startLocationUpdates()
+            bleClient.start()
+        }
         return START_STICKY
     }
 
@@ -298,6 +322,45 @@ class RideService : Service(), LocationListener {
         }
     }
 
+
+    private fun handleBleSoc(soc: Int, timestampMs: Long, address: String?) {
+        if (!logManager.isActive()) return
+        bleStateStore.setSoc(soc, "BLE 자동 · 연결됨", address, timestampMs)
+        latestBleState = "BLE 자동 · 연결됨"
+
+        // During an explicitly marked charging session, SOC is still displayed live but is not
+        // inserted as a RIDING observation. ARRIVAL/POST_CHARGE remain clean paired events.
+        val charging = chargingSessionStore.active()
+        if (charging == null && soc != lastBleRecordedSoc) {
+            val previous = lastBleRecordedSoc
+            val km = if (logManager.isFreeRide()) freeDistanceKm.coerceAtLeast(0.0) else matcher.currentKm().coerceIn(0.0, course.totalKm)
+            // Unexpected SOC rise while not in an explicit charging session is never accepted as RIDING data.
+            // This protects learning from an unmarked charger connection or protocol glitch.
+            if (previous != null && soc > previous) {
+                latestBleState = "BLE $soc% · 충전 증가 감지 (충전 버튼 확인)"
+                logManager.recordEvent("BATTERY_BLE_RISE_BLOCKED", "$previous% → $soc% · charging session 없음", km, soc.toDouble())
+            } else {
+                actualStore.save(soc.toDouble(), km, ActualEntryKind.RIDING, timestampMs, ActualEntrySource.BLE_AVINOX)
+                lastBleRecordedSoc = soc
+                logManager.recordEvent("BATTERY_BLE", "$soc% · AVINOX_SOC", km, soc.toDouble())
+            }
+        } else if (charging != null) {
+            // Track the live charging SOC so the first packet after POST_CHARGE is not duplicated as RIDING.
+            lastBleRecordedSoc = soc
+        }
+        broadcastBleState(soc, timestampMs)
+    }
+
+    private fun broadcastBleState(socOverride: Int? = null, updatedOverride: Long? = null) {
+        val snap = bleStateStore.snapshot()
+        sendBroadcast(Intent(ACTION_UPDATE).apply {
+            setPackage(packageName)
+            socOverride?.let { putExtra(EXTRA_BLE_SOC, it) } ?: snap.soc?.let { putExtra(EXTRA_BLE_SOC, it) }
+            putExtra(EXTRA_BLE_STATE, latestBleState.ifBlank { snap.state })
+            putExtra(EXTRA_BLE_UPDATED_MS, updatedOverride ?: snap.updatedMs)
+        })
+    }
+
     private fun buildNotification(text: String): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val contentIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -333,6 +396,7 @@ class RideService : Service(), LocationListener {
 
     override fun onDestroy() {
         try { locationManager.removeUpdates(this) } catch (_: Exception) { }
+        if (::bleClient.isInitialized) bleClient.stop()
         announcer.shutdown()
         super.onDestroy()
     }

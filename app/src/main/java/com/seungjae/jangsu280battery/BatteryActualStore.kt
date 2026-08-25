@@ -10,11 +10,19 @@ enum class ActualEntryKind {
     POST_CHARGE
 }
 
+enum class ActualEntrySource {
+    MANUAL,
+    BLE_AVINOX,
+    CHARGE,
+    IMPORTED
+}
+
 data class ActualBatteryEntry(
     val percent: Double,
     val routeKm: Double,
     val timestampMs: Long,
-    val kind: ActualEntryKind
+    val kind: ActualEntryKind,
+    val source: ActualEntrySource = ActualEntrySource.MANUAL
 )
 
 data class ActualSaveResult(
@@ -40,11 +48,14 @@ class BatteryActualStore(context: Context) {
                 val o = array.getJSONObject(i)
                 val kind = runCatching { ActualEntryKind.valueOf(o.optString("kind", "RIDING")) }
                     .getOrDefault(ActualEntryKind.RIDING)
+                val source = runCatching { ActualEntrySource.valueOf(o.optString("source", "MANUAL")) }
+                    .getOrDefault(ActualEntrySource.MANUAL)
                 result += ActualBatteryEntry(
                     percent = o.getDouble("percent").coerceIn(0.0, 100.0),
                     routeKm = o.getDouble("routeKm").coerceAtLeast(0.0),
                     timestampMs = o.optLong("timestampMs", 0L),
-                    kind = kind
+                    kind = kind,
+                    source = source
                 )
             }
             result
@@ -55,12 +66,19 @@ class BatteryActualStore(context: Context) {
 
     fun latest(): ActualBatteryEntry? = entries().lastOrNull()
 
-    fun save(percent: Double, routeKm: Double, kind: ActualEntryKind, timestampMs: Long = System.currentTimeMillis()): ActualBatteryEntry {
+    fun save(
+        percent: Double,
+        routeKm: Double,
+        kind: ActualEntryKind,
+        timestampMs: Long = System.currentTimeMillis(),
+        source: ActualEntrySource = ActualEntrySource.MANUAL
+    ): ActualBatteryEntry {
         val item = ActualBatteryEntry(
             percent = percent.coerceIn(0.0, 100.0),
             routeKm = routeKm.coerceAtLeast(0.0),
             timestampMs = timestampMs,
-            kind = kind
+            kind = kind,
+            source = source
         )
         val list = entries().toMutableList().apply {
             add(item)
@@ -91,7 +109,8 @@ class BatteryActualStore(context: Context) {
             percent = percent.coerceIn(0.0, 100.0),
             routeKm = routeKm.coerceAtLeast(0.0),
             timestampMs = timestampMs,
-            kind = ActualEntryKind.RIDING
+            kind = ActualEntryKind.RIDING,
+            source = ActualEntrySource.MANUAL
         )
         list.add(item)
         while (list.size > MAX_HISTORY) list.removeAt(0)
@@ -119,6 +138,7 @@ class BatteryActualStore(context: Context) {
                 put("routeKm", e.routeKm)
                 put("timestampMs", e.timestampMs)
                 put("kind", e.kind.name)
+                put("source", e.source.name)
             })
         }
         prefs.edit().putString(KEY_HISTORY, array.toString()).apply()

@@ -18,7 +18,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.ImageButton
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -42,6 +41,7 @@ class MainActivity : Activity() {
         private const val REQ_SPEECH = 1004
         private const val REQ_GPX_IMPORT = 1005
         private const val REQ_POST_RIDE_FIT = 1006
+        private const val REQ_BLUETOOTH = 1007
     }
 
     private lateinit var courseRepo: CourseRepository
@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var logManager: RideLogManager
     private lateinit var basePlan: BatteryPlan
     private lateinit var actualStore: BatteryActualStore
+    private lateinit var bleStateStore: AvinoxBleStateStore
     private lateinit var chargingSessionStore: ChargingSessionStore
     private lateinit var avinoxReferenceStore: AvinoxReferenceStore
     private lateinit var plan: AdaptiveBatteryPlan
@@ -78,9 +79,7 @@ class MainActivity : Activity() {
     private lateinit var tvRiskDetail: TextView
     private lateinit var tvActualBattery: TextView
     private lateinit var tvActualDetail: TextView
-    private lateinit var tvMicHint: TextView
-    private lateinit var btnMicBattery: ImageButton
-    private lateinit var btnUndoActual: Button
+    private lateinit var btnManualBattery: Button
     private lateinit var tvNextCheckpoint: TextView
     private lateinit var tvNextCheckpointDetail: TextView
     private lateinit var tvEta: TextView
@@ -134,6 +133,9 @@ class MainActivity : Activity() {
     private var latestSpeedKmh = 0.0
     private var latestCourseElevation = 0.0
     private var latestFreeAscentM = 0.0
+    private var latestBleSoc: Int? = null
+    private var latestBleState: String = "BLE 대기"
+    private var latestBleUpdatedMs: Long = 0L
     private var testMode = false
     private var receiverRegistered = false
     private var speechPendingAfterPermission = false
@@ -152,6 +154,9 @@ class MainActivity : Activity() {
             latestSpeedKmh = intent.getDoubleExtra(RideService.EXTRA_SPEED_KMH, latestSpeedKmh)
             latestCourseElevation = intent.getDoubleExtra(RideService.EXTRA_COURSE_ELEVATION, latestCourseElevation)
             latestFreeAscentM = intent.getDoubleExtra(RideService.EXTRA_FREE_ASCENT_M, latestFreeAscentM)
+            if (intent.hasExtra(RideService.EXTRA_BLE_SOC)) latestBleSoc = intent.getIntExtra(RideService.EXTRA_BLE_SOC, -1).takeIf { it in 0..100 }
+            if (intent.hasExtra(RideService.EXTRA_BLE_STATE)) latestBleState = intent.getStringExtra(RideService.EXTRA_BLE_STATE).orEmpty().ifBlank { latestBleState }
+            if (intent.hasExtra(RideService.EXTRA_BLE_UPDATED_MS)) latestBleUpdatedMs = intent.getLongExtra(RideService.EXTRA_BLE_UPDATED_MS, latestBleUpdatedMs)
             if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, false)
         }
     }
@@ -167,13 +172,16 @@ class MainActivity : Activity() {
         chargingStore = ChargingStationStore(this)
         logManager = RideLogManager(this)
         actualStore = BatteryActualStore(this)
+        bleStateStore = AvinoxBleStateStore(this)
         chargingSessionStore = ChargingSessionStore(this)
         avinoxReferenceStore = AvinoxReferenceStore(this)
 
         if (!logManager.isActive()) {
             actualStore.clear()
             chargingSessionStore.clear()
+            bleStateStore.clearRuntime(keepAddress = true)
         }
+        loadBleSnapshot()
 
         // 앱이 재시작된 경우 진행 중 세션의 코스를 우선 복구.
         logManager.activeRide()?.takeIf { it.mode == RideMode.PLAN }?.let { active -> runCatching { courseRepo.setActive(active.courseId) } }
@@ -187,8 +195,7 @@ class MainActivity : Activity() {
         btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else showRideStartModeDialog() }
         btnChargeToggle.setOnClickListener { toggleCharging() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
-        btnMicBattery.setOnClickListener { requestVoiceCommand() }
-        btnUndoActual.setOnClickListener { undoActual() }
+        btnManualBattery.setOnClickListener { showManualBatteryDialog() }
         btnRideReport.setOnClickListener { showRideReport() }
         btnPostRideFit.setOnClickListener { pickPostRideFit() }
         btnPostRideAvinox.setOnClickListener { showPostRideAvinoxDialog() }
@@ -228,9 +235,7 @@ class MainActivity : Activity() {
         tvRiskDetail = findViewById(R.id.tvRiskDetail)
         tvActualBattery = findViewById(R.id.tvActualBattery)
         tvActualDetail = findViewById(R.id.tvActualDetail)
-        tvMicHint = findViewById(R.id.tvMicHint)
-        btnMicBattery = findViewById(R.id.btnMicBattery)
-        btnUndoActual = findViewById(R.id.btnUndoActual)
+        btnManualBattery = findViewById(R.id.btnManualBattery)
         tvNextCheckpoint = findViewById(R.id.tvNextCheckpoint)
         tvNextCheckpointDetail = findViewById(R.id.tvNextCheckpointDetail)
         tvEta = findViewById(R.id.tvEta)
@@ -341,6 +346,10 @@ class MainActivity : Activity() {
         if (logManager.isActive()) return
         actualStore.clear()
         chargingSessionStore.clear()
+        bleStateStore.clearRuntime(keepAddress = true)
+        latestBleSoc = null
+        latestBleState = "Avinox 연결 준비"
+        latestBleUpdatedMs = 0L
         AppSettings.prefs(this).edit().putFloat(AppSettings.KEY_LAST_KM, 0f).also { if (testMode) it.putFloat(AppSettings.KEY_TEST_KM, 0f) }.apply()
         latestRouteKm = 0.0
         latestSpeedKmh = 0.0
@@ -350,7 +359,7 @@ class MainActivity : Activity() {
         renderRideState()
         renderAtKm(0.0, testMode)
         if (!testMode) ensurePermissionsAndStart()
-        Toast.makeText(this, "계획주행을 시작했습니다. GPX 예측과 GPS 로그를 함께 기록합니다.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "계획주행 시작 · Avinox BLE 배터리를 자동 연결합니다.", Toast.LENGTH_LONG).show()
     }
 
     private fun showRideStartModeDialog() {
@@ -371,6 +380,10 @@ class MainActivity : Activity() {
         if (logManager.isActive()) return
         actualStore.clear()
         chargingSessionStore.clear()
+        bleStateStore.clearRuntime(keepAddress = true)
+        latestBleSoc = null
+        latestBleState = "Avinox 연결 준비"
+        latestBleUpdatedMs = 0L
         latestRouteKm = 0.0
         latestFreeAscentM = 0.0
         latestSpeedKmh = 0.0
@@ -379,7 +392,7 @@ class MainActivity : Activity() {
         renderRideState()
         renderFreeRide()
         ensurePermissionsAndStart()
-        Toast.makeText(this, "임의주행 시작 · GPX는 무시합니다. 출발 배터리를 먼저 말한 뒤 주행 중 잔량을 계속 입력해 주세요.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "임의주행 시작 · Avinox BLE 배터리를 자동 기록합니다. 마이크 입력은 필요 없습니다.", Toast.LENGTH_LONG).show()
     }
 
     private fun recordAvinoxReferenceEvent() {
@@ -961,6 +974,58 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun loadBleSnapshot() {
+        if (!::bleStateStore.isInitialized) return
+        val snap = bleStateStore.snapshot()
+        latestBleSoc = snap.soc
+        latestBleState = snap.state
+        latestBleUpdatedMs = snap.updatedMs
+    }
+
+    private fun freshBleSoc(maxAgeMs: Long = 30_000L): Int? {
+        val soc = latestBleSoc ?: return null
+        val age = System.currentTimeMillis() - latestBleUpdatedMs
+        return soc.takeIf { latestBleUpdatedMs > 0L && age in 0..maxAgeMs }
+    }
+
+    private fun renderBleStatusLine() {
+        val fresh = freshBleSoc()
+        tvActualDetail.visibility = View.VISIBLE
+        tvActualDetail.text = when {
+            fresh != null -> "● Avinox BLE 자동 · 실시간"
+            logManager.isActive() -> latestBleState.ifBlank { "Avinox BLE 연결 중…" }
+            else -> "주행 시작 시 Avinox BLE 자동 연결"
+        }
+        tvActualDetail.setTextColor(if (fresh != null) getColor(R.color.good) else getColor(R.color.text_secondary))
+    }
+
+    private fun showManualBatteryDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "배터리 %"
+            setText((freshBleSoc() ?: actualStore.latest()?.percent?.roundToInt())?.toString().orEmpty())
+            selectAll()
+        }
+        AlertDialog.Builder(this)
+            .setTitle("비상 수동 배터리 입력")
+            .setMessage("Avinox BLE가 연결되지 않을 때만 사용하세요. BLE가 복구되면 자동값이 다시 우선됩니다.")
+            .setView(input)
+            .setPositiveButton("저장") { _, _ ->
+                val pct = input.text.toString().trim().toIntOrNull()
+                if (pct == null || pct !in 0..100) {
+                    Toast.makeText(this, "0~100 사이 배터리 값을 입력해 주세요.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val km = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
+                actualStore.save(pct.toDouble(), km, ActualEntryKind.RIDING, System.currentTimeMillis(), ActualEntrySource.MANUAL)
+                if (logManager.isActive()) logManager.recordEvent("BATTERY_MANUAL", "$pct% · BLE fallback", km, pct.toDouble())
+                if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
+                Toast.makeText(this, "수동 배터리 $pct% 저장", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
     private fun requestVoiceCommand() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             speechPendingAfterPermission = true
@@ -1034,7 +1099,7 @@ class MainActivity : Activity() {
                     sendVoiceSettingsToService()
                     Toast.makeText(this, if (command.enabled) "음성 안내를 켰습니다." else "음성 안내를 껐습니다.", Toast.LENGTH_SHORT).show()
                 }
-                VoiceCommand.Help -> speakText("임의주행에서는 배터리 80프로야, 현재 상태, 주행 종료처럼 말할 수 있습니다.")
+                VoiceCommand.Help -> speakText("임의주행에서는 현재 상태, 주행 종료처럼 말할 수 있습니다. 배터리 잔량은 Avinox BLE에서 자동으로 읽습니다.")
                 else -> speakText("임의주행에서는 GPX 종점이나 업힐 명령을 사용하지 않습니다. 배터리 입력과 현재 상태 확인은 사용할 수 있습니다.")
             }
             return
@@ -1123,14 +1188,14 @@ class MainActivity : Activity() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             hint = if (isStart) "충전 전 배터리 %" else "충전 후 배터리 %"
-            setText(actualStore.latest()?.percent?.roundToInt()?.toString().orEmpty())
+            setText((freshBleSoc() ?: actualStore.latest()?.percent?.roundToInt())?.toString().orEmpty())
             selectAll()
         }
         val title = if (isStart) "충전 시작" else "충전 완료"
         val message = if (isStart) {
-            "현재 실제 배터리 잔량을 입력하세요. 확인을 눌러야 저장됩니다."
+            if (freshBleSoc() != null) "Avinox BLE 현재값을 자동으로 넣었습니다. 확인하면 충전 시작값으로 저장합니다." else "BLE 값이 없어 수동으로 현재 배터리 잔량을 입력하세요."
         } else {
-            "충전 후 실제 배터리 잔량을 입력하세요. 확인을 눌러야 저장됩니다."
+            if (freshBleSoc() != null) "Avinox BLE 현재값을 자동으로 넣었습니다. 확인하면 충전 완료값으로 저장합니다." else "BLE 값이 없어 수동으로 충전 후 배터리 잔량을 입력하세요."
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle(title)
@@ -1168,7 +1233,7 @@ class MainActivity : Activity() {
     private fun startCharge(pct: Int) {
         val km = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
         val now = System.currentTimeMillis()
-        actualStore.save(pct.toDouble(), km, ActualEntryKind.ARRIVAL, now)
+        actualStore.save(pct.toDouble(), km, ActualEntryKind.ARRIVAL, now, ActualEntrySource.CHARGE)
         chargingSessionStore.start(km, pct.toDouble(), now)
         if (logManager.isActive()) logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%", km, pct.toDouble())
         renderRideState()
@@ -1179,7 +1244,7 @@ class MainActivity : Activity() {
     private fun finishCharge(active: ActiveChargeSession, pct: Int) {
         val now = System.currentTimeMillis()
         // 충전 전/후는 동일한 코스 km에 고정해 소비 구간이 충전시간/GPS 드리프트에 오염되지 않게 한다.
-        actualStore.save(pct.toDouble(), active.routeKm, ActualEntryKind.POST_CHARGE, now)
+        actualStore.save(pct.toDouble(), active.routeKm, ActualEntryKind.POST_CHARGE, now, ActualEntrySource.CHARGE)
         if (logManager.isActive()) {
             logManager.recordEvent(
                 "CHARGE_COMPLETE",
@@ -1266,7 +1331,7 @@ class MainActivity : Activity() {
         if (logManager.isFreeRide()) {
             val actual = actualStore.latest()?.percent
             val consumed = cumulativeActualConsumption(actualStore.entries())
-            val bat = actual?.let { "현재 배터리 ${it.roundToInt()}퍼센트." } ?: "실제 배터리 입력 전입니다."
+            val bat = actual?.let { "현재 배터리 ${it.roundToInt()}퍼센트." } ?: "Avinox BLE 배터리 수신 전입니다."
             val use = consumed?.let { " 누적 소비 약 ${it.roundToInt()}퍼센트." }.orEmpty()
             return speakText("임의주행 ${RideFormatter.one(latestRouteKm)}킬로미터. 상승 약 ${latestFreeAscentM.roundToInt()}미터. $bat$use")
         }
@@ -1335,6 +1400,14 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
             return
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val scan = checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            val connect = checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            if (!scan || !connect) {
+                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT), REQ_BLUETOOTH)
+                return
+            }
+        }
         startRideService()
     }
 
@@ -1342,7 +1415,14 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
             REQ_LOCATION -> if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) ensurePermissionsAndStart() else tvGpsStatus.text = "위치 권한이 필요합니다 · 설정에서 테스트 모드는 사용 가능"
-            REQ_NOTIFICATIONS -> startRideService()
+            REQ_NOTIFICATIONS -> ensurePermissionsAndStart()
+            REQ_BLUETOOTH -> {
+                if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) ensurePermissionsAndStart()
+                else {
+                    latestBleState = "BLE 권한 없음 · 수동 입력 사용"
+                    startRideService()
+                }
+            }
             REQ_MICROPHONE -> {
                 val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
                 if (granted && speechPendingAfterPermission) launchVoiceCommand()
@@ -1356,7 +1436,7 @@ class MainActivity : Activity() {
         val intent = Intent(this, RideService::class.java).apply { action = RideService.ACTION_START }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
         sendVoiceSettingsToService()
-        tvGpsStatus.text = "GPS 추적 + 로그 자동 저장 중 · 화면을 꺼도 유지"
+        tvGpsStatus.text = "GPS + Avinox BLE 자동 기록 중 · 화면을 꺼도 유지"
     }
 
     private fun sendVoiceSettingsToService() {
@@ -1445,25 +1525,15 @@ class MainActivity : Activity() {
         tvRiskDetail.text = "${reserve.targetName} ${reserve.predictedPct.roundToInt()}%\n목표 ${reserve.targetPct.roundToInt()}%\n$differenceText"
 
         val latestActual = actualStatus?.entry
-        if (latestActual == null) {
+        val displaySoc = freshBleSoc() ?: latestActual?.percent?.roundToInt()
+        if (displaySoc == null) {
             tvActualBattery.text = "—"
             tvActualBattery.setTextColor(getColor(R.color.text_secondary))
-            tvActualDetail.text = ""
-            btnUndoActual.isEnabled = false
-            btnUndoActual.visibility = View.GONE
         } else {
-            tvActualBattery.text = "${latestActual.percent.roundToInt()}%"
-            tvActualBattery.setTextColor(batteryColor(latestActual.percent))
-            val delta = actualStatus.delta.roundToInt()
-            val phase = when (latestActual.kind) {
-                ActualEntryKind.ARRIVAL -> "도착값"
-                ActualEntryKind.POST_CHARGE -> "충전 후 기준"
-                ActualEntryKind.RIDING -> "주행 기준"
-            }
-            tvActualDetail.text = ""
-            btnUndoActual.isEnabled = true
-            btnUndoActual.visibility = View.GONE
+            tvActualBattery.text = "$displaySoc%"
+            tvActualBattery.setTextColor(batteryColor(displaySoc.toDouble()))
         }
+        renderBleStatusLine()
 
         val remainFinish = (course.totalKm - km).coerceAtLeast(0.0)
         tvSpeed.text = if (latestSpeedKmh >= 2.0) "속도 ${RideFormatter.one(latestSpeedKmh)}km/h" else "속도 -"
@@ -1546,16 +1616,18 @@ class MainActivity : Activity() {
         tvBattery.text = actual?.let { "${it.percent.roundToInt()}%" } ?: "—"
         tvBattery.setTextColor(actual?.let { batteryColor(it.percent) } ?: getColor(R.color.text_secondary))
         progressBattery.progress = actual?.percent?.roundToInt()?.coerceIn(0, 100) ?: 0
-        tvBatteryRange.text = "임의주행 · GPX 예측 미사용 · 실제 GPS 거리/배터리 기록"
+        tvBatteryRange.text = "임의주행 · GPX 예측 미사용 · GPS + BLE 배터리 자동 기록"
         tvCompareActual.text = consumed?.let(::formatPct) ?: "—"
         tvCompareModel.text = "사후"
         tvCompareAvinox.text = "사후"
         tvCompareDetail.text = "누적 충전 +${formatPct(charged)} · 주행 종료 후 FIT을 연결하면 우리 모델 사후예측 생성\nAvinox 예상 소비량도 종료 후 독립 benchmark로 입력"
         tvRiskStatus.text = "기록 중"
         tvRiskStatus.setTextColor(getColor(R.color.accent))
-        tvRiskDetail.text = "임의주행은 목표 코스/종점이 없습니다. 출발 직후 배터리를 먼저 입력하면 실제 누적 소비량을 정확히 계산할 수 있습니다."
-        tvActualBattery.text = actual?.let { "${it.percent.roundToInt()}%" } ?: "—"
-        tvActualBattery.setTextColor(actual?.let { batteryColor(it.percent) } ?: getColor(R.color.text_secondary))
+        tvRiskDetail.text = "임의주행은 목표 코스/종점이 없습니다. Avinox BLE SOC를 자동 기록해 실제 누적 소비량을 계산합니다."
+        val displaySoc = freshBleSoc() ?: actual?.percent?.roundToInt()
+        tvActualBattery.text = displaySoc?.let { "$it%" } ?: "—"
+        tvActualBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        renderBleStatusLine()
         tvNextCheckpoint.text = "자유 주행"
         tvNextCheckpointDetail.text = "GPX 독립\n${RideFormatter.one(latestRouteKm)} km 기록\n배터리 ${actual?.percent?.roundToInt()?.let { "$it%" } ?: "입력 전"}"
         tvNextClimb.text = "실제 고도"
@@ -1563,8 +1635,8 @@ class MainActivity : Activity() {
         tvSpeed.text = if (latestSpeedKmh >= 2.0) "속도 ${RideFormatter.one(latestSpeedKmh)} km/h" else "속도 계산 중"
         tvFinishEta.text = "종점 없음"
         tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
-        tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "배터리 입력 대기"
-        tvAssist.text = "임의주행 데이터 수집 중 · GPS + 실제 배터리만 저장\n종료 후 FIT · Avinox를 붙여 3자 비교"
+        tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "BLE 배터리 연결 대기"
+        tvAssist.text = "임의주행 데이터 수집 중 · GPS + Avinox BLE SOC 자동 저장\n종료 후 FIT · Avinox 예상값을 붙여 3자 비교"
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
         profileView.visibility = View.GONE
@@ -1643,7 +1715,7 @@ class MainActivity : Activity() {
         if (logManager.isActive()) return Toast.makeText(this, "주행 종료 후 학습해 주세요.", Toast.LENGTH_SHORT).show()
         AlertDialog.Builder(this)
             .setTitle("임의주행 학습 반영")
-            .setMessage("FIT을 기준 코스로 사용하고, 주행 중 직접 입력한 실제 배터리 값만 개인 학습에 반영합니다. Avinox 예상값은 학습에 사용하지 않습니다.\n\n사후 비교용 '우리 모델 예상'은 이미 학습 전 값으로 저장되어 있어 비교 공정성은 유지됩니다.")
+            .setMessage("FIT을 기준 코스로 사용하고, 주행 중 Avinox BLE로 자동 기록된 실제 배터리 값만 개인 학습에 반영합니다. Avinox 예상값은 학습에 사용하지 않습니다.\n\n사후 비교용 '우리 모델 예상'은 이미 학습 전 값으로 저장되어 있어 비교 공정성은 유지됩니다.")
             .setPositiveButton("학습 반영") { _, _ ->
                 try {
                     val n = logManager.learnLastFreeRideFromFit(learningStore)
@@ -1685,8 +1757,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.16.0"
-    } catch (_: Exception) { "0.16.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.16.3"
+    } catch (_: Exception) { "0.16.3" }
 
     override fun onResume() {
         super.onResume()
@@ -1704,6 +1776,7 @@ class MainActivity : Activity() {
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
         }
+        loadBleSnapshot()
         applySettings()
         renderCourseQuick()
         refreshInlineSettings()

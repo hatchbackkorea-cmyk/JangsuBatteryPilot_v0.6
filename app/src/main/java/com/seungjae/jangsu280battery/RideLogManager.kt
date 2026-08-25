@@ -250,7 +250,7 @@ class RideLogManager(context: Context) {
             put("events", JSONArray().apply { events.forEach { put(it) } })
             put("actualBattery", JSONArray().apply {
                 actualStore.entries().forEach { e -> put(JSONObject().apply {
-                    put("percent", e.percent); put("routeKm", e.routeKm); put("timestampMs", e.timestampMs); put("kind", e.kind.name)
+                    put("percent", e.percent); put("routeKm", e.routeKm); put("timestampMs", e.timestampMs); put("kind", e.kind.name); put("source", e.source.name)
                 }) }
             })
         }
@@ -311,7 +311,7 @@ class RideLogManager(context: Context) {
             put("events", JSONArray().apply { events.forEach { put(it) } })
             put("actualBattery", JSONArray().apply {
                 actualEntries.forEach { e -> put(JSONObject().apply {
-                    put("percent", e.percent); put("routeKm", e.routeKm); put("timestampMs", e.timestampMs); put("kind", e.kind.name)
+                    put("percent", e.percent); put("routeKm", e.routeKm); put("timestampMs", e.timestampMs); put("kind", e.kind.name); put("source", e.source.name)
                 }) }
             })
         }
@@ -380,7 +380,8 @@ class RideLogManager(context: Context) {
                     val phoneTotal = root.optDouble("maxRouteKm", 0.0)
                     if (phoneTotal > 0.1) phoneKm * (analysis.course.totalKm / phoneTotal) else phoneKm
                 }
-                entries += ActualBatteryEntry(pct, fitKm.coerceIn(0.0, analysis.course.totalKm), ts, kind)
+                val source = runCatching { ActualEntrySource.valueOf(o.optString("source", "MANUAL")) }.getOrDefault(ActualEntrySource.MANUAL)
+                entries += ActualBatteryEntry(pct, fitKm.coerceIn(0.0, analysis.course.totalKm), ts, kind, source)
             }
         }
         val learned = learning.trainHistoricalRide(root.optString("sessionId", "free_ride"), analysis.course, entries, analysis.telemetry, analysis.dataQualityScore)
@@ -480,11 +481,14 @@ class RideLogManager(context: Context) {
             val o = arr.optJSONObject(i) ?: continue
             val kind = runCatching { ActualEntryKind.valueOf(o.optString("kind", "RIDING")) }
                 .getOrDefault(ActualEntryKind.RIDING)
+            val source = runCatching { ActualEntrySource.valueOf(o.optString("source", "MANUAL")) }
+                .getOrDefault(ActualEntrySource.MANUAL)
             entries += ActualBatteryEntry(
                 percent = o.optDouble("percent", Double.NaN),
                 routeKm = o.optDouble("routeKm", Double.NaN),
                 timestampMs = o.optLong("timestampMs", 0L),
-                kind = kind
+                kind = kind,
+                source = source
             )
         }
         val valid = entries.filter { it.percent.isFinite() && it.routeKm.isFinite() }

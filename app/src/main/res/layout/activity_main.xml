@@ -325,40 +325,48 @@
                         android:minHeight="122dp"
                         android:orientation="vertical"
                         android:padding="10dp">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="실제 배터리"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
                             <TextView
-                                android:id="@+id/tvActualBattery"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:includeFontPadding="false"
-                                android:text="—"
-                                android:textColor="@color/text_primary"
-                                android:textSize="36sp"
-                                android:textStyle="bold" />
-                            <ImageButton
-                                android:id="@+id/btnMicBattery"
-                                android:layout_width="54dp"
-                                android:layout_height="54dp"
-                                android:background="@drawable/mic_button_bg"
-                                android:contentDescription="배터리 음성 입력"
-                                android:padding="14dp"
-                                android:scaleType="fitCenter"
-                                android:src="@drawable/ic_mic" />
+                                android:text="AVINOX 실제 배터리"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                            <Button
+                                android:id="@+id/btnManualBattery"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:minWidth="0dp"
+                                android:minHeight="0dp"
+                                android:paddingStart="9dp"
+                                android:paddingEnd="9dp"
+                                android:text="수동"
+                                android:textAllCaps="false"
+                                android:textSize="11sp" />
                         </LinearLayout>
-                        <TextView android:id="@+id/tvActualDetail" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-                        <TextView android:id="@+id/tvMicHint" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-                        <Button android:id="@+id/btnUndoActual" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+                        <TextView
+                            android:id="@+id/tvActualBattery"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:includeFontPadding="false"
+                            android:text="—"
+                            android:textColor="@color/text_primary"
+                            android:textSize="42sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/tvActualDetail"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="1dp"
+                            android:maxLines="2"
+                            android:text="주행 시작 시 Avinox BLE 자동 연결"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -785,7 +793,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Avinox BLE 값은 검증 전까지 개인학습과 배터리 예측에 사용하지 않습니다."
+                        android:text="Avinox BLE SOC는 66→65→64% 연속 검증을 통과했습니다. 주행 중 자동 기록하며 원본 BLE 이벤트도 함께 보존합니다."
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
@@ -919,7 +927,7 @@
                     android:layout_marginTop="10dp"
                     android:background="@drawable/panel_bg"
                     android:padding="14dp"
-                    android:text="임의주행은 GPX 없이 GPS와 실제 배터리 입력만으로 저장됩니다.\n\n주행이 끝난 뒤 Avinox FIT 파일과 같은 코스의 Avinox 예상 소비량을 붙이면, 실제 누적 소비 ↔ 우리 모델(FIT 기준·학습 전) ↔ Avinox를 독립적으로 비교할 수 있습니다."
+                    android:text="임의주행은 GPX 없이 GPS와 Avinox BLE 실제 배터리를 자동 기록합니다.\n\n주행이 끝난 뒤 Avinox FIT 파일과 같은 코스의 Avinox 예상 소비량을 붙이면, 실제 누적 소비 ↔ 우리 모델(FIT 기준·학습 전) ↔ Avinox를 독립적으로 비교할 수 있습니다."
                     android:textColor="@color/text_primary"
                     android:textSize="14sp" />
                 <Button
