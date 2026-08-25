@@ -1,3 +1,15 @@
+## 0.15.0 — Free Ride + Post-Ride Benchmark
+- 주행 시작 시 `계획주행 / 임의주행` 선택 추가
+- 임의주행은 업로드 GPX, RouteMatcher, 코스 이탈, 체크포인트, 종점 예측과 완전히 분리
+- 임의주행 GPS 누적 거리·상승·속도 및 실제 배터리 음성 입력 기록
+- 첫 실제 배터리 입력을 기준으로 충전량을 더해 실제 누적 소비량 계산
+- 임의주행 종료 후 실제 GPS 트랙 GPX/CSV/JSON/ZIP 저장
+- 최근 주행에 Avinox FIT 사후 연결 및 FIT 코스 기준 우리 모델의 학습 전 예상 총소비량 저장
+- 최근 주행에 Avinox ECO/AUTO/TRAIL/TURBO 전체 예상 소비량 사후 입력
+- 실제 누적 소비 / 우리 모델 학습 전 사후예측 / Avinox 선택 모드의 오차 비교
+- Avinox 데이터는 학습에서 완전 제외
+- FIT 연결 후 사용자가 선택할 때만 임의주행 실제 배터리 체크포인트를 개인 학습에 반영
+
 # CHANGELOG
 
 ## 0.14.0 — Independent Avinox Benchmark + Live Energy Comparison

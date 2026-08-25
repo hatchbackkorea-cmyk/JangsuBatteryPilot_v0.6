@@ -36,6 +36,7 @@ class RideService : Service(), LocationListener {
         const val EXTRA_COURSE_ELEVATION = "course_elevation"
         const val EXTRA_GPS_ELEVATION = "gps_elevation"
         const val EXTRA_PROVIDER = "provider"
+        const val EXTRA_FREE_ASCENT_M = "free_ascent_m"
         const val EXTRA_VOICE_ENABLED = "voice_enabled"
         const val EXTRA_DISTANCE_INTERVAL_KM = "distance_interval_km"
         const val EXTRA_TIME_INTERVAL_MIN = "time_interval_min"
@@ -65,6 +66,10 @@ class RideService : Service(), LocationListener {
     private var lastNotifiedKm = -1
     private var updatesStarted = false
     private var wasOffCourse = false
+    private var freeDistanceKm = 0.0
+    private var freeAscentM = 0.0
+    private var freeLastLocation: Location? = null
+    private var freeLastElevationM: Double? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -87,7 +92,12 @@ class RideService : Service(), LocationListener {
         }
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("GPS 준비 중 · ${courseMeta.name}"))
+        if (logManager.isFreeRide()) {
+            freeDistanceKm = logManager.activeDistanceKm()
+            freeAscentM = logManager.activeAscentM()
+        }
+        val startLabel = if (logManager.isFreeRide()) "임의주행 · GPX 독립 GPS 준비 중" else "GPS 준비 중 · ${courseMeta.name}"
+        startForeground(NOTIFICATION_ID, buildNotification(startLabel))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -118,6 +128,12 @@ class RideService : Service(), LocationListener {
                     .apply()
             }
             ACTION_SPEAK_NOW -> {
+                if (logManager.isFreeRide()) {
+                    val actual = actualStore.latest()?.percent
+                    val text = if (actual != null) "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}킬로미터. 현재 배터리 ${actual.roundToInt()}퍼센트." else "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}킬로미터. 실제 배터리를 입력해 주세요."
+                    announcer.speakNow(text)
+                    return START_STICKY
+                }
                 val km = matcher.currentKm()
                 val battery = plan.estimate(km)
                 val cp = plan.currentOrNextCheckpoint(km)
@@ -155,6 +171,10 @@ class RideService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         if (!logManager.isActive()) return
+        if (logManager.isFreeRide()) {
+            handleFreeLocation(location)
+            return
+        }
         val match = matcher.match(location.latitude, location.longitude)
         val speedKmh = paceEstimator.update(location, match.routeKm)
         val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
@@ -222,6 +242,62 @@ class RideService : Service(), LocationListener {
         }
     }
 
+    private fun handleFreeLocation(location: Location) {
+        val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
+        val gpsElevation = if (location.hasAltitude()) location.altitude else Double.NaN
+        val previous = freeLastLocation
+        if (previous != null) {
+            val deltaM = previous.distanceTo(location).toDouble()
+            val dtSec = ((location.time.takeIf { it > 0 } ?: System.currentTimeMillis()) - (previous.time.takeIf { it > 0 } ?: System.currentTimeMillis())) / 1000.0
+            val plausible = deltaM in 0.5..250.0 && (dtSec <= 0.0 || deltaM / dtSec <= 25.0) && (accuracy < 0f || accuracy <= 60f)
+            if (plausible) freeDistanceKm += deltaM / 1000.0
+        }
+        if (gpsElevation.isFinite()) {
+            val prevEle = freeLastElevationM
+            if (prevEle != null) {
+                val gain = gpsElevation - prevEle
+                if (gain in 1.0..30.0) freeAscentM += gain
+            }
+            freeLastElevationM = gpsElevation
+        }
+        freeLastLocation = Location(location)
+        logManager.updateFreeRideStats(freeDistanceKm, freeAscentM)
+        val speedKmh = paceEstimator.update(location, freeDistanceKm)
+        val actual = actualStore.latest()?.percent
+        logManager.recordLocation(
+            timestampMs = location.time.takeIf { it > 0 } ?: System.currentTimeMillis(),
+            lat = location.latitude,
+            lon = location.longitude,
+            gpsElevationM = gpsElevation.takeIf { it.isFinite() },
+            speedKmh = speedKmh,
+            routeKm = freeDistanceKm,
+            offCourseM = 0.0,
+            courseElevationM = gpsElevation.takeIf { it.isFinite() } ?: 0.0,
+            estimatedBatteryPct = Double.NaN,
+            actualBatteryPct = actual
+        )
+        sendBroadcast(Intent(ACTION_UPDATE).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_ROUTE_KM, freeDistanceKm)
+            putExtra(EXTRA_OFF_COURSE_M, 0.0)
+            putExtra(EXTRA_ACCURACY_M, accuracy)
+            putExtra(EXTRA_SPEED_KMH, speedKmh)
+            putExtra(EXTRA_COURSE_ELEVATION, gpsElevation.takeIf { it.isFinite() } ?: 0.0)
+            putExtra(EXTRA_GPS_ELEVATION, gpsElevation)
+            putExtra(EXTRA_FREE_ASCENT_M, freeAscentM)
+            putExtra(EXTRA_PROVIDER, location.provider ?: "GPS")
+        })
+        val now = System.currentTimeMillis()
+        val kmInt = freeDistanceKm.toInt()
+        if (kmInt != lastNotifiedKm || now - lastNotificationAt > 15000L) {
+            val batText = actual?.let { " · 🔋${it.roundToInt()}%" }.orEmpty()
+            val text = "임의주행 ${String.format(java.util.Locale.US, "%.1f", freeDistanceKm)}km · ▲${freeAscentM.roundToInt()}m$batText"
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, buildNotification(text))
+            lastNotificationAt = now
+            lastNotifiedKm = kmInt
+        }
+    }
+
     private fun buildNotification(text: String): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val contentIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -231,7 +307,7 @@ class RideService : Service(), LocationListener {
         else @Suppress("DEPRECATION") Notification.Builder(this)
         return builder
             .setSmallIcon(R.drawable.ic_battery_pilot)
-            .setContentTitle("GPX 배터리 코파일럿 · ${courseMeta.name}")
+            .setContentTitle(if (logManager.isFreeRide()) "배터리 코파일럿 · 임의주행" else "GPX 배터리 코파일럿 · ${courseMeta.name}")
             .setContentText(text)
             .setContentIntent(contentIntent)
             .setOngoing(true)

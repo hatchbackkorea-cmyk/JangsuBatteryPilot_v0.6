@@ -15,13 +15,17 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.math.roundToInt
 
+
+enum class RideMode { PLAN, FREE }
 
 data class ActiveRide(
     val sessionId: String,
     val courseId: String,
     val courseName: String,
-    val startMs: Long
+    val startMs: Long,
+    val mode: RideMode
 )
 
 data class RideArchive(
@@ -35,7 +39,8 @@ data class RideArchive(
     val gpxFile: File,
     val jsonFile: File,
     val zipFile: File,
-    val learnedSamples: Int
+    val learnedSamples: Int,
+    val rideMode: RideMode = RideMode.PLAN
 )
 
 class RideLogManager(context: Context) {
@@ -45,6 +50,8 @@ class RideLogManager(context: Context) {
         private const val ACTIVE_COURSE_ID = "active_course_id"
         private const val ACTIVE_COURSE_NAME = "active_course_name"
         private const val ACTIVE_START = "active_start"
+        private const val ACTIVE_MODE = "active_mode"
+        private const val ACTIVE_ASCENT_M = "active_ascent_m"
         private const val ACTIVE_MAX_KM = "active_max_km"
         private const val ACTIVE_SPEED_SUM = "active_speed_sum"
         private const val ACTIVE_SPEED_COUNT = "active_speed_count"
@@ -62,14 +69,20 @@ class RideLogManager(context: Context) {
         val courseId = prefs.getString(ACTIVE_COURSE_ID, null) ?: return null
         val name = prefs.getString(ACTIVE_COURSE_NAME, "GPX 코스") ?: "GPX 코스"
         val start = prefs.getLong(ACTIVE_START, 0L)
+        val mode = runCatching { RideMode.valueOf(prefs.getString(ACTIVE_MODE, RideMode.PLAN.name) ?: RideMode.PLAN.name) }.getOrDefault(RideMode.PLAN)
         val dir = File(sessionsRoot, id)
         if (!dir.exists()) return null
-        return ActiveRide(id, courseId, name, start)
+        return ActiveRide(id, courseId, name, start, mode)
     }
 
     fun isActive(): Boolean = activeRide() != null
+    fun isFreeRide(): Boolean = activeRide()?.mode == RideMode.FREE
+    fun activeDistanceKm(): Double = prefs.getFloat(ACTIVE_MAX_KM, 0f).toDouble()
+    fun activeAscentM(): Double = prefs.getFloat(ACTIVE_ASCENT_M, 0f).toDouble()
 
-    fun start(course: CourseMeta): ActiveRide {
+    fun start(course: CourseMeta): ActiveRide = startPlan(course)
+
+    fun startPlan(course: CourseMeta): ActiveRide {
         activeRide()?.let {
             if (it.courseId == course.id) return it
             error("다른 코스의 주행 기록이 아직 진행 중입니다.")
@@ -84,12 +97,42 @@ class RideLogManager(context: Context) {
             .putString(ACTIVE_COURSE_ID, course.id)
             .putString(ACTIVE_COURSE_NAME, course.name)
             .putLong(ACTIVE_START, now)
+            .putString(ACTIVE_MODE, RideMode.PLAN.name)
+            .putFloat(ACTIVE_ASCENT_M, 0f)
             .putFloat(ACTIVE_MAX_KM, 0f)
             .putFloat(ACTIVE_SPEED_SUM, 0f)
             .putInt(ACTIVE_SPEED_COUNT, 0)
             .apply()
-        recordEvent("RIDE_START", "주행 시작", 0.0, null)
+        recordEvent("RIDE_START", "계획주행 시작", 0.0, null)
         return activeRide()!!
+    }
+
+    fun startFree(): ActiveRide {
+        activeRide()?.let { return it }
+        val now = System.currentTimeMillis()
+        val id = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(now)) + "_" + now.toString().takeLast(5)
+        val dir = File(sessionsRoot, id).apply { mkdirs() }
+        File(dir, "track.csv").writeText("timestamp_ms,lat,lon,gps_ele_m,speed_kmh,route_km,off_course_m,course_ele_m,estimated_battery_pct,actual_battery_pct\n")
+        File(dir, "events.jsonl").writeText("")
+        prefs.edit()
+            .putString(ACTIVE_ID, id)
+            .putString(ACTIVE_COURSE_ID, "__FREE_RIDE__")
+            .putString(ACTIVE_COURSE_NAME, "임의주행")
+            .putLong(ACTIVE_START, now)
+            .putString(ACTIVE_MODE, RideMode.FREE.name)
+            .putFloat(ACTIVE_MAX_KM, 0f)
+            .putFloat(ACTIVE_ASCENT_M, 0f)
+            .putFloat(ACTIVE_SPEED_SUM, 0f)
+            .putInt(ACTIVE_SPEED_COUNT, 0)
+            .apply()
+        recordEvent("RIDE_START", "임의주행 시작 · GPX 독립", 0.0, null)
+        return activeRide()!!
+    }
+
+    fun updateFreeRideStats(distanceKm: Double, ascentM: Double) {
+        if (!isFreeRide()) return
+        prefs.edit().putFloat(ACTIVE_MAX_KM, distanceKm.coerceAtLeast(0.0).toFloat())
+            .putFloat(ACTIVE_ASCENT_M, ascentM.coerceAtLeast(0.0).toFloat()).apply()
     }
 
     fun recordLocation(
@@ -148,7 +191,9 @@ class RideLogManager(context: Context) {
         val elapsed = ((System.currentTimeMillis() - ride.startMs).coerceAtLeast(0) / 60000L)
         val h = elapsed / 60
         val m = elapsed % 60
-        return "${ride.courseName}\n진행 ${RideFormatter.one(maxKm)} km · ${if (h > 0) "${h}시간 ${m}분" else "${m}분"}\n이동 평균 ${if (avg > 0f) RideFormatter.one(avg.toDouble()) + " km/h" else "-"}\n로그는 주행 중 계속 자동 저장 중입니다."
+        val modeText = if (ride.mode == RideMode.FREE) "임의주행 · GPX 독립" else "계획주행 · ${ride.courseName}"
+        val ascentText = if (ride.mode == RideMode.FREE) " · 상승 ${activeAscentM().toInt()}m" else ""
+        return "$modeText\n진행 ${RideFormatter.one(maxKm)} km$ascentText · ${if (h > 0) "${h}시간 ${m}분" else "${m}분"}\n이동 평균 ${if (avg > 0f) RideFormatter.one(avg.toDouble()) + " km/h" else "-"}\n로그는 주행 중 계속 자동 저장 중입니다."
     }
 
     fun finalizeRide(
@@ -182,6 +227,7 @@ class RideLogManager(context: Context) {
             put("sessionId", ride.sessionId)
             put("courseId", ride.courseId)
             put("courseName", ride.courseName)
+            put("rideMode", ride.mode.name)
             put("startMs", ride.startMs)
             put("endMs", end)
             put("durationSec", ((end - ride.startMs).coerceAtLeast(0L) / 1000L))
@@ -214,10 +260,210 @@ class RideLogManager(context: Context) {
         zipFiles(zip, listOf(csv, gpx, json))
         prefs.edit().putString(LAST_ZIP, zip.absolutePath).putString(LAST_JSON, json.absolutePath)
             .remove(ACTIVE_ID).remove(ACTIVE_COURSE_ID).remove(ACTIVE_COURSE_NAME).remove(ACTIVE_START)
-            .remove(ACTIVE_MAX_KM).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT).apply()
+            .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT).apply()
         sessionDir.deleteRecursively()
-        return RideArchive(ride.sessionId, ride.courseName, ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, learned)
+        return RideArchive(ride.sessionId, ride.courseName, ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, learned, ride.mode)
     }
+
+    fun finalizeFreeRide(
+        actualStore: BatteryActualStore,
+        testMode: Boolean = false
+    ): RideArchive {
+        val ride = activeRide() ?: error("진행 중인 주행이 없습니다.")
+        require(ride.mode == RideMode.FREE) { "임의주행 세션이 아닙니다." }
+        val end = System.currentTimeMillis()
+        val maxKm = activeDistanceKm()
+        val ascentM = activeAscentM()
+        recordEvent("RIDE_END", "임의주행 종료", maxKm, actualStore.latest()?.percent)
+        val sessionDir = File(sessionsRoot, ride.sessionId)
+        val sourceCsv = File(sessionDir, "track.csv")
+        val events = readEvents(File(sessionDir, "events.jsonl"))
+        val speedCount = prefs.getInt(ACTIVE_SPEED_COUNT, 0)
+        val avgSpeed = if (speedCount > 0) prefs.getFloat(ACTIVE_SPEED_SUM, 0f).toDouble() / speedCount else 0.0
+        val exportRoot = (app.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: File(app.filesDir, "exports"))
+        val outDir = File(exportRoot, "GPXBatteryCopilot/RideLogs").apply { mkdirs() }
+        val baseName = "${ride.sessionId}_free_ride"
+        val csv = File(outDir, "$baseName.csv")
+        sourceCsv.copyTo(csv, overwrite = true)
+        val gpx = File(outDir, "$baseName.gpx")
+        writeGpxFromCsv(sourceCsv, gpx, "임의주행")
+        val json = File(outDir, "$baseName.json")
+        val actualEntries = actualStore.entries()
+        val actualConsumed = cumulativeConsumed(actualEntries)
+        val summary = JSONObject().apply {
+            put("sessionId", ride.sessionId)
+            put("courseId", "__FREE_RIDE__")
+            put("courseName", "임의주행")
+            put("rideMode", RideMode.FREE.name)
+            put("startMs", ride.startMs)
+            put("endMs", end)
+            put("durationSec", ((end - ride.startMs).coerceAtLeast(0L) / 1000L))
+            put("maxRouteKm", maxKm)
+            put("gpsAscentM", ascentM)
+            put("avgSpeedKmh", avgSpeed)
+            put("testMode", testMode)
+            put("learningStatus", if (testMode) "TEST_MODE_SKIPPED" else "WAITING_FOR_FIT")
+            if (actualConsumed != null) put("actualConsumedPct", actualConsumed)
+            actualEntries.firstOrNull()?.let { put("actualCoverageStartKm", it.routeKm); put("actualStartBatteryPct", it.percent) }
+            actualEntries.lastOrNull()?.let { put("actualEndBatteryPct", it.percent) }
+            put("postRideFitAttached", false)
+            put("postRideAvinox", JSONObject())
+            put("events", JSONArray().apply { events.forEach { put(it) } })
+            put("actualBattery", JSONArray().apply {
+                actualEntries.forEach { e -> put(JSONObject().apply {
+                    put("percent", e.percent); put("routeKm", e.routeKm); put("timestampMs", e.timestampMs); put("kind", e.kind.name)
+                }) }
+            })
+        }
+        json.writeText(summary.toString(2))
+        val zip = File(outDir, "$baseName.zip")
+        zipFiles(zip, listOf(csv, gpx, json))
+        prefs.edit().putString(LAST_ZIP, zip.absolutePath).putString(LAST_JSON, json.absolutePath)
+            .remove(ACTIVE_ID).remove(ACTIVE_COURSE_ID).remove(ACTIVE_COURSE_NAME).remove(ACTIVE_START)
+            .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT).apply()
+        sessionDir.deleteRecursively()
+        return RideArchive(ride.sessionId, "임의주행", ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, 0, RideMode.FREE)
+    }
+
+    fun attachFitToLastRide(uri: android.net.Uri, learning: BatteryLearningStore): String {
+        val json = lastJsonFile() ?: error("최근 주행 기록이 없습니다.")
+        val root = JSONObject(json.readText())
+        val analysis = HistoricalRideImporter.analyze(app, uri, HistoricalSourceType.FIT)
+        val preLearnPlan = BatteryPlan(analysis.course, learning, emptyList())
+        val modelBefore = preLearnPlan.predictedTotalUsePct()
+        val outDir = json.parentFile ?: error("저장 폴더를 찾지 못했습니다.")
+        val fitName = json.nameWithoutExtension + "_avinox.fit"
+        val fitFile = File(outDir, fitName)
+        app.contentResolver.openInputStream(uri)?.use { input -> fitFile.outputStream().use { input.copyTo(it) } }
+            ?: error("FIT 파일을 읽지 못했습니다.")
+        root.put("postRideFitAttached", true)
+        root.put("postRideFit", JSONObject().apply {
+            put("fileName", fitFile.name)
+            put("distanceKm", analysis.distanceKm)
+            put("ascentM", analysis.ascentM)
+            put("descentM", analysis.descentM)
+            if (analysis.durationSec != null) put("durationSec", analysis.durationSec)
+            if (analysis.avgSpeedKph != null) put("avgSpeedKmh", analysis.avgSpeedKph)
+            put("modelPredictedTotalBeforeLearningPct", modelBefore)
+            put("dataQualityScore", analysis.dataQualityScore)
+        })
+        root.put("learningStatus", "FIT_ATTACHED_NOT_LEARNED")
+        json.writeText(root.toString(2))
+        rebuildLastZip(extraFiles = listOf(fitFile))
+        return "FIT 연결 완료 · ${RideFormatter.one(analysis.distanceKm)} km · 상승 ${analysis.ascentM.roundToInt()}m\n우리 모델 사후 예상 ${format1(modelBefore)}% · 아직 학습에는 미반영"
+    }
+
+    fun learnLastFreeRideFromFit(learning: BatteryLearningStore): Int {
+        val json = lastJsonFile() ?: return 0
+        val root = runCatching { JSONObject(json.readText()) }.getOrNull() ?: return 0
+        if (root.optString("rideMode") != RideMode.FREE.name) return 0
+        if (root.optString("learningStatus") == "USED") return root.optInt("learnedSamplesAdded", 0)
+        val fit = root.optJSONObject("postRideFit") ?: return 0
+        val fitFile = File(json.parentFile, fit.optString("fileName"))
+        if (!fitFile.exists()) return 0
+        val analysis = HistoricalRideImporter.analyzeFile(fitFile, HistoricalSourceType.FIT)
+        val arr = root.optJSONArray("actualBattery") ?: JSONArray()
+        val entries = mutableListOf<ActualBatteryEntry>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val kind = runCatching { ActualEntryKind.valueOf(o.optString("kind", "RIDING")) }.getOrDefault(ActualEntryKind.RIDING)
+            val pct = o.optDouble("percent", Double.NaN)
+            val phoneKm = o.optDouble("routeKm", Double.NaN)
+            val ts = o.optLong("timestampMs", 0L)
+            if (pct.isFinite() && phoneKm.isFinite()) {
+                val nearest = if (ts > 0L) analysis.telemetry.asSequence()
+                    .mapNotNull { p -> p.timestampMs?.let { t -> kotlin.math.abs(t - ts) to p.routeKm } }
+                    .minByOrNull { it.first } else null
+                val fitKm = if (nearest != null && nearest.first <= 300_000L) {
+                    nearest.second
+                } else {
+                    val phoneTotal = root.optDouble("maxRouteKm", 0.0)
+                    if (phoneTotal > 0.1) phoneKm * (analysis.course.totalKm / phoneTotal) else phoneKm
+                }
+                entries += ActualBatteryEntry(pct, fitKm.coerceIn(0.0, analysis.course.totalKm), ts, kind)
+            }
+        }
+        val learned = learning.trainHistoricalRide(root.optString("sessionId", "free_ride"), analysis.course, entries, analysis.telemetry, analysis.dataQualityScore)
+        root.put("learningStatus", "USED")
+        root.put("learnedSamplesAdded", learned)
+        root.put("learningDecisionMs", System.currentTimeMillis())
+        json.writeText(root.toString(2))
+        rebuildLastZip(extraFiles = listOf(fitFile))
+        return learned
+    }
+
+    fun setLastRideAvinox(eco: Double?, auto: Double?, trail: Double?, turbo: Double?, selected: AvinoxRideMode?): String {
+        val json = lastJsonFile() ?: error("최근 주행 기록이 없습니다.")
+        val root = JSONObject(json.readText())
+        val values = JSONObject().apply {
+            eco?.let { put("ECO", it.coerceAtLeast(0.0)) }
+            auto?.let { put("AUTO", it.coerceAtLeast(0.0)) }
+            trail?.let { put("TRAIL", it.coerceAtLeast(0.0)) }
+            turbo?.let { put("TURBO", it.coerceAtLeast(0.0)) }
+            selected?.let { put("selectedMode", it.name) }
+        }
+        root.put("postRideAvinox", values)
+        json.writeText(root.toString(2))
+        rebuildLastZip()
+        return lastComparisonText()
+    }
+
+    fun lastComparisonText(): String {
+        val json = lastJsonFile() ?: return "저장된 주행 기록이 없습니다."
+        val o = runCatching { JSONObject(json.readText()) }.getOrNull() ?: return "주행 기록을 읽지 못했습니다."
+        val actual = o.optDouble("actualConsumedPct", Double.NaN).takeIf { it.isFinite() }
+        val fit = o.optJSONObject("postRideFit")
+        val model = fit?.optDouble("modelPredictedTotalBeforeLearningPct", Double.NaN)?.takeIf { it.isFinite() }
+        val av = o.optJSONObject("postRideAvinox")
+        val selectedName = av?.optString("selectedMode", "").orEmpty()
+        val avinox = if (selectedName.isNotBlank()) av?.optDouble(selectedName, Double.NaN)?.takeIf { it.isFinite() } else null
+        return buildString {
+            append(if (o.optString("rideMode") == RideMode.FREE.name) "임의주행 사후 비교" else "계획주행 사후 비교")
+            append("\n실제 누적 소비: "); append(actual?.let { format1(it) + "%" } ?: "—")
+            val coverage = o.optDouble("actualCoverageStartKm", Double.NaN)
+            if (coverage.isFinite() && coverage > 0.5) append(" · ${format1(coverage)}km 첫 입력부터")
+            append("\n우리 모델(FIT 기준·학습 전): "); append(model?.let { format1(it) + "%" } ?: "FIT 미연결")
+            if (actual != null && model != null) append(" · 오차 ${signed1(model - actual)}%")
+            append("\nAvinox"); if (selectedName.isNotBlank()) append(" $selectedName")
+            append(": "); append(avinox?.let { format1(it) + "%" } ?: "미입력")
+            if (actual != null && avinox != null) append(" · 오차 ${signed1(avinox - actual)}%")
+            fit?.let { append("\nFIT: ${format1(it.optDouble("distanceKm", 0.0))} km · 상승 ${it.optDouble("ascentM", 0.0).roundToInt()}m") }
+        }
+    }
+
+    fun lastJsonFile(): File? = prefs.getString(LAST_JSON, null)?.let(::File)?.takeIf { it.exists() }
+
+    private fun cumulativeConsumed(entries: List<ActualBatteryEntry>): Double? {
+        if (entries.isEmpty()) return null
+        var chargeAdded = 0.0
+        var arrival: ActualBatteryEntry? = null
+        entries.sortedBy { it.timestampMs }.forEach { e ->
+            when (e.kind) {
+                ActualEntryKind.ARRIVAL -> arrival = e
+                ActualEntryKind.POST_CHARGE -> {
+                    val a = arrival
+                    if (a != null) chargeAdded += (e.percent - a.percent).coerceAtLeast(0.0)
+                    arrival = null
+                }
+                ActualEntryKind.RIDING -> Unit
+            }
+        }
+        return (entries.first().percent + chargeAdded - entries.last().percent).coerceAtLeast(0.0)
+    }
+
+    private fun rebuildLastZip(extraFiles: List<File> = emptyList()) {
+        val json = lastJsonFile() ?: return
+        val zip = lastZipFile() ?: return
+        val base = json.nameWithoutExtension
+        val dir = json.parentFile ?: return
+        val root = runCatching { JSONObject(json.readText()) }.getOrNull()
+        val attachedFit = root?.optJSONObject("postRideFit")?.optString("fileName")?.takeIf { it.isNotBlank() }?.let { File(dir, it) }
+        val files = listOfNotNull(File(dir, "$base.csv"), File(dir, "$base.gpx"), json, attachedFit).filter { it.exists() } + extraFiles.filter { it.exists() }
+        zipFiles(zip, files.distinctBy { it.absolutePath })
+    }
+
+    private fun format1(v: Double): String = String.format(Locale.US, "%.1f", v)
+    private fun signed1(v: Double): String = (if (v >= 0) "+" else "") + format1(v)
 
     fun learnFromArchive(archive: RideArchive, course: CourseData, learning: BatteryLearningStore): Int {
         val json = archive.jsonFile
@@ -266,7 +512,7 @@ class RideLogManager(context: Context) {
         val ride = activeRide()
         if (ride != null) File(sessionsRoot, ride.sessionId).deleteRecursively()
         prefs.edit().remove(ACTIVE_ID).remove(ACTIVE_COURSE_ID).remove(ACTIVE_COURSE_NAME).remove(ACTIVE_START)
-            .remove(ACTIVE_MAX_KM).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT).apply()
+            .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT).apply()
     }
 
     fun lastZipFile(): File? = prefs.getString(LAST_ZIP, null)?.let(::File)?.takeIf { it.exists() }
@@ -290,6 +536,12 @@ class RideLogManager(context: Context) {
                     "SKIPPED" -> append("학습: 사용 안 함\n")
                     "TEST_MODE_SKIPPED" -> append("학습: 테스트 모드 제외\n")
                     else -> append("학습: 선택 대기\n")
+                }
+                if (o.optString("rideMode") == RideMode.FREE.name) {
+                    append("임의주행 · GPX 독립 기록\n")
+                    val actual = o.optDouble("actualConsumedPct", Double.NaN)
+                    if (actual.isFinite()) append("실제 누적 소비: ${format1(actual)}%\n")
+                    append(if (o.optBoolean("postRideFitAttached", false)) "FIT: 연결됨\n" else "FIT: 사후 연결 대기\n")
                 }
                 append("GPX / CSV / JSON / ZIP 저장 완료")
             }

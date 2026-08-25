@@ -138,6 +138,17 @@ object HistoricalRideImporter {
         )))
     }
 
+    fun analyzeFile(file: java.io.File, requestedType: HistoricalSourceType): HistoricalRideAnalysis {
+        require(file.exists()) { "파일을 찾지 못했습니다." }
+        val bytes = file.readBytes()
+        require(bytes.size <= MAX_FILE_BYTES) { "파일이 너무 큽니다." }
+        val hash = sha256(bytes)
+        return when (requestedType) {
+            HistoricalSourceType.FIT -> parseFit(bytes, file.name, hash)
+            HistoricalSourceType.GPX -> parseGpx(bytes, file.name, hash)
+        }
+    }
+
     /**
      * Avinox가 절전/전원 OFF로 한 라이딩을 여러 FIT으로 나눈 경우를 하나의 실제 세션으로 결합한다.
      * 파일 자체의 이동거리/상승/이동시간은 합산하고, 파일 사이 공백은 주행 데이터로 꾸며내지 않는다.

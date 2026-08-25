@@ -41,6 +41,7 @@ class MainActivity : Activity() {
         private const val REQ_MICROPHONE = 1003
         private const val REQ_SPEECH = 1004
         private const val REQ_GPX_IMPORT = 1005
+        private const val REQ_POST_RIDE_FIT = 1006
     }
 
     private lateinit var courseRepo: CourseRepository
@@ -64,6 +65,7 @@ class MainActivity : Activity() {
     private lateinit var btnRideToggle: Button
     private lateinit var btnChargeToggle: Button
     private lateinit var tvGpsStatus: TextView
+    private lateinit var tvRideMode: TextView
     private lateinit var tvCurrentKm: TextView
     private lateinit var tvBattery: TextView
     private lateinit var tvBatteryRange: TextView
@@ -95,6 +97,10 @@ class MainActivity : Activity() {
     private lateinit var profileView: ElevationProfileView
     private lateinit var btnSpeakNow: Button
     private lateinit var btnRideReport: Button
+    private lateinit var btnPostRideFit: Button
+    private lateinit var btnPostRideAvinox: Button
+    private lateinit var btnPostRideCompare: Button
+    private lateinit var btnPostRideLearn: Button
     private lateinit var tvChargeStatus: TextView
     private lateinit var switchPageVoice: Switch
     private lateinit var switchPageKeepScreen: Switch
@@ -123,6 +129,7 @@ class MainActivity : Activity() {
     private var latestAccuracyM = -1f
     private var latestSpeedKmh = 0.0
     private var latestCourseElevation = 0.0
+    private var latestFreeAscentM = 0.0
     private var testMode = false
     private var receiverRegistered = false
     private var speechPendingAfterPermission = false
@@ -140,7 +147,8 @@ class MainActivity : Activity() {
             latestAccuracyM = intent.getFloatExtra(RideService.EXTRA_ACCURACY_M, latestAccuracyM)
             latestSpeedKmh = intent.getDoubleExtra(RideService.EXTRA_SPEED_KMH, latestSpeedKmh)
             latestCourseElevation = intent.getDoubleExtra(RideService.EXTRA_COURSE_ELEVATION, latestCourseElevation)
-            renderAtKm(latestRouteKm, false)
+            latestFreeAscentM = intent.getDoubleExtra(RideService.EXTRA_FREE_ASCENT_M, latestFreeAscentM)
+            if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, false)
         }
     }
 
@@ -164,7 +172,7 @@ class MainActivity : Activity() {
         }
 
         // 앱이 재시작된 경우 진행 중 세션의 코스를 우선 복구.
-        logManager.activeRide()?.let { active -> runCatching { courseRepo.setActive(active.courseId) } }
+        logManager.activeRide()?.takeIf { it.mode == RideMode.PLAN }?.let { active -> runCatching { courseRepo.setActive(active.courseId) } }
         if (!loadSelectedCourse(resetProgress = false)) return
         applySettings()
 
@@ -172,12 +180,16 @@ class MainActivity : Activity() {
         btnCourseImportQuick.setOnClickListener { importGpxQuick() }
         tvCourseQuickSelect.setOnClickListener { showCoursePickerQuick() }
         btnAvinoxReferenceEdit.setOnClickListener { showAvinoxReferenceDialog() }
-        btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else startRide() }
+        btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else showRideStartModeDialog() }
         btnChargeToggle.setOnClickListener { toggleCharging() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnMicBattery.setOnClickListener { requestVoiceCommand() }
         btnUndoActual.setOnClickListener { undoActual() }
         btnRideReport.setOnClickListener { showRideReport() }
+        btnPostRideFit.setOnClickListener { pickPostRideFit() }
+        btnPostRideAvinox.setOnClickListener { showPostRideAvinoxDialog() }
+        btnPostRideCompare.setOnClickListener { showPostRideComparison() }
+        btnPostRideLearn.setOnClickListener { learnLastFreeRide() }
         setupInlineSettings()
         setupLearningPage()
         setupSwipePager()
@@ -198,6 +210,7 @@ class MainActivity : Activity() {
         btnRideToggle = findViewById(R.id.btnRideToggle)
         btnChargeToggle = findViewById(R.id.btnChargeToggle)
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
+        tvRideMode = findViewById(R.id.tvRideMode)
         tvCurrentKm = findViewById(R.id.tvCurrentKm)
         tvBattery = findViewById(R.id.tvBattery)
         tvBatteryRange = findViewById(R.id.tvBatteryRange)
@@ -229,6 +242,10 @@ class MainActivity : Activity() {
         profileView = findViewById(R.id.profileView)
         btnSpeakNow = findViewById(R.id.btnSpeakNow)
         btnRideReport = findViewById(R.id.btnRideReport)
+        btnPostRideFit = findViewById(R.id.btnPostRideFit)
+        btnPostRideAvinox = findViewById(R.id.btnPostRideAvinox)
+        btnPostRideCompare = findViewById(R.id.btnPostRideCompare)
+        btnPostRideLearn = findViewById(R.id.btnPostRideLearn)
         tvChargeStatus = findViewById(R.id.tvChargeStatus)
         switchPageVoice = findViewById(R.id.switchPageVoice)
         switchPageKeepScreen = findViewById(R.id.switchPageKeepScreen)
@@ -267,7 +284,7 @@ class MainActivity : Activity() {
             }
             latestRouteKm = prefs.getFloat(AppSettings.KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
             latestCourseElevation = course.pointAtKm(latestRouteKm).ele
-            tvVersion.text = "GPX Battery Copilot v${appVersionName()} · GPX Ride Copilot"
+            tvVersion.text = "Battery Copilot v${appVersionName()} · Plan + Free Ride"
             true
         } catch (e: Exception) {
             Toast.makeText(this, "GPX 읽기 실패: ${e.message}", Toast.LENGTH_LONG).show()
@@ -286,6 +303,14 @@ class MainActivity : Activity() {
     }
 
     private fun renderCurrentMode() {
+        if (logManager.isFreeRide()) {
+            testMode = false
+            latestRouteKm = logManager.activeDistanceKm()
+            latestFreeAscentM = logManager.activeAscentM()
+            renderFreeRide()
+            ensurePermissionsAndStart()
+            return
+        }
         if (testMode) {
             stopRideService()
             latestRouteKm = AppSettings.testKm(this).coerceIn(0.0, course.totalKm)
@@ -303,7 +328,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun startRide() {
+    private fun startPlanRide() {
         if (logManager.isActive()) return
         actualStore.clear()
         chargingSessionStore.clear()
@@ -311,12 +336,41 @@ class MainActivity : Activity() {
         latestRouteKm = 0.0
         latestSpeedKmh = 0.0
         latestOffCourseM = 0.0
-        logManager.start(courseMeta)
+        logManager.startPlan(courseMeta)
         recordAvinoxReferenceEvent()
         renderRideState()
         renderAtKm(0.0, testMode)
         if (!testMode) ensurePermissionsAndStart()
-        Toast.makeText(this, "주행 기록을 시작했습니다. GPS 로그는 계속 자동 저장됩니다.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "계획주행을 시작했습니다. GPX 예측과 GPS 로그를 함께 기록합니다.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun showRideStartModeDialog() {
+        if (testMode) {
+            startPlanRide()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("주행 방식 선택")
+            .setMessage("계획주행은 선택된 GPX를 따라 예측합니다.\n\n임의주행은 현재 GPX와 완전히 독립적으로 GPS·고도·속도·실제 배터리만 기록합니다.")
+            .setPositiveButton("🗺 계획주행") { _, _ -> startPlanRide() }
+            .setNeutralButton("🚵 임의주행") { _, _ -> startFreeRide() }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun startFreeRide() {
+        if (logManager.isActive()) return
+        actualStore.clear()
+        chargingSessionStore.clear()
+        latestRouteKm = 0.0
+        latestFreeAscentM = 0.0
+        latestSpeedKmh = 0.0
+        latestOffCourseM = 0.0
+        logManager.startFree()
+        renderRideState()
+        renderFreeRide()
+        ensurePermissionsAndStart()
+        Toast.makeText(this, "임의주행 시작 · GPX는 무시합니다. 출발 배터리를 먼저 말한 뒤 주행 중 잔량을 계속 입력해 주세요.", Toast.LENGTH_LONG).show()
     }
 
     private fun recordAvinoxReferenceEvent() {
@@ -330,7 +384,7 @@ class MainActivity : Activity() {
     private fun confirmEndRide() {
         AlertDialog.Builder(this)
             .setTitle("주행 종료")
-            .setMessage("주행을 종료하고 GPX · CSV · JSON 로그를 저장할까요?")
+            .setMessage("주행을 종료하고 GPS · 배터리 · 이벤트 로그를 저장할까요?")
             .setPositiveButton("종료 및 저장") { _, _ -> endRide() }
             .setNegativeButton("계속 주행", null)
             .show()
@@ -340,6 +394,18 @@ class MainActivity : Activity() {
         if (!logManager.isActive()) return
         stopRideService()
         try {
+            if (logManager.isFreeRide()) {
+                val archive = logManager.finalizeFreeRide(actualStore = actualStore, testMode = false)
+                chargingSessionStore.clear()
+                renderRideState()
+                AlertDialog.Builder(this)
+                    .setTitle("임의주행 저장 완료")
+                    .setMessage("${RideFormatter.one(archive.maxRouteKm)} km 주행을 저장했습니다.\n\n이제 Avinox에서 FIT 파일을 내려받고, 같은 코스를 내비게이션에 등록해 나온 ECO/AUTO/TRAIL/TURBO 소비량을 사후에 추가하면 됩니다.\n\n피드백 페이지에서 FIT와 Avinox 값을 연결할 수 있습니다.")
+                    .setPositiveButton("피드백 페이지로") { _, _ -> showPagerChild(4) }
+                    .setNegativeButton("나중에", null)
+                    .show()
+                return
+            }
             val archive = logManager.finalizeRide(
                 course = course,
                 actualStore = actualStore,
@@ -393,6 +459,11 @@ class MainActivity : Activity() {
         val active = logManager.isActive()
         val charging = chargingSessionStore.active()
         btnRideToggle.text = if (active) "■ 주행 종료" else "▶ 주행 시작"
+        tvRideMode.text = when {
+            logManager.isFreeRide() -> "🚵 임의주행 · GPX 독립 · GPS/배터리 실제값 기록 중"
+            active -> "🗺 계획주행 · ${courseMeta.name}"
+            else -> "주행 대기 · 시작 버튼에서 계획주행 / 임의주행 선택"
+        }
         btnChargeToggle.isEnabled = active
         btnChargeToggle.text = if (charging != null) "⚡ 충전 완료" else "⚡ 충전 시작"
         tvChargeStatus.text = when {
@@ -855,13 +926,13 @@ class MainActivity : Activity() {
     private fun launchVoiceCommand() {
         // 배터리 관측 위치는 음성 인식 결과가 돌아온 시점이 아니라 사용자가 입력을 시작한 시점에 고정한다.
         voiceInputStartedMs = System.currentTimeMillis()
-        voiceInputRouteKm = latestRouteKm.coerceIn(0.0, course.totalKm)
+        voiceInputRouteKm = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ko-KR")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "자연스럽게 말하세요 · 배터리 48프로야 · 종점 목표 20 · 5킬로마다 알려줘 · 앞에 업힐 있어?")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, if (logManager.isFreeRide()) "임의주행 · 배터리 48프로야 · 현재 상태 · 주행 종료" else "자연스럽게 말하세요 · 배터리 48프로야 · 종점 목표 20 · 5킬로마다 알려줘 · 앞에 업힐 있어?")
         }
         try { startActivityForResult(intent, REQ_SPEECH) }
         catch (_: ActivityNotFoundException) {
@@ -873,6 +944,17 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android, retained for minSdk 26 compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_POST_RIDE_FIT) {
+            if (resultCode == RESULT_OK) data?.data?.let { uri ->
+                try {
+                    val msg = logManager.attachFitToLastRide(uri, learningStore)
+                    AlertDialog.Builder(this).setTitle("FIT 연결 완료").setMessage(msg + "\n\n" + logManager.lastComparisonText()).setPositiveButton("확인", null).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "FIT 연결 실패: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+            return
+        }
         if (requestCode == REQ_GPX_IMPORT) {
             if (resultCode == RESULT_OK) data?.data?.let { handleImportedGpx(it) }
             return
@@ -894,6 +976,22 @@ class MainActivity : Activity() {
     }
 
     private fun handleVoiceCommand(command: VoiceCommand, heardText: String) {
+        if (logManager.isFreeRide()) {
+            when (command) {
+                is VoiceCommand.Battery -> saveActualBattery(command.percent, heardText)
+                VoiceCommand.Repeat, VoiceCommand.CurrentStatus -> speakCurrentSummary()
+                VoiceCommand.UndoActual -> undoActual()
+                VoiceCommand.RideStop -> confirmEndRide()
+                is VoiceCommand.SetVoiceEnabled -> {
+                    AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_VOICE, command.enabled).apply()
+                    sendVoiceSettingsToService()
+                    Toast.makeText(this, if (command.enabled) "음성 안내를 켰습니다." else "음성 안내를 껐습니다.", Toast.LENGTH_SHORT).show()
+                }
+                VoiceCommand.Help -> speakText("임의주행에서는 배터리 80프로야, 현재 상태, 주행 종료처럼 말할 수 있습니다.")
+                else -> speakText("임의주행에서는 GPX 종점이나 업힐 명령을 사용하지 않습니다. 배터리 입력과 현재 상태 확인은 사용할 수 있습니다.")
+            }
+            return
+        }
         when (command) {
             is VoiceCommand.Battery -> saveActualBattery(command.percent, heardText)
             is VoiceCommand.FinishTarget -> {
@@ -925,7 +1023,7 @@ class MainActivity : Activity() {
             VoiceCommand.LocationInfo -> speakLocationInfo()
             VoiceCommand.CourseInfo -> speakCourseInfo()
             VoiceCommand.UndoActual -> undoActual()
-            VoiceCommand.RideStart -> startRide()
+            VoiceCommand.RideStart -> showRideStartModeDialog()
             VoiceCommand.RideStop -> confirmEndRide()
             VoiceCommand.AddSupplyPoint -> addCurrentSupplyPoint()
             VoiceCommand.Help -> speakVoiceHelp()
@@ -935,7 +1033,7 @@ class MainActivity : Activity() {
 
     private fun saveActualBattery(percent: Int, heardText: String) {
         val pct = percent.coerceIn(0, 100)
-        val km = if (voiceInputStartedMs > 0L) voiceInputRouteKm else latestRouteKm.coerceIn(0.0, course.totalKm)
+        val km = if (voiceInputStartedMs > 0L) voiceInputRouteKm else if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
         val now = voiceInputStartedMs.takeIf { it > 0L } ?: System.currentTimeMillis()
         val result = actualStore.saveRidingReplacingRecent(pct.toDouble(), km, now, 10_000L)
         if (logManager.isActive()) {
@@ -950,7 +1048,13 @@ class MainActivity : Activity() {
             logManager.recordEvent("BATTERY", "$pct% · RIDING", km, pct.toDouble())
         }
         // 값은 발화 시작 위치에 기록하되 화면/예측은 인식 결과가 돌아온 현재 위치를 유지한다.
-        renderAtKm(latestRouteKm, testMode)
+        if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
+        if (logManager.isFreeRide()) {
+            val consumed = cumulativeActualConsumption(actualStore.entries())
+            if (result.replaced != null) Toast.makeText(this, "${result.replaced.percent.roundToInt()}% 입력을 취소하고 $pct%로 수정했습니다.", Toast.LENGTH_SHORT).show()
+            speakText("배터리 ${pct}퍼센트 저장했습니다.${consumed?.let { " 누적 소비 약 ${it.roundToInt()}퍼센트." }.orEmpty()}")
+            return
+        }
         val reserve = plan.reserveStatus(latestRouteKm, finishTargetPct)
         if (result.replaced != null) {
             Toast.makeText(this, "${result.replaced.percent.roundToInt()}% 입력을 취소하고 $pct%로 수정했습니다.", Toast.LENGTH_SHORT).show()
@@ -1015,13 +1119,13 @@ class MainActivity : Activity() {
     }
 
     private fun startCharge(pct: Int) {
-        val km = latestRouteKm.coerceIn(0.0, course.totalKm)
+        val km = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
         val now = System.currentTimeMillis()
         actualStore.save(pct.toDouble(), km, ActualEntryKind.ARRIVAL, now)
         chargingSessionStore.start(km, pct.toDouble(), now)
         if (logManager.isActive()) logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%", km, pct.toDouble())
         renderRideState()
-        renderAtKm(km, testMode)
+        if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(km, testMode)
         Toast.makeText(this, "충전 시작 · $pct%", Toast.LENGTH_SHORT).show()
     }
 
@@ -1039,7 +1143,7 @@ class MainActivity : Activity() {
         }
         chargingSessionStore.clear()
         renderRideState()
-        renderAtKm(latestRouteKm, testMode)
+        if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
         Toast.makeText(this, "충전 완료 · $pct%", Toast.LENGTH_SHORT).show()
     }
 
@@ -1049,7 +1153,7 @@ class MainActivity : Activity() {
             Toast.makeText(this, "취소할 실제 배터리 입력이 없습니다.", Toast.LENGTH_SHORT).show()
         } else {
             if (logManager.isActive()) logManager.recordEvent("BATTERY_UNDO", "마지막 배터리 입력 취소", latestRouteKm, null)
-            renderAtKm(latestRouteKm, testMode)
+            if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
         }
     }
 
@@ -1100,6 +1204,7 @@ class MainActivity : Activity() {
     }
 
     private fun addCurrentSupplyPoint() {
+        if (logManager.isFreeRide()) return speakText("임의주행에서는 GPX 보급소를 등록하지 않습니다.")
         val poi = courseRepo.addCustomSupplyPoint(courseMeta.id, latestRouteKm)
         if (logManager.isActive()) logManager.recordEvent("USER_SUPPLY", poi.name, latestRouteKm, actualStore.latest()?.percent)
         val wasActive = logManager.isActive() && !testMode
@@ -1111,6 +1216,13 @@ class MainActivity : Activity() {
     }
 
     private fun speakCurrentSummary() {
+        if (logManager.isFreeRide()) {
+            val actual = actualStore.latest()?.percent
+            val consumed = cumulativeActualConsumption(actualStore.entries())
+            val bat = actual?.let { "현재 배터리 ${it.roundToInt()}퍼센트." } ?: "실제 배터리 입력 전입니다."
+            val use = consumed?.let { " 누적 소비 약 ${it.roundToInt()}퍼센트." }.orEmpty()
+            return speakText("임의주행 ${RideFormatter.one(latestRouteKm)}킬로미터. 상승 약 ${latestFreeAscentM.roundToInt()}미터. $bat$use")
+        }
         val km = latestRouteKm
         val battery = plan.estimate(km)
         val reserve = plan.reserveStatus(km, finishTargetPct)
@@ -1252,6 +1364,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderAtKm(kmValue: Double, simulated: Boolean) {
+        profileView.visibility = View.VISIBLE
         val km = kmValue.coerceIn(0.0, course.totalKm)
         latestRouteKm = km
         val point = course.pointAtKm(km)
@@ -1376,6 +1489,131 @@ class MainActivity : Activity() {
         renderRideState()
     }
 
+    private fun renderFreeRide() {
+        latestRouteKm = logManager.activeDistanceKm().takeIf { it > latestRouteKm } ?: latestRouteKm.coerceAtLeast(0.0)
+        latestFreeAscentM = logManager.activeAscentM().takeIf { it > latestFreeAscentM } ?: latestFreeAscentM.coerceAtLeast(0.0)
+        val actual = actualStore.latest()
+        val consumed = cumulativeActualConsumption(actualStore.entries())
+        val charged = cumulativeChargeAdded(actualStore.entries())
+        tvCurrentKm.text = "${RideFormatter.one(latestRouteKm)} km"
+        tvBattery.text = actual?.let { "${it.percent.roundToInt()}%" } ?: "—"
+        tvBattery.setTextColor(actual?.let { batteryColor(it.percent) } ?: getColor(R.color.text_secondary))
+        progressBattery.progress = actual?.percent?.roundToInt()?.coerceIn(0, 100) ?: 0
+        tvBatteryRange.text = "임의주행 · GPX 예측 미사용 · 실제 GPS 거리/배터리 기록"
+        tvCompareActual.text = consumed?.let(::formatPct) ?: "—"
+        tvCompareModel.text = "사후"
+        tvCompareAvinox.text = "사후"
+        tvCompareDetail.text = "누적 충전 +${formatPct(charged)} · 주행 종료 후 FIT을 연결하면 우리 모델 사후예측 생성\nAvinox 예상 소비량도 종료 후 독립 benchmark로 입력"
+        tvRiskStatus.text = "기록 중"
+        tvRiskStatus.setTextColor(getColor(R.color.accent))
+        tvRiskDetail.text = "임의주행은 목표 코스/종점이 없습니다. 출발 직후 배터리를 먼저 입력하면 실제 누적 소비량을 정확히 계산할 수 있습니다."
+        tvActualBattery.text = actual?.let { "${it.percent.roundToInt()}%" } ?: "—"
+        tvActualBattery.setTextColor(actual?.let { batteryColor(it.percent) } ?: getColor(R.color.text_secondary))
+        tvNextCheckpoint.text = "자유 주행"
+        tvNextCheckpointDetail.text = "GPX 독립\n${RideFormatter.one(latestRouteKm)} km 기록\n배터리 ${actual?.percent?.roundToInt()?.let { "$it%" } ?: "입력 전"}"
+        tvNextClimb.text = "실제 고도"
+        tvNextClimbDetail.text = "누적 상승 약\n${latestFreeAscentM.roundToInt()} m\nFIT 연결 후 정밀 보강"
+        tvSpeed.text = if (latestSpeedKmh >= 2.0) "속도 ${RideFormatter.one(latestSpeedKmh)} km/h" else "속도 계산 중"
+        tvFinishEta.text = "종점 없음"
+        tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
+        tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "배터리 입력 대기"
+        tvAssist.text = "임의주행 데이터 수집 중 · GPS + 실제 배터리만 저장\n종료 후 FIT · Avinox를 붙여 3자 비교"
+        tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
+        tvNextPoi.text = ""
+        profileView.visibility = View.GONE
+        tvGpsStatus.text = if (logManager.isActive()) "임의주행 GPS 기록 중 · 화면 꺼도 유지" else "임의주행 저장 완료"
+    }
+
+    private fun cumulativeChargeAdded(entries: List<ActualBatteryEntry>): Double {
+        var total = 0.0
+        var arrival: ActualBatteryEntry? = null
+        entries.sortedBy { it.timestampMs }.forEach { e ->
+            when (e.kind) {
+                ActualEntryKind.ARRIVAL -> arrival = e
+                ActualEntryKind.POST_CHARGE -> {
+                    arrival?.let { total += (e.percent - it.percent).coerceAtLeast(0.0) }
+                    arrival = null
+                }
+                ActualEntryKind.RIDING -> Unit
+            }
+        }
+        return total
+    }
+
+    private fun cumulativeActualConsumption(entries: List<ActualBatteryEntry>): Double? {
+        val last = entries.lastOrNull() ?: return null
+        return (entries.first().percent + cumulativeChargeAdded(entries) - last.percent).coerceAtLeast(0.0)
+    }
+
+    private fun pickPostRideFit() {
+        if (logManager.isActive()) return Toast.makeText(this, "주행을 종료한 뒤 FIT을 연결해 주세요.", Toast.LENGTH_SHORT).show()
+        if (logManager.lastJsonFile() == null) return Toast.makeText(this, "먼저 저장된 주행이 필요합니다.", Toast.LENGTH_SHORT).show()
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/octet-stream", "application/fit", "application/vnd.ant.fit"))
+        }
+        try { startActivityForResult(intent, REQ_POST_RIDE_FIT) }
+        catch (_: ActivityNotFoundException) { Toast.makeText(this, "파일 선택 앱을 찾지 못했습니다.", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun showPostRideAvinoxDialog() {
+        if (logManager.isActive()) return Toast.makeText(this, "주행 종료 후 입력해 주세요.", Toast.LENGTH_SHORT).show()
+        if (logManager.lastJsonFile() == null) return Toast.makeText(this, "저장된 주행이 없습니다.", Toast.LENGTH_SHORT).show()
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 12, 48, 0) }
+        fun field(label: String): EditText = EditText(this).apply {
+            hint = "$label 전체 소비량 % · 100 초과 가능"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            box.addView(this)
+        }
+        val eco = field("ECO")
+        val auto = field("AUTO")
+        val trail = field("TRAIL")
+        val turbo = field("TURBO")
+        val group = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
+        val modes = listOf(AvinoxRideMode.ECO, AvinoxRideMode.AUTO, AvinoxRideMode.TRAIL, AvinoxRideMode.TURBO)
+        modes.forEachIndexed { i, mode -> group.addView(RadioButton(this).apply { id = 9100 + i; text = mode.label; if (mode == AvinoxRideMode.AUTO) isChecked = true }) }
+        box.addView(TextView(this).apply { text = "비교할 대표 모드"; setPadding(0, 12, 0, 0) })
+        box.addView(group)
+        val dialog = AlertDialog.Builder(this).setTitle("주행 후 Avinox 예상값").setMessage("같은 주행 경로를 Avinox 내비게이션에 등록해 나온 전체 예상 소비량을 입력합니다. 학습에는 절대 사용하지 않습니다.").setView(box).setPositiveButton("저장", null).setNegativeButton("취소", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                fun num(e: EditText) = e.text.toString().trim().takeIf { it.isNotBlank() }?.toDoubleOrNull()?.takeIf { it >= 0.0 }
+                val values = listOf(num(eco), num(auto), num(trail), num(turbo))
+                if (values.all { it == null }) { Toast.makeText(this, "Avinox 값을 하나 이상 입력해 주세요.", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+                val idx = modes.indices.firstOrNull { group.checkedRadioButtonId == 9100 + it } ?: 1
+                try {
+                    val text = logManager.setLastRideAvinox(values[0], values[1], values[2], values[3], modes[idx])
+                    dialog.dismiss()
+                    AlertDialog.Builder(this).setTitle("Avinox 저장 완료").setMessage(text).setPositiveButton("확인", null).show()
+                } catch (e: Exception) { Toast.makeText(this, "저장 실패: ${e.message}", Toast.LENGTH_LONG).show() }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun learnLastFreeRide() {
+        if (logManager.isActive()) return Toast.makeText(this, "주행 종료 후 학습해 주세요.", Toast.LENGTH_SHORT).show()
+        AlertDialog.Builder(this)
+            .setTitle("임의주행 학습 반영")
+            .setMessage("FIT을 기준 코스로 사용하고, 주행 중 직접 입력한 실제 배터리 값만 개인 학습에 반영합니다. Avinox 예상값은 학습에 사용하지 않습니다.\n\n사후 비교용 '우리 모델 예상'은 이미 학습 전 값으로 저장되어 있어 비교 공정성은 유지됩니다.")
+            .setPositiveButton("학습 반영") { _, _ ->
+                try {
+                    val n = logManager.learnLastFreeRideFromFit(learningStore)
+                    if (n > 0) {
+                        refreshLearningPage()
+                        Toast.makeText(this, "임의주행 ${n}개 구간을 개인 학습에 반영했습니다.", Toast.LENGTH_LONG).show()
+                    } else Toast.makeText(this, "FIT 연결 또는 배터리 입력이 부족해 학습하지 못했습니다.", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) { Toast.makeText(this, "학습 실패: ${e.message}", Toast.LENGTH_LONG).show() }
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun showPostRideComparison() {
+        AlertDialog.Builder(this).setTitle("사후 3자 비교").setMessage(logManager.lastComparisonText()).setPositiveButton("확인", null).show()
+    }
+
     private fun showRideReport() {
         val text = if (logManager.isActive()) logManager.activeSummaryText() + "\n\n" + learningStore.summaryText()
         else logManager.lastReportText() + "\n\n" + learningStore.summaryText()
@@ -1400,8 +1638,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.14.0"
-    } catch (_: Exception) { "0.14.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.15.0"
+    } catch (_: Exception) { "0.15.0" }
 
     override fun onResume() {
         super.onResume()
@@ -1437,7 +1675,7 @@ class MainActivity : Activity() {
             receiverRegistered = true
         }
         renderRideState()
-        if (::course.isInitialized) renderAtKm(latestRouteKm, testMode)
+        if (::course.isInitialized) { if (::logManager.isInitialized && logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode) }
         if (::logManager.isInitialized && logManager.isActive() && !testMode) ensurePermissionsAndStart()
     }
 

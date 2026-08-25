@@ -44,10 +44,24 @@
                         android:id="@+id/tvVersion"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="v0.14.0"
+                        android:text="v0.15.0"
                         android:textColor="@color/text_secondary"
                         android:textSize="9sp" />
                 </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvRideMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:background="@drawable/pill_bg"
+                    android:gravity="center"
+                    android:paddingTop="5dp"
+                    android:paddingBottom="5dp"
+                    android:text="계획주행 대기 · 시작 버튼에서 주행 방식을 선택하세요"
+                    android:textColor="@color/accent"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -69,7 +83,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="현재 위치"
+                                android:text="현재 거리"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                             <TextView
@@ -91,7 +105,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="예측 배터리"
+                                android:text="배터리"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                             <TextView
@@ -849,14 +863,42 @@
                     android:layout_marginTop="10dp"
                     android:background="@drawable/panel_bg"
                     android:padding="14dp"
-                    android:text="FIT 원본과 거리·GPS·고도·속도·케이던스·라이더 파워·모터 파워 시계열을 보존합니다.\n\n향후 거리/고도 그래프 ↔ 지도 위치 동기화, 배터리 소모별 경로 색상, 무동력 다운힐 구분을 이 데이터에 연결합니다."
+                    android:text="임의주행은 GPX 없이 GPS와 실제 배터리 입력만으로 저장됩니다.\n\n주행이 끝난 뒤 Avinox FIT 파일과 같은 코스의 Avinox 예상 소비량을 붙이면, 실제 누적 소비 ↔ 우리 모델(FIT 기준·학습 전) ↔ Avinox를 독립적으로 비교할 수 있습니다."
                     android:textColor="@color/text_primary"
                     android:textSize="14sp" />
+                <Button
+                    android:id="@+id/btnPostRideFit"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="12dp"
+                    android:text="최근 주행에 Avinox FIT 연결"
+                    android:textStyle="bold" />
+                <Button
+                    android:id="@+id/btnPostRideAvinox"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="7dp"
+                    android:text="최근 주행 Avinox 예상값 입력"
+                    android:textStyle="bold" />
+                <Button
+                    android:id="@+id/btnPostRideCompare"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="7dp"
+                    android:text="실제 · 자체모델 · Avinox 비교"
+                    android:textStyle="bold" />
+                <Button
+                    android:id="@+id/btnPostRideLearn"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="7dp"
+                    android:text="최근 임의주행을 개인 학습에 반영"
+                    android:textStyle="bold" />
                 <Button
                     android:id="@+id/btnRideReport"
                     android:layout_width="match_parent"
                     android:layout_height="54dp"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="7dp"
                     android:text="현재 / 최근 주행 리포트"
                     android:textStyle="bold" />
             </LinearLayout>
