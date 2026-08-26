@@ -113,7 +113,6 @@
                         android:orientation="horizontal">
                         <Button android:id="@+id/btnAssistTrail" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="Trail" android:textAllCaps="false" android:textSize="11sp" />
                         <Button android:id="@+id/btnAssistTurbo" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Turbo" android:textAllCaps="false" android:textSize="11sp" />
-                        <Button android:id="@+id/btnAssistBoost" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="BOOST" android:textAllCaps="false" android:textSize="11sp" />
                     </LinearLayout>
                     <TextView
                         android:layout_width="match_parent"

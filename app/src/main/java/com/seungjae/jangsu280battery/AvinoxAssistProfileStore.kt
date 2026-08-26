@@ -9,8 +9,7 @@ enum class AvinoxAssistMode(val label: String) {
     ECO("Eco"),
     AUTO("Auto"),
     TRAIL("Trail"),
-    TURBO("Turbo"),
-    BOOST("BOOST")
+    TURBO("Turbo")
 }
 
 data class AvinoxAssistProfile(
@@ -23,18 +22,12 @@ data class AvinoxAssistProfile(
     val motorOverrunStep: Int? = null,
     val startAssistStep: Int? = null,
     val continuousAssistStep: Int? = null,
-    val boostEnabled: Boolean? = null,
-    val boostDurationSec: Int? = null,
-    val boostLogicEnhanced: Boolean? = null,
     val sourceNote: String = "사용자 설정",
     val savedAtMs: Long = System.currentTimeMillis()
 ) {
     val profileId: String get() = "${mode.name}_${fingerprint()}"
 
     fun compactText(): String {
-        if (mode == AvinoxAssistMode.BOOST) {
-            return "BOOST ${if (boostEnabled == true) "ON" else "OFF"} · ${boostDurationSec ?: "?"}초 · 로직강화 ${if (boostLogicEnhanced == true) "ON" else "OFF"}"
-        }
         val assist = when {
             assistMin != null && assistMax != null && assistMin != assistMax -> "Assist $assistMin~$assistMax"
             assistMin != null -> "Assist $assistMin"
@@ -60,9 +53,6 @@ data class AvinoxAssistProfile(
         motorOverrunStep?.let { put("motorOverrunStep", it) }
         startAssistStep?.let { put("startAssistStep", it) }
         continuousAssistStep?.let { put("continuousAssistStep", it) }
-        boostEnabled?.let { put("boostEnabled", it) }
-        boostDurationSec?.let { put("boostDurationSec", it) }
-        boostLogicEnhanced?.let { put("boostLogicEnhanced", it) }
         put("sourceNote", sourceNote)
         put("savedAtMs", savedAtMs)
     }
@@ -72,8 +62,7 @@ data class AvinoxAssistProfile(
             mode.name,
             assistMin?.toString().orEmpty(), assistMax?.toString().orEmpty(),
             maxTorqueNm?.toString().orEmpty(), maxPowerW?.toString().orEmpty(),
-            motorOverrunStep?.toString().orEmpty(), startAssistStep?.toString().orEmpty(), continuousAssistStep?.toString().orEmpty(),
-            boostEnabled?.toString().orEmpty(), boostDurationSec?.toString().orEmpty(), boostLogicEnhanced?.toString().orEmpty()
+            motorOverrunStep?.toString().orEmpty(), startAssistStep?.toString().orEmpty(), continuousAssistStep?.toString().orEmpty()
         ).joinToString("|")
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
         return digest.take(5).joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -125,9 +114,6 @@ class AvinoxAssistProfileStore(context: Context) {
         motorOverrunStep = o.optIntOrNull("motorOverrunStep"),
         startAssistStep = o.optIntOrNull("startAssistStep"),
         continuousAssistStep = o.optIntOrNull("continuousAssistStep"),
-        boostEnabled = o.optBooleanOrNull("boostEnabled"),
-        boostDurationSec = o.optIntOrNull("boostDurationSec"),
-        boostLogicEnhanced = o.optBooleanOrNull("boostLogicEnhanced"),
         sourceNote = o.optString("sourceNote", "사용자 설정"),
         savedAtMs = o.optLong("savedAtMs", System.currentTimeMillis())
     )
@@ -142,9 +128,7 @@ class AvinoxAssistProfileStore(context: Context) {
         AvinoxAssistMode.AUTO -> AvinoxAssistProfile(mode, 3, 8, 105, 900, 0, 4, 2, sourceNote = "2026-08-26 사진 기준 초기값")
         AvinoxAssistMode.TRAIL -> AvinoxAssistProfile(mode, 9, 11, 105, 850, 1, 4, 2, sourceNote = "2026-08-26 사진 기준 초기값")
         AvinoxAssistMode.TURBO -> AvinoxAssistProfile(mode, 13, 13, 105, 850, 2, 4, 2, sourceNote = "2026-08-26 사진 기준 초기값")
-        AvinoxAssistMode.BOOST -> AvinoxAssistProfile(mode, boostEnabled = true, boostDurationSec = 60, boostLogicEnhanced = true, sourceNote = "2026-08-26 사진 기준 초기값")
     }
 }
 
 private fun JSONObject.optIntOrNull(key: String): Int? = if (has(key) && !isNull(key)) optInt(key) else null
-private fun JSONObject.optBooleanOrNull(key: String): Boolean? = if (has(key) && !isNull(key)) optBoolean(key) else null

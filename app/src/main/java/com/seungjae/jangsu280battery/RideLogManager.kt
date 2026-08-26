@@ -98,9 +98,6 @@ class RideLogManager(context: Context) {
                 motorOverrunStep = if (o.has("motorOverrunStep")) o.getInt("motorOverrunStep") else null,
                 startAssistStep = if (o.has("startAssistStep")) o.getInt("startAssistStep") else null,
                 continuousAssistStep = if (o.has("continuousAssistStep")) o.getInt("continuousAssistStep") else null,
-                boostEnabled = if (o.has("boostEnabled")) o.getBoolean("boostEnabled") else null,
-                boostDurationSec = if (o.has("boostDurationSec")) o.getInt("boostDurationSec") else null,
-                boostLogicEnhanced = if (o.has("boostLogicEnhanced")) o.getBoolean("boostLogicEnhanced") else null,
                 sourceNote = o.optString("sourceNote", "주행 기록"),
                 savedAtMs = o.optLong("savedAtMs", System.currentTimeMillis())
             )
@@ -694,7 +691,7 @@ class RideLogManager(context: Context) {
                     if (prior != null && prior.size >= 12) {
                         val mode = prior[10]
                         val profileId = prior[11]
-                        if (mode.isNotBlank() && profileId.isNotBlank() && p[10] == mode && p[11] == profileId) {
+                        if (mode.isNotBlank() && mode != "BOOST" && profileId.isNotBlank() && p[10] == mode && p[11] == profileId) {
                             val key = "$mode|$profileId"
                             val a = stats.getOrPut(key) { AssistAccum() }
                             val t0 = prior[0].toLongOrNull()
@@ -727,7 +724,7 @@ class RideLogManager(context: Context) {
                 val mode = e.optString("assistMode")
                 val profile = e.optString("assistProfileId")
                 val prevPct = lastBatteryPct
-                if (pct.isFinite() && prevPct != null && !modeChangedSinceBattery && mode.isNotBlank() && profile.isNotBlank() && mode == lastBatteryMode && profile == lastBatteryProfile) {
+                if (pct.isFinite() && prevPct != null && !modeChangedSinceBattery && mode.isNotBlank() && mode != "BOOST" && profile.isNotBlank() && mode == lastBatteryMode && profile == lastBatteryProfile) {
                     val drop = prevPct - pct
                     if (drop in 0.0..5.0) stats.getOrPut("$mode|$profile") { AssistAccum() }.verifiedSocDropPct += drop
                 }

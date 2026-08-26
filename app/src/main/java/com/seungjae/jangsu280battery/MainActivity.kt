@@ -18,7 +18,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -77,7 +76,6 @@ class MainActivity : Activity() {
     private lateinit var btnAssistAuto: Button
     private lateinit var btnAssistTrail: Button
     private lateinit var btnAssistTurbo: Button
-    private lateinit var btnAssistBoost: Button
     private lateinit var tvCurrentKm: TextView
     private lateinit var tvBattery: TextView
     private lateinit var tvBatteryRange: TextView
@@ -211,7 +209,6 @@ class MainActivity : Activity() {
         btnAssistAuto.setOnClickListener { selectAssistMode(AvinoxAssistMode.AUTO) }
         btnAssistTrail.setOnClickListener { selectAssistMode(AvinoxAssistMode.TRAIL) }
         btnAssistTurbo.setOnClickListener { selectAssistMode(AvinoxAssistMode.TURBO) }
-        btnAssistBoost.setOnClickListener { selectAssistMode(AvinoxAssistMode.BOOST) }
         btnAssistProfileEdit.setOnClickListener { showAssistProfilePicker() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnManualBattery.setOnClickListener { showManualBatteryDialog() }
@@ -250,7 +247,6 @@ class MainActivity : Activity() {
         btnAssistAuto = findViewById(R.id.btnAssistAuto)
         btnAssistTrail = findViewById(R.id.btnAssistTrail)
         btnAssistTurbo = findViewById(R.id.btnAssistTurbo)
-        btnAssistBoost = findViewById(R.id.btnAssistBoost)
         tvCurrentKm = findViewById(R.id.tvCurrentKm)
         tvBattery = findViewById(R.id.tvBattery)
         tvBatteryRange = findViewById(R.id.tvBatteryRange)
@@ -572,7 +568,7 @@ class MainActivity : Activity() {
         }
         val buttons = mapOf(
             AvinoxAssistMode.MIN to btnAssistMin, AvinoxAssistMode.ECO to btnAssistEco, AvinoxAssistMode.AUTO to btnAssistAuto,
-            AvinoxAssistMode.TRAIL to btnAssistTrail, AvinoxAssistMode.TURBO to btnAssistTurbo, AvinoxAssistMode.BOOST to btnAssistBoost
+            AvinoxAssistMode.TRAIL to btnAssistTrail, AvinoxAssistMode.TURBO to btnAssistTurbo
         )
         buttons.forEach { (mode, button) ->
             val mark = if (mode == shown) "● " else ""
@@ -606,7 +602,6 @@ class MainActivity : Activity() {
         }
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(8), px(18), px(8)) }
         val inputs = linkedMapOf<String, EditText>()
-        if (mode != AvinoxAssistMode.BOOST) {
             listOf(
                 "assistMin" to field("어시스트 최소 (고정 모드는 같은 값)", current.assistMin),
                 "assistMax" to field("어시스트 최대 (고정 모드는 같은 값)", current.assistMax),
@@ -616,16 +611,6 @@ class MainActivity : Activity() {
                 "start" to field("스타트 어시스트 위치 0~4", current.startAssistStep),
                 "continuous" to field("연속 어시스트 위치 0~4", current.continuousAssistStep)
             ).forEach { (key, pair) -> body.addView(pair.first); body.addView(pair.second); inputs[key] = pair.second }
-        }
-        val boostEnabled = CheckBox(this).apply { text = "부스트 활성화"; isChecked = current.boostEnabled == true; setTextColor(getColor(R.color.text_primary)) }
-        val boostLogic = CheckBox(this).apply { text = "Boost 로직 강화"; isChecked = current.boostLogicEnhanced == true; setTextColor(getColor(R.color.text_primary)) }
-        var boostDuration: EditText? = null
-        if (mode == AvinoxAssistMode.BOOST) {
-            body.addView(boostEnabled)
-            val pair = field("지속 시간(초)", current.boostDurationSec)
-            body.addView(pair.first); body.addView(pair.second); boostDuration = pair.second
-            body.addView(boostLogic)
-        }
         body.addView(TextView(this).apply {
             text = "※ 오버런/스타트/연속은 Avinox 화면에 숫자가 표시되지 않아 슬라이더 상대 위치(0~4)로 기록합니다. 정확한 물리 단위로 해석하지 않습니다."
             textSize = 11f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, px(8), 0, 0)
@@ -642,19 +627,14 @@ class MainActivity : Activity() {
             fun read(key: String): Int? = inputs[key]?.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.toIntOrNull()
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 try {
-                    val profile = if (mode == AvinoxAssistMode.BOOST) {
-                        AvinoxAssistProfile(mode, boostEnabled = boostEnabled.isChecked, boostDurationSec = boostDuration?.text?.toString()?.toIntOrNull(), boostLogicEnhanced = boostLogic.isChecked, sourceNote = "사용자 입력")
-                    } else {
-                        val amin = read("assistMin"); val amax = read("assistMax")
-                        require(amin == null || amin in 1..15) { "어시스트 최소는 1~15로 입력하세요." }
-                        require(amax == null || amax in 1..15) { "어시스트 최대는 1~15로 입력하세요." }
-                        require(amin == null || amax == null || amin <= amax) { "어시스트 최소가 최대보다 클 수 없습니다." }
-                        listOf("overrun", "start", "continuous").forEach { key -> read(key)?.let { require(it in 0..4) { "상대 위치는 0~4로 입력하세요." } } }
-                        AvinoxAssistProfile(mode, amin, amax, read("torque"), read("power"), read("overrun"), read("start"), read("continuous"), sourceNote = "사용자 입력")
-                    }
+                    val amin = read("assistMin"); val amax = read("assistMax")
+                    require(amin == null || amin in 1..15) { "어시스트 최소는 1~15로 입력하세요." }
+                    require(amax == null || amax in 1..15) { "어시스트 최대는 1~15로 입력하세요." }
+                    require(amin == null || amax == null || amin <= amax) { "어시스트 최소가 최대보다 클 수 없습니다." }
+                    listOf("overrun", "start", "continuous").forEach { key -> read(key)?.let { require(it in 0..4) { "상대 위치는 0~4로 입력하세요." } } }
+                    val profile = AvinoxAssistProfile(mode, amin, amax, read("torque"), read("power"), read("overrun"), read("start"), read("continuous"), sourceNote = "사용자 입력")
                     if (profile.maxTorqueNm != null) require(profile.maxTorqueNm in 10..105) { "최대 토크는 10~105 N·m 범위로 입력하세요." }
                     if (profile.maxPowerW != null) require(profile.maxPowerW in 100..1000) { "최대 파워는 100~1000 W 범위로 입력하세요." }
-                    if (profile.boostDurationSec != null) require(profile.boostDurationSec in 10..60) { "BOOST 지속시간은 10~60초로 입력하세요." }
                     assistProfileStore.save(profile)
                     if (logManager.isActive() && logManager.activeAssistMode() == mode) {
                         logManager.setAssistMode(profile, currentRideKm(), freshBleSoc()?.toDouble())

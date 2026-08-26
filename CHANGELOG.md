@@ -1,3 +1,11 @@
+# v0.17.1
+
+- BOOST를 지속 주행 모드 학습/통계 대상에서 제거
+- 주행 화면 BOOST 버튼 제거
+- BOOST 프로필 설정값 및 BOOST 전용 로그 라벨 제거
+- MIN / Eco / Auto / Trail / Turbo만 모드 프로필 대상으로 유지
+- BOOST 사용 중 소비도 전체 SOC 감소에는 포함되지만 별도 모드 학습에는 사용하지 않음
+
 # Changelog
 
 ## v0.17.0 — Avinox Assist Profile Field Validation
