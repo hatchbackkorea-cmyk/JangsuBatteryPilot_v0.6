@@ -30,6 +30,8 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.ViewFlipper
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -107,7 +109,6 @@ class MainActivity : Activity() {
     private lateinit var tvNextPoi: TextView
     private lateinit var tvVersion: TextView
     private lateinit var profileView: ElevationProfileView
-    private lateinit var btnSpeakNow: Button
     private lateinit var btnRideReport: Button
     private lateinit var btnPostRideFit: Button
     private lateinit var btnPostRideAvinox: Button
@@ -196,6 +197,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        applySystemBarInsets()
         LearningMigration.ensureV0110FreshStart(this)
         bindViews()
 
@@ -235,7 +237,6 @@ class MainActivity : Activity() {
         btnAssistModeMismatch.setOnClickListener { showDetectedAssistCorrection() }
         tvAssistModeCurrent.setOnClickListener { if (logManager.isActive()) showDetectedAssistCorrection() }
         btnAssistProfileEdit.setOnClickListener { showAssistProfilePicker() }
-        btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnManualBattery.setOnClickListener { showManualBatteryDialog() }
         btnRideReport.setOnClickListener { showRideReport() }
         btnPostRideFit.setOnClickListener { pickPostRideFit() }
@@ -253,6 +254,25 @@ class MainActivity : Activity() {
         renderAssistModeUi()
         renderCurrentMode()
         UpdateManager.maybeCheckOnLaunch(this)
+    }
+
+    private fun applySystemBarInsets() {
+        val root = findViewById<View>(R.id.rootMain)
+        val baseLeft = root.paddingLeft
+        val baseTop = root.paddingTop
+        val baseRight = root.paddingRight
+        val baseBottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                baseLeft + bars.left,
+                baseTop + bars.top,
+                baseRight + bars.right,
+                baseBottom + bars.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun bindViews() {
@@ -302,7 +322,6 @@ class MainActivity : Activity() {
         tvNextPoi = findViewById(R.id.tvNextPoi)
         tvVersion = findViewById(R.id.tvVersion)
         profileView = findViewById(R.id.profileView)
-        btnSpeakNow = findViewById(R.id.btnSpeakNow)
         btnRideReport = findViewById(R.id.btnRideReport)
         btnPostRideFit = findViewById(R.id.btnPostRideFit)
         btnPostRideAvinox = findViewById(R.id.btnPostRideAvinox)
