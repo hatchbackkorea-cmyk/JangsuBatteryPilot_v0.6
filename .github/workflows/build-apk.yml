@@ -27,8 +27,10 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          VERSION=$(tr -d '\r\n[:space:]' < VERSION.txt)
+          test -n "$VERSION" || (echo "VERSION.txt is empty" && exit 1)
           echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "App version: $VERSION"
 
       - name: Build debug APK for CI validation
         run: gradle :app:assembleDebug --stacktrace -PupdateRepo="${GITHUB_REPOSITORY}"
