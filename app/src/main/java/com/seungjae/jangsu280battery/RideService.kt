@@ -44,6 +44,13 @@ class RideService : Service(), LocationListener {
         const val EXTRA_BLE_SOC = "ble_soc"
         const val EXTRA_BLE_STATE = "ble_state"
         const val EXTRA_BLE_UPDATED_MS = "ble_updated_ms"
+        const val EXTRA_ASSIST_PRIMARY = "assist_primary"
+        const val EXTRA_ASSIST_ALTERNATE = "assist_alternate"
+        const val EXTRA_ASSIST_CONFIDENCE = "assist_confidence"
+        const val EXTRA_ASSIST_RAW_CODE = "assist_raw_code"
+        const val EXTRA_ASSIST_ACTIVE_MODE = "assist_active_mode"
+        const val EXTRA_ASSIST_ACTIVE_CONFIDENCE = "assist_active_confidence"
+        const val EXTRA_ASSIST_UPDATED_MS = "assist_updated_ms"
 
         private const val CHANNEL_ID = "gpx_ride_tracking"
         private const val NOTIFICATION_ID = 280
@@ -65,6 +72,7 @@ class RideService : Service(), LocationListener {
     private lateinit var chargingSessionStore: ChargingSessionStore
     private lateinit var bleStateStore: AvinoxBleStateStore
     private lateinit var bleClient: AvinoxBleSocClient
+    private lateinit var assistProfileStore: AvinoxAssistProfileStore
     private val paceEstimator = PaceEstimator()
     private val passedCheckpointKeys = mutableSetOf<String>()
 
@@ -78,6 +86,9 @@ class RideService : Service(), LocationListener {
     private lateinit var freeAscentEstimator: GpsAscentEstimator
     private var lastBleRecordedSoc: Int? = null
     private var latestBleState: String = "BLE 대기"
+    private var latestAssistDetection: AvinoxAssistDetection? = null
+    private var latestAssistUpdatedMs: Long = 0L
+    private var lastServiceAssistMode: AvinoxAssistMode? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -94,6 +105,7 @@ class RideService : Service(), LocationListener {
         basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         actualStore = BatteryActualStore(this)
         bleStateStore = AvinoxBleStateStore(this)
+        assistProfileStore = AvinoxAssistProfileStore(this)
         lastBleRecordedSoc = actualStore.latest()?.percent?.roundToInt()
         bleClient = AvinoxBleSocClient(this, object : AvinoxBleSocClient.Listener {
             override fun onBleState(state: String, address: String?) {
@@ -108,6 +120,7 @@ class RideService : Service(), LocationListener {
 
             override fun onRawNotification(timestampMs: Long, bytes: ByteArray, address: String?) {
                 logManager.recordRawBleNotification(timestampMs, bytes)
+                handleAssistDetection(timestampMs, bytes)
             }
         })
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
@@ -324,6 +337,42 @@ class RideService : Service(), LocationListener {
     }
 
 
+    private fun handleAssistDetection(timestampMs: Long, bytes: ByteArray) {
+        val detection = AvinoxAssistModeDetector.detect(bytes) ?: return
+        latestAssistDetection = detection
+        latestAssistUpdatedMs = timestampMs
+
+        val currentMode = logManager.activeAssistMode()
+        val currentConfidence = logManager.activeAssistConfidence()
+        val compatible = currentMode != null && detection.compatibleModes.contains(currentMode)
+        val km = if (logManager.isFreeRide()) freeDistanceKm.coerceAtLeast(0.0) else matcher.currentKm().coerceIn(0.0, course.totalKm)
+
+        when {
+            currentConfidence == "CONFIRMED" && compatible -> Unit
+            currentMode == AvinoxAssistMode.AUTO && currentConfidence == "HIGH" && compatible && !detection.isHighConfidence -> {
+                // AUTO가 2/3으로 내려오는 현장을 이미 확인했다. AUTO를 유지하되 학습은 사용자 재확인 전까지 보류한다.
+                logManager.setDetectedAssistMode(assistProfileStore.get(AvinoxAssistMode.AUTO), km, actualStore.latest()?.percent, "AMBIGUOUS", detection.rawCode)
+            }
+            else -> logManager.setDetectedAssistMode(
+                assistProfileStore.get(detection.primary), km, actualStore.latest()?.percent, detection.confidence, detection.rawCode
+            )
+        }
+        refreshServiceEnergyModeIfVerified()
+        logManager.recordAutoModeDetection(timestampMs, detection, bytes)
+        broadcastBleState()
+    }
+
+    private fun refreshServiceEnergyModeIfVerified() {
+        val mode = logManager.activeAssistMode() ?: return
+        val confidence = logManager.activeAssistConfidence()
+        if (confidence !in setOf("HIGH", "CONFIRMED") || mode == lastServiceAssistMode) return
+        assistProfileStore.setPreferredMode(mode)
+        basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
+        plan = AdaptiveBatteryPlan(basePlan, actualStore)
+        pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+        lastServiceAssistMode = mode
+    }
+
     private fun handleBleSoc(soc: Int, timestampMs: Long, address: String?) {
         if (!logManager.isActive()) return
         bleStateStore.setSoc(soc, "BLE 자동 · 연결됨", address, timestampMs)
@@ -359,6 +408,15 @@ class RideService : Service(), LocationListener {
             socOverride?.let { putExtra(EXTRA_BLE_SOC, it) } ?: snap.soc?.let { putExtra(EXTRA_BLE_SOC, it) }
             putExtra(EXTRA_BLE_STATE, latestBleState.ifBlank { snap.state })
             putExtra(EXTRA_BLE_UPDATED_MS, updatedOverride ?: snap.updatedMs)
+            latestAssistDetection?.let { d ->
+                putExtra(EXTRA_ASSIST_PRIMARY, d.primary.name)
+                d.alternate?.let { putExtra(EXTRA_ASSIST_ALTERNATE, it.name) }
+                putExtra(EXTRA_ASSIST_CONFIDENCE, d.confidence)
+                putExtra(EXTRA_ASSIST_RAW_CODE, d.rawCode)
+                putExtra(EXTRA_ASSIST_UPDATED_MS, latestAssistUpdatedMs)
+            }
+            logManager.activeAssistMode()?.let { putExtra(EXTRA_ASSIST_ACTIVE_MODE, it.name) }
+            putExtra(EXTRA_ASSIST_ACTIVE_CONFIDENCE, logManager.activeAssistConfidence())
         })
     }
 

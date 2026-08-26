@@ -58,6 +58,9 @@ class RideLogManager(context: Context) {
         private const val ACTIVE_ASSIST_MODE = "active_assist_mode"
         private const val ACTIVE_ASSIST_PROFILE_ID = "active_assist_profile_id"
         private const val ACTIVE_ASSIST_PROFILE_JSON = "active_assist_profile_json"
+        private const val ACTIVE_ASSIST_SOURCE = "active_assist_source"
+        private const val ACTIVE_ASSIST_CONFIDENCE = "active_assist_confidence"
+        private const val ACTIVE_ASSIST_RAW_CODE = "active_assist_raw_code"
         private const val ASSIST_PROBE_UNTIL = "assist_probe_until"
         private const val LAST_ZIP = "last_zip"
         private const val LAST_JSON = "last_json"
@@ -85,6 +88,9 @@ class RideLogManager(context: Context) {
     fun activeAscentM(): Double = prefs.getFloat(ACTIVE_ASCENT_M, 0f).toDouble()
     fun activeAssistMode(): AvinoxAssistMode? = prefs.getString(ACTIVE_ASSIST_MODE, null)?.let { runCatching { AvinoxAssistMode.valueOf(it) }.getOrNull() }
     fun activeAssistProfileId(): String? = prefs.getString(ACTIVE_ASSIST_PROFILE_ID, null)
+    fun activeAssistSource(): String = prefs.getString(ACTIVE_ASSIST_SOURCE, "") ?: ""
+    fun activeAssistConfidence(): String = prefs.getString(ACTIVE_ASSIST_CONFIDENCE, "") ?: ""
+    fun activeAssistRawCode(): Int? = prefs.getInt(ACTIVE_ASSIST_RAW_CODE, -1).takeIf { it >= 0 }
     fun activeAssistProfile(): AvinoxAssistProfile? = prefs.getString(ACTIVE_ASSIST_PROFILE_JSON, null)?.let { raw ->
         runCatching {
             val o = JSONObject(raw)
@@ -114,7 +120,7 @@ class RideLogManager(context: Context) {
         val now = System.currentTimeMillis()
         val id = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(now)) + "_" + now.toString().takeLast(5)
         val dir = File(sessionsRoot, id).apply { mkdirs() }
-        File(dir, "track.csv").writeText("timestamp_ms,lat,lon,gps_ele_m,speed_kmh,route_km,off_course_m,course_ele_m,estimated_battery_pct,actual_battery_pct,assist_mode,assist_profile_id\n")
+        File(dir, "track.csv").writeText("timestamp_ms,lat,lon,gps_ele_m,speed_kmh,route_km,off_course_m,course_ele_m,estimated_battery_pct,actual_battery_pct,assist_mode,assist_profile_id,assist_mode_source,assist_mode_confidence,assist_raw_code\n")
         File(dir, "events.jsonl").writeText("")
         File(dir, "assist_profiles.jsonl").writeText("")
         File(dir, "raw_ble_probe.csv").writeText("timestamp_ms,assist_mode,assist_profile_id,fff4_hex\n")
@@ -131,6 +137,9 @@ class RideLogManager(context: Context) {
             .remove(ACTIVE_ASSIST_MODE)
             .remove(ACTIVE_ASSIST_PROFILE_ID)
             .remove(ACTIVE_ASSIST_PROFILE_JSON)
+            .remove(ACTIVE_ASSIST_SOURCE)
+            .remove(ACTIVE_ASSIST_CONFIDENCE)
+            .remove(ACTIVE_ASSIST_RAW_CODE)
             .remove(ASSIST_PROBE_UNTIL)
             .apply()
         recordEvent("RIDE_START", "계획주행 시작", 0.0, null)
@@ -142,7 +151,7 @@ class RideLogManager(context: Context) {
         val now = System.currentTimeMillis()
         val id = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(now)) + "_" + now.toString().takeLast(5)
         val dir = File(sessionsRoot, id).apply { mkdirs() }
-        File(dir, "track.csv").writeText("timestamp_ms,lat,lon,gps_ele_m,speed_kmh,route_km,off_course_m,course_ele_m,estimated_battery_pct,actual_battery_pct,assist_mode,assist_profile_id\n")
+        File(dir, "track.csv").writeText("timestamp_ms,lat,lon,gps_ele_m,speed_kmh,route_km,off_course_m,course_ele_m,estimated_battery_pct,actual_battery_pct,assist_mode,assist_profile_id,assist_mode_source,assist_mode_confidence,assist_raw_code\n")
         File(dir, "events.jsonl").writeText("")
         File(dir, "assist_profiles.jsonl").writeText("")
         File(dir, "raw_ble_probe.csv").writeText("timestamp_ms,assist_mode,assist_profile_id,fff4_hex\n")
@@ -159,6 +168,9 @@ class RideLogManager(context: Context) {
             .remove(ACTIVE_ASSIST_MODE)
             .remove(ACTIVE_ASSIST_PROFILE_ID)
             .remove(ACTIVE_ASSIST_PROFILE_JSON)
+            .remove(ACTIVE_ASSIST_SOURCE)
+            .remove(ACTIVE_ASSIST_CONFIDENCE)
+            .remove(ACTIVE_ASSIST_RAW_CODE)
             .remove(ASSIST_PROBE_UNTIL)
             .apply()
         recordEvent("RIDE_START", "임의주행 시작 · GPX 독립", 0.0, null)
@@ -192,10 +204,14 @@ class RideLogManager(context: Context) {
         val actual = actualBatteryPct?.let { fmt(it, 1) } ?: ""
         val assistMode = activeAssistMode()?.name.orEmpty()
         val assistProfileId = activeAssistProfileId().orEmpty()
+        val assistSource = activeAssistSource()
+        val assistConfidence = activeAssistConfidence()
+        val assistRawCode = activeAssistRawCode()?.toString().orEmpty()
         val estimated = estimatedBatteryPct.takeIf { it.isFinite() }?.let { fmt(it, 1) }.orEmpty()
         val line = listOf(
             now.toString(), fmt(lat, 7), fmt(lon, 7), gpsEle, fmt(speedKmh, 2), fmt(routeKm, 3),
-            fmt(offCourseM, 1), fmt(courseElevationM, 1), estimated, actual, assistMode, assistProfileId
+            fmt(offCourseM, 1), fmt(courseElevationM, 1), estimated, actual, assistMode, assistProfileId,
+            assistSource, assistConfidence, assistRawCode
         ).joinToString(",") + "\n"
         File(dir, "track.csv").appendText(line)
 
@@ -219,6 +235,9 @@ class RideLogManager(context: Context) {
             put("routeKm", routeKm)
             activeAssistMode()?.let { put("assistMode", it.name) }
             activeAssistProfileId()?.let { put("assistProfileId", it) }
+            activeAssistSource().takeIf { it.isNotBlank() }?.let { put("assistModeSource", it) }
+            activeAssistConfidence().takeIf { it.isNotBlank() }?.let { put("assistModeConfidence", it) }
+            activeAssistRawCode()?.let { put("assistRawCode", it) }
             if (batteryPct != null) put("batteryPct", batteryPct)
         }
         File(dir, "events.jsonl").appendText(o.toString() + "\n")
@@ -231,6 +250,9 @@ class RideLogManager(context: Context) {
             .putString(ACTIVE_ASSIST_MODE, profile.mode.name)
             .putString(ACTIVE_ASSIST_PROFILE_ID, profile.profileId)
             .putString(ACTIVE_ASSIST_PROFILE_JSON, profile.toJson().toString())
+            .putString(ACTIVE_ASSIST_SOURCE, "MANUAL")
+            .putString(ACTIVE_ASSIST_CONFIDENCE, "CONFIRMED")
+            .remove(ACTIVE_ASSIST_RAW_CODE)
             .putLong(ASSIST_PROBE_UNTIL, now + 12_000L)
             .apply()
         val dir = File(sessionsRoot, ride.sessionId)
@@ -241,6 +263,74 @@ class RideLogManager(context: Context) {
         }
         File(dir, "assist_profiles.jsonl").appendText(snapshot.toString() + "\n")
         recordEvent("ASSIST_MODE", "${profile.mode.label} · ${profile.compactText()} · BLE raw 12초 probe", routeKm, batteryPct)
+    }
+
+    /** Automatic BLE mode candidate. AMBIGUOUS segments are recorded but excluded from validated mode learning. */
+    fun setDetectedAssistMode(profile: AvinoxAssistProfile, routeKm: Double, batteryPct: Double?, confidence: String, rawCode: Int) {
+        if (activeRide() == null) return
+        val oldMode = activeAssistMode()
+        val oldConfidence = activeAssistConfidence()
+        val oldCode = activeAssistRawCode()
+        val normalized = if (confidence == "HIGH") "HIGH" else "AMBIGUOUS"
+        prefs.edit()
+            .putString(ACTIVE_ASSIST_MODE, profile.mode.name)
+            .putString(ACTIVE_ASSIST_PROFILE_ID, profile.profileId)
+            .putString(ACTIVE_ASSIST_PROFILE_JSON, profile.toJson().toString())
+            .putString(ACTIVE_ASSIST_SOURCE, "BLE_AUTO")
+            .putString(ACTIVE_ASSIST_CONFIDENCE, normalized)
+            .putInt(ACTIVE_ASSIST_RAW_CODE, rawCode)
+            .apply()
+        if (oldMode != profile.mode || oldConfidence != normalized || oldCode != rawCode) {
+            val ride = activeRide() ?: return
+            val now = System.currentTimeMillis()
+            val snapshot = profile.toJson().apply {
+                put("selectedAtMs", now)
+                put("routeKm", routeKm)
+                put("modeSource", "BLE_AUTO")
+                put("modeConfidence", normalized)
+                put("rawCode", rawCode)
+                if (batteryPct != null) put("batteryPct", batteryPct)
+            }
+            File(File(sessionsRoot, ride.sessionId), "assist_profiles.jsonl").appendText(snapshot.toString() + "\n")
+            recordEvent("ASSIST_AUTO_DETECT", "${profile.mode.label} · $normalized · raw=$rawCode", routeKm, batteryPct)
+        }
+    }
+
+    /** User confirms the bike display during detector validation. */
+    fun confirmDetectedAssistMode(profile: AvinoxAssistProfile, routeKm: Double, batteryPct: Double?, rawCode: Int?) {
+        if (activeRide() == null) return
+        prefs.edit()
+            .putString(ACTIVE_ASSIST_MODE, profile.mode.name)
+            .putString(ACTIVE_ASSIST_PROFILE_ID, profile.profileId)
+            .putString(ACTIVE_ASSIST_PROFILE_JSON, profile.toJson().toString())
+            .putString(ACTIVE_ASSIST_SOURCE, "USER_CONFIRMED")
+            .putString(ACTIVE_ASSIST_CONFIDENCE, "CONFIRMED")
+            .apply { if (rawCode != null) putInt(ACTIVE_ASSIST_RAW_CODE, rawCode) else remove(ACTIVE_ASSIST_RAW_CODE) }
+            .apply()
+        val ride = activeRide() ?: return
+        val now = System.currentTimeMillis()
+        val snapshot = profile.toJson().apply {
+            put("selectedAtMs", now)
+            put("routeKm", routeKm)
+            put("modeSource", "USER_CONFIRMED")
+            put("modeConfidence", "CONFIRMED")
+            rawCode?.let { put("rawCode", it) }
+            if (batteryPct != null) put("batteryPct", batteryPct)
+        }
+        File(File(sessionsRoot, ride.sessionId), "assist_profiles.jsonl").appendText(snapshot.toString() + "\n")
+        recordEvent("ASSIST_USER_CONFIRM", "${profile.mode.label} · detector verification · raw=${rawCode ?: -1}", routeKm, batteryPct)
+    }
+
+    /** Keep a compact continuous detector trace; one long FFF4 packet per second is small enough for field validation. */
+    fun recordAutoModeDetection(timestampMs: Long, detection: AvinoxAssistDetection, bytes: ByteArray) {
+        val ride = activeRide() ?: return
+        val file = File(File(sessionsRoot, ride.sessionId), "assist_auto_detect.csv")
+        if (!file.exists()) file.writeText("timestamp_ms,primary,alternate,confidence,raw_code,active_mode,active_confidence,fff4_hex\n")
+        val hex = bytes.joinToString("") { "%02X".format(it.toInt() and 0xff) }
+        file.appendText(listOf(
+            timestampMs.toString(), detection.primary.name, detection.alternate?.name.orEmpty(), detection.confidence,
+            detection.rawCode.toString(), activeAssistMode()?.name.orEmpty(), activeAssistConfidence(), hex
+        ).joinToString(",") + "\n")
     }
 
     fun restartAssistProbeWindow(durationMs: Long = 12_000L) {
@@ -260,9 +350,10 @@ class RideLogManager(context: Context) {
     }
 
     fun activeAssistSummaryText(): String {
-        val mode = activeAssistMode() ?: return "모드 미선택 · 실제 Avinox 모드를 눌러주세요"
+        val mode = activeAssistMode() ?: return "모드 자동감지 대기 · Avinox BLE 연결 확인"
         val profile = activeAssistProfile()
-        return "${mode.label} · ${profile?.compactText() ?: activeAssistProfileId().orEmpty()}"
+        val conf = activeAssistConfidence().takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+        return "${mode.label}$conf · ${profile?.compactText() ?: activeAssistProfileId().orEmpty()}"
     }
 
     fun activeSummaryText(): String {
@@ -307,6 +398,7 @@ class RideLogManager(context: Context) {
         val json = File(outDir, "$baseName.json")
         val assistProfilesOut = copyOptionalSessionFile(sessionDir, outDir, "assist_profiles.jsonl", baseName)
         val rawBleProbeOut = copyOptionalSessionFile(sessionDir, outDir, "raw_ble_probe.csv", baseName)
+        val autoModeDetectOut = copyOptionalSessionFile(sessionDir, outDir, "assist_auto_detect.csv", baseName)
         val assistStats = buildAssistModeStats(sourceCsv, events)
         val summary = JSONObject().apply {
             put("sessionId", ride.sessionId)
@@ -335,6 +427,7 @@ class RideLogManager(context: Context) {
             put("assistModeStats", assistStats)
             put("assistProfilesFile", assistProfilesOut?.name ?: "")
             put("rawBleProbeFile", rawBleProbeOut?.name ?: "")
+            put("autoModeDetectFile", autoModeDetectOut?.name ?: "")
             put("events", JSONArray().apply { events.forEach { put(it) } })
             put("actualBattery", JSONArray().apply {
                 actualStore.entries().forEach { e -> put(JSONObject().apply {
@@ -345,11 +438,11 @@ class RideLogManager(context: Context) {
         json.writeText(summary.toString(2))
 
         val zip = File(outDir, "$baseName.zip")
-        zipFiles(zip, listOfNotNull(csv, gpx, json, assistProfilesOut, rawBleProbeOut))
+        zipFiles(zip, listOfNotNull(csv, gpx, json, assistProfilesOut, rawBleProbeOut, autoModeDetectOut))
         prefs.edit().putString(LAST_ZIP, zip.absolutePath).putString(LAST_JSON, json.absolutePath)
             .remove(ACTIVE_ID).remove(ACTIVE_COURSE_ID).remove(ACTIVE_COURSE_NAME).remove(ACTIVE_START)
             .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT)
-            .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ASSIST_PROBE_UNTIL).apply()
+            .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ACTIVE_ASSIST_SOURCE).remove(ACTIVE_ASSIST_CONFIDENCE).remove(ACTIVE_ASSIST_RAW_CODE).remove(ASSIST_PROBE_UNTIL).apply()
         sessionDir.deleteRecursively()
         return RideArchive(ride.sessionId, ride.courseName, ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, learned, ride.mode)
     }
@@ -379,6 +472,7 @@ class RideLogManager(context: Context) {
         val json = File(outDir, "$baseName.json")
         val assistProfilesOut = copyOptionalSessionFile(sessionDir, outDir, "assist_profiles.jsonl", baseName)
         val rawBleProbeOut = copyOptionalSessionFile(sessionDir, outDir, "raw_ble_probe.csv", baseName)
+        val autoModeDetectOut = copyOptionalSessionFile(sessionDir, outDir, "assist_auto_detect.csv", baseName)
         val assistStats = buildAssistModeStats(sourceCsv, events)
         val actualEntries = actualStore.entries()
         val actualConsumed = cumulativeConsumed(actualEntries)
@@ -403,6 +497,7 @@ class RideLogManager(context: Context) {
             put("assistModeStats", assistStats)
             put("assistProfilesFile", assistProfilesOut?.name ?: "")
             put("rawBleProbeFile", rawBleProbeOut?.name ?: "")
+            put("autoModeDetectFile", autoModeDetectOut?.name ?: "")
             put("events", JSONArray().apply { events.forEach { put(it) } })
             put("actualBattery", JSONArray().apply {
                 actualEntries.forEach { e -> put(JSONObject().apply {
@@ -412,11 +507,11 @@ class RideLogManager(context: Context) {
         }
         json.writeText(summary.toString(2))
         val zip = File(outDir, "$baseName.zip")
-        zipFiles(zip, listOfNotNull(csv, gpx, json, assistProfilesOut, rawBleProbeOut))
+        zipFiles(zip, listOfNotNull(csv, gpx, json, assistProfilesOut, rawBleProbeOut, autoModeDetectOut))
         prefs.edit().putString(LAST_ZIP, zip.absolutePath).putString(LAST_JSON, json.absolutePath)
             .remove(ACTIVE_ID).remove(ACTIVE_COURSE_ID).remove(ACTIVE_COURSE_NAME).remove(ACTIVE_START)
             .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT)
-            .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ASSIST_PROBE_UNTIL).apply()
+            .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ACTIVE_ASSIST_SOURCE).remove(ACTIVE_ASSIST_CONFIDENCE).remove(ACTIVE_ASSIST_RAW_CODE).remove(ASSIST_PROBE_UNTIL).apply()
         sessionDir.deleteRecursively()
         return RideArchive(ride.sessionId, "임의주행", ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, 0, RideMode.FREE)
     }
@@ -513,19 +608,20 @@ class RideLogManager(context: Context) {
         if (fileName.isBlank()) return emptyList()
         val file = File(parent, fileName)
         if (!file.exists()) return emptyList()
-        data class Mark(val at: Long, val mode: AvinoxAssistMode, val profileId: String)
+        data class Mark(val at: Long, val mode: AvinoxAssistMode, val profileId: String, val confidence: String)
         val marks = file.readLines().mapNotNull { line ->
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@mapNotNull null
             val at = o.optLong("selectedAtMs", 0L)
             val mode = runCatching { AvinoxAssistMode.valueOf(o.optString("mode", "")) }.getOrNull()
             val profileId = o.optString("profileId", "")
-            if (at <= 0L || mode == null || profileId.isBlank()) null else Mark(at, mode, profileId)
+            val confidence = o.optString("modeConfidence", "CONFIRMED")
+            if (at <= 0L || mode == null || profileId.isBlank()) null else Mark(at, mode, profileId, confidence)
         }.sortedBy { it.at }
         if (marks.isEmpty()) return emptyList()
         val rideEnd = root.optLong("endMs", marks.last().at + 1L).coerceAtLeast(marks.last().at + 1L)
-        return marks.mapIndexed { index, m ->
+        return marks.mapIndexedNotNull { index, m ->
             val end = if (index + 1 < marks.size) marks[index + 1].at - 1L else rideEnd
-            AssistModeWindow(m.at, end.coerceAtLeast(m.at), m.mode, m.profileId)
+            if (m.confidence == "AMBIGUOUS") null else AssistModeWindow(m.at, end.coerceAtLeast(m.at), m.mode, m.profileId)
         }
     }
 
@@ -597,7 +693,8 @@ class RideLogManager(context: Context) {
         val attachedFit = root?.optJSONObject("postRideFit")?.optString("fileName")?.takeIf { it.isNotBlank() }?.let { File(dir, it) }
         val assistProfiles = root?.optString("assistProfilesFile")?.takeIf { it.isNotBlank() }?.let { File(dir, it) }
         val rawBleProbe = root?.optString("rawBleProbeFile")?.takeIf { it.isNotBlank() }?.let { File(dir, it) }
-        val files = listOfNotNull(File(dir, "$base.csv"), File(dir, "$base.gpx"), json, attachedFit, assistProfiles, rawBleProbe).filter { it.exists() } + extraFiles.filter { it.exists() }
+        val autoModeDetect = root?.optString("autoModeDetectFile")?.takeIf { it.isNotBlank() }?.let { File(dir, it) }
+        val files = listOfNotNull(File(dir, "$base.csv"), File(dir, "$base.gpx"), json, attachedFit, assistProfiles, rawBleProbe, autoModeDetect).filter { it.exists() } + extraFiles.filter { it.exists() }
         zipFiles(zip, files.distinctBy { it.absolutePath })
     }
 
@@ -630,8 +727,24 @@ class RideLogManager(context: Context) {
             )
         }
         val valid = entries.filter { it.percent.isFinite() && it.routeKm.isFinite() }
-        val learned = learning.trainFromRide(archive.sessionId, course, valid)
-        updateLearningDecision(archive, "USED", learned)
+        val modeWindows = readAssistModeWindows(root, json.parentFile)
+        if (modeWindows.isEmpty()) {
+            updateLearningDecision(archive, "BLOCKED_NO_MODE_LOG", 0)
+            return 0
+        }
+        // v0.18.2부터 계획주행도 임의주행과 동일한 클린 모드 분리 정책을 사용한다.
+        // 선택 모드가 확정되지 않은 구간(AMBIGUOUS)은 readAssistModeWindows에서 경계만 남기고 학습에서 제외된다.
+        // 계획주행에는 FIT 텔레메트리가 아직 붙지 않으므로 파워 보조값은 비워 두고,
+        // GPX 거리/상승량 + 실제 BLE SOC + 검증된 모드만 학습한다.
+        val learned = learning.trainModeSeparatedRide(
+            archive.sessionId,
+            course,
+            valid,
+            emptyList(),
+            modeWindows,
+            100
+        )
+        updateLearningDecision(archive, if (learned > 0) "USED" else "BLOCKED_NO_CLEAN_INTERVALS", learned)
         return learned
     }
 
@@ -650,7 +763,8 @@ class RideLogManager(context: Context) {
         val dir = archive.jsonFile.parentFile
         val assistProfiles = root.optString("assistProfilesFile").takeIf { it.isNotBlank() }?.let { name -> dir?.let { File(it, name) } }
         val rawBleProbe = root.optString("rawBleProbeFile").takeIf { it.isNotBlank() }?.let { name -> dir?.let { File(it, name) } }
-        zipFiles(archive.zipFile, listOfNotNull(archive.csvFile, archive.gpxFile, archive.jsonFile, assistProfiles, rawBleProbe).filter { it.exists() })
+        val autoModeDetect = root.optString("autoModeDetectFile").takeIf { it.isNotBlank() }?.let { name -> dir?.let { File(it, name) } }
+        zipFiles(archive.zipFile, listOfNotNull(archive.csvFile, archive.gpxFile, archive.jsonFile, assistProfiles, rawBleProbe, autoModeDetect).filter { it.exists() })
     }
 
     fun discardActive() {
@@ -658,7 +772,7 @@ class RideLogManager(context: Context) {
         if (ride != null) File(sessionsRoot, ride.sessionId).deleteRecursively()
         prefs.edit().remove(ACTIVE_ID).remove(ACTIVE_COURSE_ID).remove(ACTIVE_COURSE_NAME).remove(ACTIVE_START)
             .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT)
-            .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ASSIST_PROBE_UNTIL).apply()
+            .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ACTIVE_ASSIST_SOURCE).remove(ACTIVE_ASSIST_CONFIDENCE).remove(ACTIVE_ASSIST_RAW_CODE).remove(ASSIST_PROBE_UNTIL).apply()
     }
 
     fun lastZipFile(): File? = prefs.getString(LAST_ZIP, null)?.let(::File)?.takeIf { it.exists() }
@@ -736,7 +850,10 @@ class RideLogManager(context: Context) {
                     if (prior != null && prior.size >= 12) {
                         val mode = prior[10]
                         val profileId = prior[11]
-                        if (mode.isNotBlank() && profileId.isNotBlank() && p[10] == mode && p[11] == profileId) {
+                        val priorConfidence = prior.getOrNull(13).orEmpty()
+                        val currentConfidence = p.getOrNull(13).orEmpty()
+                        val confidenceOk = priorConfidence != "AMBIGUOUS" && currentConfidence != "AMBIGUOUS"
+                        if (confidenceOk && mode.isNotBlank() && profileId.isNotBlank() && p[10] == mode && p[11] == profileId) {
                             val key = "$mode|$profileId"
                             val a = stats.getOrPut(key) { AssistAccum() }
                             val t0 = prior[0].toLongOrNull()
@@ -772,15 +889,18 @@ class RideLogManager(context: Context) {
         var lastBatteryPct: Double? = null
         var lastBatteryMode: String? = null
         var lastBatteryProfile: String? = null
+        var lastBatteryConfidence: String? = null
         var modeChangedSinceBattery = false
         events.sortedBy { it.optLong("timestampMs") }.forEach { e ->
-            if (e.optString("type") == "ASSIST_MODE") modeChangedSinceBattery = true
+            if (e.optString("type") in setOf("ASSIST_MODE", "ASSIST_AUTO_DETECT", "ASSIST_USER_CONFIRM")) modeChangedSinceBattery = true
             if (e.optString("type") == "BATTERY_BLE" && e.has("batteryPct")) {
                 val pct = e.optDouble("batteryPct", Double.NaN)
                 val mode = e.optString("assistMode")
                 val profile = e.optString("assistProfileId")
+                val confidence = e.optString("assistModeConfidence")
+                val confidenceOk = confidence != "AMBIGUOUS" && lastBatteryConfidence != "AMBIGUOUS"
                 val prevPct = lastBatteryPct
-                if (pct.isFinite() && prevPct != null && !modeChangedSinceBattery && mode.isNotBlank() && profile.isNotBlank() && mode == lastBatteryMode && profile == lastBatteryProfile) {
+                if (pct.isFinite() && prevPct != null && confidenceOk && !modeChangedSinceBattery && mode.isNotBlank() && profile.isNotBlank() && mode == lastBatteryMode && profile == lastBatteryProfile) {
                     val drop = prevPct - pct
                     if (drop in 0.0..5.0) stats.getOrPut("$mode|$profile") { AssistAccum() }.verifiedSocDropPct += drop
                 }
@@ -788,6 +908,7 @@ class RideLogManager(context: Context) {
                     lastBatteryPct = pct
                     lastBatteryMode = mode
                     lastBatteryProfile = profile
+                    lastBatteryConfidence = confidence
                     modeChangedSinceBattery = false
                 }
             }

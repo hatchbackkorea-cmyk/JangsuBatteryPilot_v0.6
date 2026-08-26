@@ -87,6 +87,10 @@ class AvinoxAssistProfileStore(context: Context) {
         prefs.edit().putString(PREF_MODE, mode.name).putBoolean(PREF_MODE_EXPLICIT, true).apply()
     }
 
+    fun clearPreferredMode() {
+        prefs.edit().remove(PREF_MODE).putBoolean(PREF_MODE_EXPLICIT, false).apply()
+    }
+
     fun get(mode: AvinoxAssistMode): AvinoxAssistProfile {
         val raw = prefs.getString(key(mode), null) ?: return defaultProfile(mode)
         return runCatching { fromJson(JSONObject(raw), mode) }.getOrElse { defaultProfile(mode) }

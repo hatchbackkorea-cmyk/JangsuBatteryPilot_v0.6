@@ -71,6 +71,10 @@ class MainActivity : Activity() {
     private lateinit var tvGpsStatus: TextView
     private lateinit var tvRideMode: TextView
     private lateinit var tvAssistModeCurrent: TextView
+    private lateinit var tvAssistModeHint: TextView
+    private lateinit var layoutAssistVerify: LinearLayout
+    private lateinit var btnAssistModeConfirm: Button
+    private lateinit var btnAssistModeMismatch: Button
     private lateinit var btnAssistProfileEdit: Button
     private lateinit var btnAssistEco: Button
     private lateinit var btnAssistAuto: Button
@@ -145,6 +149,12 @@ class MainActivity : Activity() {
     private var latestBleSoc: Int? = null
     private var latestBleState: String = "BLE 대기"
     private var latestBleUpdatedMs: Long = 0L
+    private var latestAssistPrimary: AvinoxAssistMode? = null
+    private var latestAssistAlternate: AvinoxAssistMode? = null
+    private var latestAssistConfidence: String = ""
+    private var latestAssistRawCode: Int? = null
+    private var latestAssistUpdatedMs: Long = 0L
+    private var lastPlanAssistMode: AvinoxAssistMode? = null
     private var testMode = false
     private var receiverRegistered = false
     private var speechPendingAfterPermission = false
@@ -166,6 +176,19 @@ class MainActivity : Activity() {
             if (intent.hasExtra(RideService.EXTRA_BLE_SOC)) latestBleSoc = intent.getIntExtra(RideService.EXTRA_BLE_SOC, -1).takeIf { it in 0..100 }
             if (intent.hasExtra(RideService.EXTRA_BLE_STATE)) latestBleState = intent.getStringExtra(RideService.EXTRA_BLE_STATE).orEmpty().ifBlank { latestBleState }
             if (intent.hasExtra(RideService.EXTRA_BLE_UPDATED_MS)) latestBleUpdatedMs = intent.getLongExtra(RideService.EXTRA_BLE_UPDATED_MS, latestBleUpdatedMs)
+            if (intent.hasExtra(RideService.EXTRA_ASSIST_PRIMARY)) latestAssistPrimary = runCatching { AvinoxAssistMode.valueOf(intent.getStringExtra(RideService.EXTRA_ASSIST_PRIMARY).orEmpty()) }.getOrNull()
+            latestAssistAlternate = if (intent.hasExtra(RideService.EXTRA_ASSIST_ALTERNATE)) runCatching { AvinoxAssistMode.valueOf(intent.getStringExtra(RideService.EXTRA_ASSIST_ALTERNATE).orEmpty()) }.getOrNull() else null
+            if (intent.hasExtra(RideService.EXTRA_ASSIST_CONFIDENCE)) latestAssistConfidence = intent.getStringExtra(RideService.EXTRA_ASSIST_CONFIDENCE).orEmpty()
+            if (intent.hasExtra(RideService.EXTRA_ASSIST_RAW_CODE)) latestAssistRawCode = intent.getIntExtra(RideService.EXTRA_ASSIST_RAW_CODE, -1).takeIf { it >= 0 }
+            if (intent.hasExtra(RideService.EXTRA_ASSIST_UPDATED_MS)) latestAssistUpdatedMs = intent.getLongExtra(RideService.EXTRA_ASSIST_UPDATED_MS, latestAssistUpdatedMs)
+            val activeMode = intent.getStringExtra(RideService.EXTRA_ASSIST_ACTIVE_MODE)?.let { runCatching { AvinoxAssistMode.valueOf(it) }.getOrNull() }
+            val activeConfidence = intent.getStringExtra(RideService.EXTRA_ASSIST_ACTIVE_CONFIDENCE).orEmpty()
+            if (activeMode != null && activeConfidence in setOf("HIGH", "CONFIRMED") && activeMode != lastPlanAssistMode) {
+                assistProfileStore.setPreferredMode(activeMode)
+                lastPlanAssistMode = activeMode
+                rebuildEnergyModelsForSelectedMode()
+            }
+            renderAssistModeUi()
             if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, false)
         }
     }
@@ -208,6 +231,9 @@ class MainActivity : Activity() {
         btnAssistAuto.setOnClickListener { selectAssistMode(AvinoxAssistMode.AUTO) }
         btnAssistTrail.setOnClickListener { selectAssistMode(AvinoxAssistMode.TRAIL) }
         btnAssistTurbo.setOnClickListener { selectAssistMode(AvinoxAssistMode.TURBO) }
+        btnAssistModeConfirm.setOnClickListener { confirmDetectedAssistPrimary() }
+        btnAssistModeMismatch.setOnClickListener { showDetectedAssistCorrection() }
+        tvAssistModeCurrent.setOnClickListener { if (logManager.isActive()) showDetectedAssistCorrection() }
         btnAssistProfileEdit.setOnClickListener { showAssistProfilePicker() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnManualBattery.setOnClickListener { showManualBatteryDialog() }
@@ -240,6 +266,10 @@ class MainActivity : Activity() {
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
         tvRideMode = findViewById(R.id.tvRideMode)
         tvAssistModeCurrent = findViewById(R.id.tvAssistModeCurrent)
+        tvAssistModeHint = findViewById(R.id.tvAssistModeHint)
+        layoutAssistVerify = findViewById(R.id.layoutAssistVerify)
+        btnAssistModeConfirm = findViewById(R.id.btnAssistModeConfirm)
+        btnAssistModeMismatch = findViewById(R.id.btnAssistModeMismatch)
         btnAssistProfileEdit = findViewById(R.id.btnAssistProfileEdit)
         btnAssistEco = findViewById(R.id.btnAssistEco)
         btnAssistAuto = findViewById(R.id.btnAssistAuto)
@@ -377,13 +407,20 @@ class MainActivity : Activity() {
         latestRouteKm = 0.0
         latestSpeedKmh = 0.0
         latestOffCourseM = 0.0
+        latestAssistPrimary = null
+        latestAssistAlternate = null
+        latestAssistConfidence = ""
+        latestAssistRawCode = null
+        latestAssistUpdatedMs = 0L
+        lastPlanAssistMode = null
+        assistProfileStore.clearPreferredMode()
+        rebuildEnergyModelsForSelectedMode()
         logManager.startPlan(courseMeta)
-        activatePreferredAssistMode()
         recordAvinoxReferenceEvent()
         renderRideState()
         renderAtKm(0.0, testMode)
         if (!testMode) ensurePermissionsAndStart()
-        Toast.makeText(this, "계획주행 시작 · Avinox BLE SOC 실시간 보정 · 충전 권장량은 주행 중 자동 재계산됩니다.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "계획주행 시작 · Avinox BLE 배터리 + 모드 자동 감지 · 충전 권장량 자동 재계산", Toast.LENGTH_LONG).show()
     }
 
     private fun showRideStartModeDialog() {
@@ -412,12 +449,19 @@ class MainActivity : Activity() {
         latestFreeAscentM = 0.0
         latestSpeedKmh = 0.0
         latestOffCourseM = 0.0
+        latestAssistPrimary = null
+        latestAssistAlternate = null
+        latestAssistConfidence = ""
+        latestAssistRawCode = null
+        latestAssistUpdatedMs = 0L
+        lastPlanAssistMode = null
+        assistProfileStore.clearPreferredMode()
+        rebuildEnergyModelsForSelectedMode()
         logManager.startFree()
-        activatePreferredAssistMode()
         renderRideState()
         renderFreeRide()
         ensurePermissionsAndStart()
-        Toast.makeText(this, "임의주행 시작 · Avinox BLE 자동 기록 · 실제 어시스트 모드 버튼을 확인하세요.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "임의주행 시작 · Avinox BLE 배터리 + 모드 자동 감지", Toast.LENGTH_LONG).show()
     }
 
     private fun recordAvinoxReferenceEvent() {
@@ -482,8 +526,8 @@ class MainActivity : Activity() {
             .setMessage(
                 "${archive.courseName}\n${RideFormatter.one(archive.maxRouteKm)} km\n\n" +
                     "GPX · CSV · JSON · ZIP 저장 완료\n\n" +
-                    "이 주행 파일의 실제 배터리 기록을 앞으로의 배터리 예측 학습에 사용할까요?\n" +
-                    "차량 테스트나 임의로 입력한 배터리 값이 포함됐다면 ‘사용 안 함’을 선택하세요."
+                    "검증된 Avinox 모드 + 실제 BLE 배터리 구간만 앞으로의 예측 학습에 사용할까요?\n" +
+                    "모드가 불확실했던 구간은 자동 제외됩니다. 테스트 주행이면 ‘사용 안 함’을 선택하세요."
             )
             .setPositiveButton("학습에 사용") { _, _ ->
                 val learned = logManager.learnFromArchive(archive, course, learningStore)
@@ -599,28 +643,78 @@ class MainActivity : Activity() {
 
     private fun renderAssistModeUi() {
         if (!::assistProfileStore.isInitialized || !::tvAssistModeCurrent.isInitialized) return
-        val active = logManager.activeAssistMode()
-        val preferred = assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }
-        val shown = active ?: preferred
-        tvAssistModeCurrent.text = when {
-            active != null -> {
-                val p = assistProfileStore.get(active)
-                "Avinox ${active.label} · ${p.compactText()} · #${p.profileId.takeLast(10)}"
+        val activeMode = logManager.activeAssistMode()
+        val activeConfidence = logManager.activeAssistConfidence()
+        val detectionFresh = latestAssistUpdatedMs > 0L && System.currentTimeMillis() - latestAssistUpdatedMs <= 15_000L
+        val primary = latestAssistPrimary.takeIf { detectionFresh }
+        val alternate = latestAssistAlternate.takeIf { detectionFresh }
+        val compatible = activeMode != null && (activeMode == primary || activeMode == alternate)
+
+        when {
+            !logManager.isActive() -> {
+                tvAssistModeCurrent.text = "Avinox 모드 · 주행 시작 시 자동 감지"
+                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
+                tvAssistModeHint.text = "4개 수동 버튼 없이 BLE에서 자동으로 읽습니다"
+                tvAssistModeHint.setTextColor(getColor(R.color.text_secondary))
+                layoutAssistVerify.visibility = View.GONE
             }
-            preferred != null -> {
-                val p = assistProfileStore.get(preferred)
-                "시작 예정 ${preferred.label} · ${p.compactText()} · #${p.profileId.takeLast(10)}"
+            primary == null -> {
+                tvAssistModeCurrent.text = "Avinox 모드 · BLE 감지 대기…"
+                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
+                tvAssistModeHint.text = "배터리와 같은 FFF4 실시간 패킷에서 모드를 찾는 중"
+                tvAssistModeHint.setTextColor(getColor(R.color.text_secondary))
+                layoutAssistVerify.visibility = View.GONE
             }
-            else -> "Avinox 모드 · 미선택 (주행 전/후 실제 모드를 눌러주세요)"
+            activeConfidence == "CONFIRMED" && compatible -> {
+                tvAssistModeCurrent.text = "Avinox 모드 · ${activeMode!!.label}  ✓"
+                tvAssistModeCurrent.setTextColor(getColor(R.color.good))
+                tvAssistModeHint.text = "사용자 확인됨 · BLE raw ${latestAssistRawCode ?: "-"} · 다르면 위 모드 표시를 탭"
+                tvAssistModeHint.setTextColor(getColor(R.color.good))
+                layoutAssistVerify.visibility = View.GONE
+            }
+            latestAssistConfidence == "HIGH" && alternate == null -> {
+                tvAssistModeCurrent.text = "Avinox 모드 · ${primary.label}"
+                tvAssistModeCurrent.setTextColor(getColor(R.color.good))
+                tvAssistModeHint.text = "● BLE 자동감지 · 검증중 · 자전거 표시와 다르면 위 모드 표시를 탭"
+                tvAssistModeHint.setTextColor(getColor(R.color.good))
+                layoutAssistVerify.visibility = View.GONE
+            }
+            else -> {
+                val altText = alternate?.let { " / ${it.label}" }.orEmpty()
+                tvAssistModeCurrent.text = "Avinox 모드 후보 · ${primary.label}$altText"
+                tvAssistModeCurrent.setTextColor(getColor(R.color.warn))
+                tvAssistModeHint.text = "AUTO가 이 값으로도 움직여 아직 검증 필요 · raw ${latestAssistRawCode ?: "-"}"
+                tvAssistModeHint.setTextColor(getColor(R.color.warn))
+                btnAssistModeConfirm.text = "✓ ${primary.label} 맞음"
+                layoutAssistVerify.visibility = View.VISIBLE
+            }
         }
-        val buttons = mapOf(
-            AvinoxAssistMode.ECO to btnAssistEco, AvinoxAssistMode.AUTO to btnAssistAuto,
-            AvinoxAssistMode.TRAIL to btnAssistTrail, AvinoxAssistMode.TURBO to btnAssistTurbo
-        )
-        buttons.forEach { (mode, button) ->
-            val mark = if (mode == shown) "● " else ""
-            button.text = mark + mode.label
-        }
+    }
+
+    private fun confirmDetectedAssistPrimary() {
+        val mode = latestAssistPrimary ?: return
+        confirmDetectedAssist(mode)
+    }
+
+    private fun showDetectedAssistCorrection() {
+        if (!logManager.isActive()) return
+        val modes = AvinoxAssistMode.values()
+        AlertDialog.Builder(this)
+            .setTitle("자전거의 실제 Avinox 모드")
+            .setMessage("우리 앱의 자동 감지 표시와 다를 때만 실제 자전거 화면의 모드를 선택하세요. 이 확인값은 모드 감지 검증과 클린 학습에 사용됩니다.")
+            .setItems(modes.map { it.label }.toTypedArray()) { _, which -> confirmDetectedAssist(modes[which]) }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun confirmDetectedAssist(mode: AvinoxAssistMode) {
+        logManager.confirmDetectedAssistMode(assistProfileStore.get(mode), currentRideKm(), freshBleSoc()?.toDouble(), latestAssistRawCode)
+        assistProfileStore.setPreferredMode(mode)
+        lastPlanAssistMode = mode
+        rebuildEnergyModelsForSelectedMode()
+        Toast.makeText(this, "${mode.label} 확인값 저장 · 이후 자동 감지와 비교", Toast.LENGTH_SHORT).show()
+        renderAssistModeUi()
+        if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
     }
 
     private fun showAssistProfilePicker() {
@@ -1198,13 +1292,10 @@ class MainActivity : Activity() {
 
     private fun renderBleStatusLine() {
         val fresh = freshBleSoc()
-        tvActualDetail.visibility = View.VISIBLE
-        tvActualDetail.text = when {
-            fresh != null -> "● Avinox BLE 자동 · 실시간"
-            logManager.isActive() -> latestBleState.ifBlank { "Avinox BLE 연결 중…" }
-            else -> "주행 시작 시 Avinox BLE 자동 연결"
-        }
-        tvActualDetail.setTextColor(if (fresh != null) getColor(R.color.good) else getColor(R.color.text_secondary))
+        // v0.18.2부터 별도 'Avinox 실제 배터리' 카드는 숨기고 상단 큰 배터리 카드로 통합한다.
+        tvActualDetail.visibility = View.GONE
+        tvActualBattery.visibility = View.GONE
+        btnManualBattery.visibility = if (logManager.isActive() && fresh == null && !testMode) View.VISIBLE else View.GONE
     }
 
     private fun showManualBatteryDialog() {
@@ -1722,12 +1813,29 @@ class MainActivity : Activity() {
         val climb = course.nextMajorClimb(km)
 
         tvCurrentKm.text = "${RideFormatter.one(km)} km"
-        val pct = battery.percent.roundToInt().coerceIn(0, 100)
-        tvBattery.text = "$pct%"
-        tvBattery.setTextColor(batteryColor(battery.percent))
-        progressBattery.progress = pct
-        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(batteryColor(battery.percent))
-        tvBatteryRange.text = "예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%${if (battery.calibrated) " · 실측보정" else ""}"
+        val planPct = battery.percent.roundToInt().coerceIn(0, 100)
+        val freshSoc = freshBleSoc()
+        val lastObservedSoc = actualStatus?.entry?.percent?.roundToInt()?.coerceIn(0, 100)
+        val displaySoc = when {
+            simulated -> planPct
+            freshSoc != null -> freshSoc
+            lastObservedSoc != null -> lastObservedSoc
+            else -> null
+        }
+        tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
+        tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        progressBattery.progress = displaySoc ?: 0
+        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        tvBatteryRange.text = when {
+            simulated -> "테스트 · 계획 $planPct% · 예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
+            freshSoc != null -> {
+                val diff = freshSoc - planPct
+                "● BLE 실제 · 계획 $planPct% · 오차 ${if (diff >= 0) "+" else ""}$diff% · 예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
+            }
+            lastObservedSoc != null -> "최근 실측 $lastObservedSoc% · BLE 재연결 중 · 계획 $planPct%"
+            else -> "BLE 연결 대기 · 계획 $planPct% · 예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
+        }
+        btnManualBattery.visibility = if (!simulated && logManager.isActive() && freshSoc == null) View.VISIBLE else View.GONE
         renderEnergyComparison(km)
 
         tvRiskStatus.text = reserve.label
@@ -1740,15 +1848,8 @@ class MainActivity : Activity() {
         val differenceText = if (reserve.differencePct >= 0) "여유 ${diffAbs}%" else "부족 ${diffAbs}%"
         tvRiskDetail.text = "${reserve.targetName} ${reserve.predictedPct.roundToInt()}%\n목표 ${reserve.targetPct.roundToInt()}%\n$differenceText"
 
-        val latestActual = actualStatus?.entry
-        val displaySoc = freshBleSoc() ?: latestActual?.percent?.roundToInt()
-        if (displaySoc == null) {
-            tvActualBattery.text = "—"
-            tvActualBattery.setTextColor(getColor(R.color.text_secondary))
-        } else {
-            tvActualBattery.text = "$displaySoc%"
-            tvActualBattery.setTextColor(batteryColor(displaySoc.toDouble()))
-        }
+        // 하위 호환용 숨김 뷰. 실제 SOC는 이제 상단의 큰 배터리 카드가 담당한다.
+        tvActualBattery.text = displaySoc?.let { "$it%" } ?: "—"
         renderBleStatusLine()
 
         val remainFinish = (course.totalKm - km).coerceAtLeast(0.0)
@@ -1837,10 +1938,19 @@ class MainActivity : Activity() {
         val consumed = cumulativeActualConsumption(actualStore.entries())
         val charged = cumulativeChargeAdded(actualStore.entries())
         tvCurrentKm.text = "${RideFormatter.one(latestRouteKm)} km"
-        tvBattery.text = actual?.let { "${it.percent.roundToInt()}%" } ?: "—"
-        tvBattery.setTextColor(actual?.let { batteryColor(it.percent) } ?: getColor(R.color.text_secondary))
-        progressBattery.progress = actual?.percent?.roundToInt()?.coerceIn(0, 100) ?: 0
-        tvBatteryRange.text = "임의주행 · GPX 예측 미사용 · GPS + BLE 배터리 자동 기록"
+        val freshSoc = freshBleSoc()
+        val storedSoc = actual?.percent?.roundToInt()?.coerceIn(0, 100)
+        val displaySoc = freshSoc ?: storedSoc
+        tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
+        tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        progressBattery.progress = displaySoc ?: 0
+        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        tvBatteryRange.text = when {
+            freshSoc != null -> "● BLE 실제 · 임의주행 · GPS + 배터리 자동 기록"
+            storedSoc != null -> "최근 실측 $storedSoc% · BLE 재연결 중 · 임의주행"
+            else -> "BLE 연결 대기 · 임의주행"
+        }
+        btnManualBattery.visibility = if (logManager.isActive() && freshSoc == null) View.VISIBLE else View.GONE
         tvCompareActual.text = consumed?.let(::formatPct) ?: "—"
         tvCompareModel.text = "사후"
         tvCompareAvinox.text = "사후"
@@ -1848,9 +1958,7 @@ class MainActivity : Activity() {
         tvRiskStatus.text = "기록 중"
         tvRiskStatus.setTextColor(getColor(R.color.accent))
         tvRiskDetail.text = "임의주행은 목표 코스/종점이 없습니다. Avinox BLE SOC를 자동 기록해 실제 누적 소비량을 계산합니다."
-        val displaySoc = freshBleSoc() ?: actual?.percent?.roundToInt()
         tvActualBattery.text = displaySoc?.let { "$it%" } ?: "—"
-        tvActualBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
         renderBleStatusLine()
         tvNextCheckpoint.text = "자유 주행"
         tvNextCheckpointDetail.text = "GPX 독립\n${RideFormatter.one(latestRouteKm)} km 기록\n배터리 ${actual?.percent?.roundToInt()?.let { "$it%" } ?: "입력 전"}"
@@ -1981,8 +2089,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.1"
-    } catch (_: Exception) { "0.18.1" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.2"
+    } catch (_: Exception) { "0.18.2" }
 
     override fun onResume() {
         super.onResume()

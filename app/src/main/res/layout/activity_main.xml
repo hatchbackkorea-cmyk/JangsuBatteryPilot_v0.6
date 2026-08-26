@@ -81,7 +81,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Avinox 모드 · 미선택"
+                            android:text="Avinox 모드 · 자동 감지 대기"
                             android:textColor="@color/text_primary"
                             android:textSize="13sp"
                             android:textStyle="bold" />
@@ -98,26 +98,52 @@
                             android:textSize="11sp" />
                     </LinearLayout>
 
+                    <!-- v0.18.2: 기존 4개 수동 모드 버튼은 검증 완료 후 제거. ID는 호환용으로 숨겨둔다. -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
+                        android:visibility="gone"
                         android:orientation="horizontal">
-                        <Button android:id="@+id/btnAssistEco" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="Eco" android:textAllCaps="false" android:textSize="11sp" />
-                        <Button android:id="@+id/btnAssistAuto" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Auto" android:textAllCaps="false" android:textSize="11sp" />
+                        <Button android:id="@+id/btnAssistEco" android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" android:text="Eco" />
+                        <Button android:id="@+id/btnAssistAuto" android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" android:text="Auto" />
+                        <Button android:id="@+id/btnAssistTrail" android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" android:text="Trail" />
+                        <Button android:id="@+id/btnAssistTurbo" android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" android:text="Turbo" />
                     </LinearLayout>
                     <LinearLayout
+                        android:id="@+id/layoutAssistVerify"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-                        <Button android:id="@+id/btnAssistTrail" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="Trail" android:textAllCaps="false" android:textSize="11sp" />
-                        <Button android:id="@+id/btnAssistTurbo" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Turbo" android:textAllCaps="false" android:textSize="11sp" />
+                        android:layout_marginTop="4dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+                        <Button
+                            android:id="@+id/btnAssistModeConfirm"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_weight="1"
+                            android:minHeight="0dp"
+                            android:text="✓ 자전거와 같음"
+                            android:textAllCaps="false"
+                            android:textSize="10sp" />
+                        <Button
+                            android:id="@+id/btnAssistModeMismatch"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_marginStart="4dp"
+                            android:layout_weight="1"
+                            android:minHeight="0dp"
+                            android:text="다름 · 실제모드 선택"
+                            android:textAllCaps="false"
+                            android:textSize="10sp" />
                     </LinearLayout>
                     <TextView
+                        android:id="@+id/tvAssistModeHint"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
                         android:gravity="center"
-                        android:text="자전거 모드를 바꾼 직후 같은 버튼을 누르세요 · 12초 BLE 원시값도 함께 수집"
+                        android:text="주행 시작 시 Avinox BLE에서 모드를 자동 감지합니다"
                         android:textColor="@color/text_secondary"
                         android:textSize="9sp" />
                 </LinearLayout>
@@ -161,12 +187,31 @@
                             android:layout_weight="1"
                             android:gravity="end"
                             android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
+                            <LinearLayout
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="배터리"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="12sp" />
+                                android:gravity="end|center_vertical"
+                                android:orientation="horizontal">
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="배터리"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="12sp" />
+                                <Button
+                                    android:id="@+id/btnManualBattery"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="30dp"
+                                    android:layout_marginStart="5dp"
+                                    android:minHeight="0dp"
+                                    android:minWidth="0dp"
+                                    android:paddingStart="7dp"
+                                    android:paddingEnd="7dp"
+                                    android:text="수동"
+                                    android:textAllCaps="false"
+                                    android:textSize="9sp"
+                                    android:visibility="gone" />
+                            </LinearLayout>
                             <TextView
                                 android:id="@+id/tvBattery"
                                 android:layout_width="match_parent"
@@ -347,9 +392,8 @@
                     android:orientation="horizontal"
                     android:baselineAligned="false">
                     <LinearLayout
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        android:layout_weight="1"
                         android:background="@drawable/panel_bg"
                         android:gravity="center_vertical"
                         android:minHeight="122dp"
@@ -377,6 +421,7 @@
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
+                        android:visibility="gone"
                         android:layout_marginStart="6dp"
                         android:layout_weight="1"
                         android:background="@drawable/panel_bg"
@@ -397,7 +442,7 @@
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                             <Button
-                                android:id="@+id/btnManualBattery"
+                                android:id="@+id/btnManualBatteryLegacy"
                                 android:layout_width="wrap_content"
                                 android:layout_height="36dp"
                                 android:minWidth="0dp"

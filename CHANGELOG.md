@@ -1,3 +1,18 @@
+# v0.18.2 — BLE HUD + Avinox Mode Auto-Detect Validation
+
+- 주행 상단 큰 `배터리` 숫자를 Avinox BLE 실제 SOC의 단일 대표값으로 변경; 계획 SOC는 하단 보조문구로 분리
+- 별도 `AVINOX 실제 배터리` 카드를 숨기고 배터리 판단 카드를 전체 폭으로 정리
+- BLE가 끊긴 동안에만 상단 배터리 옆 비상 `수동` 입력 버튼 표시
+- Eco / Auto / Trail / Turbo 4개 큰 수동 모드 버튼을 주행 화면에서 숨김
+- FFF4 long packet byte[68] 기반 Avinox 모드 자동감지 검증기 추가
+- 현장 검증상 1=Eco, 4=Auto 강한 후보; 2/3은 Auto 동적상태와 Trail/Turbo가 겹칠 수 있어 AMBIGUOUS로 명시
+- 애매한 후보에서만 `맞음 / 다름` 검증 UI를 노출해 매 모드 변경마다 4개 버튼을 누를 필요를 없앰
+- 사용자 확인값은 CONFIRMED, 강한 후보는 HIGH, 애매한 후보는 AMBIGUOUS로 로그에 출처/신뢰도 저장
+- AMBIGUOUS 구간은 모드별 개인학습에서 자동 제외해 잘못된 AUTO/TRAIL/TURBO 분류가 학습모델을 오염시키지 않도록 보호
+- 계획주행 학습도 기존 통합 학습 대신 검증된 모드별 클린 구간만 사용하도록 변경; 모드 로그/클린 구간이 없으면 학습 차단
+- `assist_auto_detect.csv`를 추가해 주행 내내 감지 후보/신뢰도/raw code/FFF4 long packet을 보존, selected_mode 필드 추가 역추적 가능
+- HIGH/CONFIRMED 모드가 바뀌면 해당 모드의 학습값으로 계획/페이싱 모델을 즉시 다시 계산
+
 # v0.18.1 — Clean Mode Learning + GPS Ascent Filter
 
 - 임의주행 FIT 학습을 Eco / Auto / Trail / Turbo 모드별로 완전 분리
