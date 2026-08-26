@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.17.0 — Avinox Assist Profile Field Validation
+- MIN / Eco / Auto / Trail / Turbo / BOOST 6개 모드를 주행 화면에서 직접 표식 가능
+- 자전거에서 모드를 바꾼 직후 앱의 같은 모드 버튼을 누르면 시간·거리·GPS 고도·BLE SOC와 함께 모드 전환 이벤트 저장
+- 모드별 커스텀 설정값을 별도 프로필로 저장: 어시스트 최소/최대, 최대토크, 최대파워, 오버런, 스타트 어시스트, 연속 어시스트, BOOST 활성/지속시간/로직강화
+- 제공된 2026-08-26 Avinox 화면을 사진 기준 초기 프로필로 등록; 숫자가 표시되지 않는 3개 반응 슬라이더는 0~4 상대 위치로만 기록
+- 프로필 내용이 달라지면 결정론적 profileId가 달라져 같은 Trail이라도 다른 세팅의 주행 데이터가 섞이지 않도록 분리
+- track.csv에 assist_mode / assist_profile_id 추가
+- 모드 선택 직후 12초 동안 FFF4 BLE 원시 Notify를 raw_ble_probe.csv에 저장해 Avinox 내부 모드 필드 역추적 가능
+- assist_profiles.jsonl에 실제 주행에 사용된 프로필 스냅샷 저장
+- 종료 JSON에 assistModeStats 추가: 모드/프로필별 사용시간·거리·GPS 상승·검증된 SOC 하락량·800Wh 환산 에너지 저장
+- SOC 소비량은 모드 전환이 없었던 연속 BLE SOC 하락만 해당 모드에 귀속해 혼합 구간 오염 방지
+- 모드 데이터는 현장 검증용이며 개인 배터리 학습에는 자동 반영하지 않음
+
 ## v0.16.3 — Avinox BLE SOC 실주행 통합
 - 66%→0x42, 65%→0x41, 64%→0x40 3회 독립 검증 결과를 바탕으로 FFF0/FFF4 Notify의 SOC 필드를 실주행 자동 입력으로 승격
 - 계획주행/임의주행 시작 시 RideService가 Avinox를 자동 검색·연결·재연결

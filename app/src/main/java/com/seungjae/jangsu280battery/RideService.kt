@@ -98,11 +98,16 @@ class RideService : Service(), LocationListener {
         bleClient = AvinoxBleSocClient(this, object : AvinoxBleSocClient.Listener {
             override fun onBleState(state: String, address: String?) {
                 latestBleState = state
+                if (state.contains("SOC 수신 대기")) logManager.restartAssistProbeWindow()
                 broadcastBleState()
             }
 
             override fun onSoc(soc: Int, timestampMs: Long, address: String?) {
                 handleBleSoc(soc, timestampMs, address)
+            }
+
+            override fun onRawNotification(timestampMs: Long, bytes: ByteArray, address: String?) {
+                logManager.recordRawBleNotification(timestampMs, bytes)
             }
         })
         plan = AdaptiveBatteryPlan(basePlan, actualStore)

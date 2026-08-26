@@ -17,8 +17,10 @@ android {
         applicationId = "com.seungjae.jangsu280battery"
         minSdk = 26
         targetSdk = 35
-        versionCode = 28
-        versionName = "0.16.3"
+        val appVersionName = rootProject.file("VERSION.txt").readText().trim()
+        val versionParts = appVersionName.split(".").map { it.toInt() }
+        versionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+        versionName = appVersionName
         val escapedRepo = updateRepository.replace("\\", "\\\\").replace("\"", "\\\"")
         buildConfigField("String", "UPDATE_REPOSITORY", "\"$escapedRepo\"")
     }

@@ -18,6 +18,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -25,6 +26,7 @@ import android.widget.RadioGroup
 import android.text.InputType
 import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -55,6 +57,7 @@ class MainActivity : Activity() {
     private lateinit var bleStateStore: AvinoxBleStateStore
     private lateinit var chargingSessionStore: ChargingSessionStore
     private lateinit var avinoxReferenceStore: AvinoxReferenceStore
+    private lateinit var assistProfileStore: AvinoxAssistProfileStore
     private lateinit var plan: AdaptiveBatteryPlan
     private lateinit var pacingAdvisor: EnergyPacingAdvisor
 
@@ -67,6 +70,14 @@ class MainActivity : Activity() {
     private lateinit var btnChargeToggle: Button
     private lateinit var tvGpsStatus: TextView
     private lateinit var tvRideMode: TextView
+    private lateinit var tvAssistModeCurrent: TextView
+    private lateinit var btnAssistProfileEdit: Button
+    private lateinit var btnAssistMin: Button
+    private lateinit var btnAssistEco: Button
+    private lateinit var btnAssistAuto: Button
+    private lateinit var btnAssistTrail: Button
+    private lateinit var btnAssistTurbo: Button
+    private lateinit var btnAssistBoost: Button
     private lateinit var tvCurrentKm: TextView
     private lateinit var tvBattery: TextView
     private lateinit var tvBatteryRange: TextView
@@ -175,6 +186,7 @@ class MainActivity : Activity() {
         bleStateStore = AvinoxBleStateStore(this)
         chargingSessionStore = ChargingSessionStore(this)
         avinoxReferenceStore = AvinoxReferenceStore(this)
+        assistProfileStore = AvinoxAssistProfileStore(this)
 
         if (!logManager.isActive()) {
             actualStore.clear()
@@ -194,6 +206,13 @@ class MainActivity : Activity() {
         btnAvinoxReferenceEdit.setOnClickListener { showAvinoxReferenceDialog() }
         btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else showRideStartModeDialog() }
         btnChargeToggle.setOnClickListener { toggleCharging() }
+        btnAssistMin.setOnClickListener { selectAssistMode(AvinoxAssistMode.MIN) }
+        btnAssistEco.setOnClickListener { selectAssistMode(AvinoxAssistMode.ECO) }
+        btnAssistAuto.setOnClickListener { selectAssistMode(AvinoxAssistMode.AUTO) }
+        btnAssistTrail.setOnClickListener { selectAssistMode(AvinoxAssistMode.TRAIL) }
+        btnAssistTurbo.setOnClickListener { selectAssistMode(AvinoxAssistMode.TURBO) }
+        btnAssistBoost.setOnClickListener { selectAssistMode(AvinoxAssistMode.BOOST) }
+        btnAssistProfileEdit.setOnClickListener { showAssistProfilePicker() }
         btnSpeakNow.setOnClickListener { speakCurrentSummary() }
         btnManualBattery.setOnClickListener { showManualBatteryDialog() }
         btnRideReport.setOnClickListener { showRideReport() }
@@ -209,6 +228,7 @@ class MainActivity : Activity() {
         refreshInlineSettings()
         refreshLearningPage()
         renderRideState()
+        renderAssistModeUi()
         renderCurrentMode()
         UpdateManager.maybeCheckOnLaunch(this)
     }
@@ -223,6 +243,14 @@ class MainActivity : Activity() {
         btnChargeToggle = findViewById(R.id.btnChargeToggle)
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
         tvRideMode = findViewById(R.id.tvRideMode)
+        tvAssistModeCurrent = findViewById(R.id.tvAssistModeCurrent)
+        btnAssistProfileEdit = findViewById(R.id.btnAssistProfileEdit)
+        btnAssistMin = findViewById(R.id.btnAssistMin)
+        btnAssistEco = findViewById(R.id.btnAssistEco)
+        btnAssistAuto = findViewById(R.id.btnAssistAuto)
+        btnAssistTrail = findViewById(R.id.btnAssistTrail)
+        btnAssistTurbo = findViewById(R.id.btnAssistTurbo)
+        btnAssistBoost = findViewById(R.id.btnAssistBoost)
         tvCurrentKm = findViewById(R.id.tvCurrentKm)
         tvBattery = findViewById(R.id.tvBattery)
         tvBatteryRange = findViewById(R.id.tvBatteryRange)
@@ -355,11 +383,12 @@ class MainActivity : Activity() {
         latestSpeedKmh = 0.0
         latestOffCourseM = 0.0
         logManager.startPlan(courseMeta)
+        activatePreferredAssistMode()
         recordAvinoxReferenceEvent()
         renderRideState()
         renderAtKm(0.0, testMode)
         if (!testMode) ensurePermissionsAndStart()
-        Toast.makeText(this, "계획주행 시작 · Avinox BLE 배터리를 자동 연결합니다.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "계획주행 시작 · Avinox BLE 배터리 자동 연결 · 실제 어시스트 모드 버튼을 확인하세요.", Toast.LENGTH_LONG).show()
     }
 
     private fun showRideStartModeDialog() {
@@ -389,10 +418,11 @@ class MainActivity : Activity() {
         latestSpeedKmh = 0.0
         latestOffCourseM = 0.0
         logManager.startFree()
+        activatePreferredAssistMode()
         renderRideState()
         renderFreeRide()
         ensurePermissionsAndStart()
-        Toast.makeText(this, "임의주행 시작 · Avinox BLE 배터리를 자동 기록합니다. 마이크 입력은 필요 없습니다.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "임의주행 시작 · Avinox BLE 자동 기록 · 실제 어시스트 모드 버튼을 확인하세요.", Toast.LENGTH_LONG).show()
     }
 
     private fun recordAvinoxReferenceEvent() {
@@ -497,6 +527,157 @@ class MainActivity : Activity() {
             else -> "주행 시작 후 충전 기록 가능"
         }
         if (!active) tvGpsStatus.text = if (testMode) "테스트 모드" else "주행 대기"
+        renderAssistModeUi()
+    }
+
+    private fun selectAssistMode(mode: AvinoxAssistMode) {
+        assistProfileStore.setPreferredMode(mode)
+        if (logManager.isActive()) {
+            val profile = assistProfileStore.get(mode)
+            logManager.setAssistMode(profile, currentRideKm(), freshBleSoc()?.toDouble())
+            Toast.makeText(this, "${mode.label} 기록 시작 · 12초 BLE probe", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "${mode.label}을 시작 모드로 선택했습니다.", Toast.LENGTH_SHORT).show()
+        }
+        renderAssistModeUi()
+    }
+
+    private fun activatePreferredAssistMode() {
+        if (!logManager.isActive() || !assistProfileStore.hasPreferredMode()) {
+            renderAssistModeUi()
+            return
+        }
+        val mode = assistProfileStore.preferredMode()
+        logManager.setAssistMode(assistProfileStore.get(mode), currentRideKm(), freshBleSoc()?.toDouble())
+        renderAssistModeUi()
+    }
+
+    private fun currentRideKm(): Double = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
+
+    private fun renderAssistModeUi() {
+        if (!::assistProfileStore.isInitialized || !::tvAssistModeCurrent.isInitialized) return
+        val active = logManager.activeAssistMode()
+        val preferred = assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }
+        val shown = active ?: preferred
+        tvAssistModeCurrent.text = when {
+            active != null -> {
+                val p = assistProfileStore.get(active)
+                "Avinox ${active.label} · ${p.compactText()} · #${p.profileId.takeLast(10)}"
+            }
+            preferred != null -> {
+                val p = assistProfileStore.get(preferred)
+                "시작 예정 ${preferred.label} · ${p.compactText()} · #${p.profileId.takeLast(10)}"
+            }
+            else -> "Avinox 모드 · 미선택 (주행 전/후 실제 모드를 눌러주세요)"
+        }
+        val buttons = mapOf(
+            AvinoxAssistMode.MIN to btnAssistMin, AvinoxAssistMode.ECO to btnAssistEco, AvinoxAssistMode.AUTO to btnAssistAuto,
+            AvinoxAssistMode.TRAIL to btnAssistTrail, AvinoxAssistMode.TURBO to btnAssistTurbo, AvinoxAssistMode.BOOST to btnAssistBoost
+        )
+        buttons.forEach { (mode, button) ->
+            val mark = if (mode == shown) "● " else ""
+            button.text = mark + mode.label
+        }
+    }
+
+    private fun showAssistProfilePicker() {
+        val modes = AvinoxAssistMode.values()
+        val labels = modes.map { m -> "${m.label}  ·  ${assistProfileStore.get(m).compactText()}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Avinox 모드 설정값")
+            .setMessage("사진 기준 초기값을 넣어뒀습니다. 자전거 Avinox 앱에서 값을 바꾸면 여기에도 같은 값으로 저장하세요. 모드별 프로필 ID가 달라져 주행 데이터가 섞이지 않습니다.")
+            .setItems(labels) { _, which -> showAssistProfileEditor(modes[which]) }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun showAssistProfileEditor(mode: AvinoxAssistMode) {
+        val current = assistProfileStore.get(mode)
+        val density = resources.displayMetrics.density
+        fun px(dp: Int) = (dp * density).roundToInt()
+        fun field(label: String, value: Int?): Pair<TextView, EditText> {
+            val title = TextView(this).apply { text = label; textSize = 13f; setTextColor(getColor(R.color.text_primary)); setPadding(0, px(6), 0, 0) }
+            val input = EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText(value?.toString().orEmpty())
+                hint = "비워두면 미기록"
+            }
+            return title to input
+        }
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(8), px(18), px(8)) }
+        val inputs = linkedMapOf<String, EditText>()
+        if (mode != AvinoxAssistMode.BOOST) {
+            listOf(
+                "assistMin" to field("어시스트 최소 (고정 모드는 같은 값)", current.assistMin),
+                "assistMax" to field("어시스트 최대 (고정 모드는 같은 값)", current.assistMax),
+                "torque" to field("최대 토크 N·m", current.maxTorqueNm),
+                "power" to field("최대 파워 W", current.maxPowerW),
+                "overrun" to field("모터 오버런 위치 0~4 (0=최단, 4=최장)", current.motorOverrunStep),
+                "start" to field("스타트 어시스트 위치 0~4", current.startAssistStep),
+                "continuous" to field("연속 어시스트 위치 0~4", current.continuousAssistStep)
+            ).forEach { (key, pair) -> body.addView(pair.first); body.addView(pair.second); inputs[key] = pair.second }
+        }
+        val boostEnabled = CheckBox(this).apply { text = "부스트 활성화"; isChecked = current.boostEnabled == true; setTextColor(getColor(R.color.text_primary)) }
+        val boostLogic = CheckBox(this).apply { text = "Boost 로직 강화"; isChecked = current.boostLogicEnhanced == true; setTextColor(getColor(R.color.text_primary)) }
+        var boostDuration: EditText? = null
+        if (mode == AvinoxAssistMode.BOOST) {
+            body.addView(boostEnabled)
+            val pair = field("지속 시간(초)", current.boostDurationSec)
+            body.addView(pair.first); body.addView(pair.second); boostDuration = pair.second
+            body.addView(boostLogic)
+        }
+        body.addView(TextView(this).apply {
+            text = "※ 오버런/스타트/연속은 Avinox 화면에 숫자가 표시되지 않아 슬라이더 상대 위치(0~4)로 기록합니다. 정확한 물리 단위로 해석하지 않습니다."
+            textSize = 11f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, px(8), 0, 0)
+        })
+        val scroll = ScrollView(this).apply { addView(body) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("${mode.label} 프로필")
+            .setView(scroll)
+            .setPositiveButton("저장", null)
+            .setNeutralButton("사진값 초기화", null)
+            .setNegativeButton("취소", null)
+            .create()
+        dialog.setOnShowListener {
+            fun read(key: String): Int? = inputs[key]?.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.toIntOrNull()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val profile = if (mode == AvinoxAssistMode.BOOST) {
+                        AvinoxAssistProfile(mode, boostEnabled = boostEnabled.isChecked, boostDurationSec = boostDuration?.text?.toString()?.toIntOrNull(), boostLogicEnhanced = boostLogic.isChecked, sourceNote = "사용자 입력")
+                    } else {
+                        val amin = read("assistMin"); val amax = read("assistMax")
+                        require(amin == null || amin in 1..15) { "어시스트 최소는 1~15로 입력하세요." }
+                        require(amax == null || amax in 1..15) { "어시스트 최대는 1~15로 입력하세요." }
+                        require(amin == null || amax == null || amin <= amax) { "어시스트 최소가 최대보다 클 수 없습니다." }
+                        listOf("overrun", "start", "continuous").forEach { key -> read(key)?.let { require(it in 0..4) { "상대 위치는 0~4로 입력하세요." } } }
+                        AvinoxAssistProfile(mode, amin, amax, read("torque"), read("power"), read("overrun"), read("start"), read("continuous"), sourceNote = "사용자 입력")
+                    }
+                    if (profile.maxTorqueNm != null) require(profile.maxTorqueNm in 10..105) { "최대 토크는 10~105 N·m 범위로 입력하세요." }
+                    if (profile.maxPowerW != null) require(profile.maxPowerW in 100..1000) { "최대 파워는 100~1000 W 범위로 입력하세요." }
+                    if (profile.boostDurationSec != null) require(profile.boostDurationSec in 10..60) { "BOOST 지속시간은 10~60초로 입력하세요." }
+                    assistProfileStore.save(profile)
+                    if (logManager.isActive() && logManager.activeAssistMode() == mode) {
+                        logManager.setAssistMode(profile, currentRideKm(), freshBleSoc()?.toDouble())
+                    }
+                    renderAssistModeUi()
+                    Toast.makeText(this, "${mode.label} 설정 저장 · ${profile.profileId}", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                } catch (e: Exception) {
+                    Toast.makeText(this, e.message ?: "입력값을 확인하세요.", Toast.LENGTH_LONG).show()
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                assistProfileStore.reset(mode)
+                val reset = assistProfileStore.get(mode)
+                if (logManager.isActive() && logManager.activeAssistMode() == mode) {
+                    logManager.setAssistMode(reset, currentRideKm(), freshBleSoc()?.toDouble())
+                }
+                renderAssistModeUi()
+                dialog.dismiss()
+                Toast.makeText(this, "${mode.label}을 사진 기준 초기값으로 복원했습니다.", Toast.LENGTH_SHORT).show()
+            }
+        }
+        dialog.show()
     }
 
 
@@ -1757,8 +1938,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.16.3"
-    } catch (_: Exception) { "0.16.3" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.17.0"
+    } catch (_: Exception) { "0.17.0" }
 
     override fun onResume() {
         super.onResume()

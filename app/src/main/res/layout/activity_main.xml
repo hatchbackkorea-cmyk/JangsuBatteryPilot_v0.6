@@ -67,6 +67,67 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="5dp"
+                    android:background="@drawable/panel_bg"
+                    android:orientation="vertical"
+                    android:padding="7dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+                        <TextView
+                            android:id="@+id/tvAssistModeCurrent"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Avinox 모드 · 미선택"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                        <Button
+                            android:id="@+id/btnAssistProfileEdit"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minHeight="0dp"
+                            android:minWidth="0dp"
+                            android:paddingStart="9dp"
+                            android:paddingEnd="9dp"
+                            android:text="⚙ 설정값"
+                            android:textAllCaps="false"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:orientation="horizontal">
+                        <Button android:id="@+id/btnAssistMin" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="MIN" android:textAllCaps="false" android:textSize="11sp" />
+                        <Button android:id="@+id/btnAssistEco" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Eco" android:textAllCaps="false" android:textSize="11sp" />
+                        <Button android:id="@+id/btnAssistAuto" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Auto" android:textAllCaps="false" android:textSize="11sp" />
+                    </LinearLayout>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <Button android:id="@+id/btnAssistTrail" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="Trail" android:textAllCaps="false" android:textSize="11sp" />
+                        <Button android:id="@+id/btnAssistTurbo" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Turbo" android:textAllCaps="false" android:textSize="11sp" />
+                        <Button android:id="@+id/btnAssistBoost" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="BOOST" android:textAllCaps="false" android:textSize="11sp" />
+                    </LinearLayout>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:text="자전거 모드를 바꾼 직후 같은 버튼을 누르세요 · 12초 BLE 원시값도 함께 수집"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="9sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
                     android:background="@drawable/panel_hero_bg"
                     android:orientation="vertical"
                     android:padding="11dp">
