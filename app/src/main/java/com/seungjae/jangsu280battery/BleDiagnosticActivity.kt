@@ -25,6 +25,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
 import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -94,9 +96,29 @@ class BleDiagnosticActivity : Activity() {
         val bytes: ByteArray
     )
 
+    private fun applySystemBarInsets() {
+        val root = findViewById<View>(R.id.rootBleDiagnostic)
+        val baseLeft = root.paddingLeft
+        val baseTop = root.paddingTop
+        val baseRight = root.paddingRight
+        val baseBottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                baseLeft + bars.left,
+                baseTop + bars.top,
+                baseRight + bars.right,
+                baseBottom + bars.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_ble_diagnostic)
+        applySystemBarInsets()
 
         findViewById<Button>(R.id.btnBleBack).setOnClickListener { finish() }
         tvStatus = findViewById(R.id.tvBleStatus)
