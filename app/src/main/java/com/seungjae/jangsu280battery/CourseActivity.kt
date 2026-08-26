@@ -141,9 +141,10 @@ class CourseActivity : Activity() {
         val waypointCount = course.pois.count { !it.userAdded }
         btnWaypointCharge.text = "웨이포인트 선택 ($waypointCount)"
 
-        val recommended = if (stations.isEmpty()) BatteryPlan(course, learningStore, emptyList()).recommendedChargeKm(AppSettings.finishTarget(this)) else null
+        val planForStations = BatteryPlan(course, learningStore, stations)
+        val recommended = if (stations.isEmpty()) planForStations.recommendedChargeKm(AppSettings.finishTarget(this)) else null
         tvChargingSummary.text = when {
-            stations.isNotEmpty() -> "충전소 ${stations.size}개 · 배터리 판단은 다음 충전소 우선"
+            stations.isNotEmpty() -> "충전소 ${stations.size}개 · 앱 권장과 사용자 목표를 분리 · ${AvinoxChargeCurve.curveLabel()}"
             recommended != null -> "충전소 없음 · 현재는 종점 기준 · 권장 검토 ${RideFormatter.one(recommended)}km 부근"
             else -> "충전소 없음 · 현재는 종점 기준"
         }
@@ -159,10 +160,14 @@ class CourseActivity : Activity() {
             })
             return
         }
-        stations.forEachIndexed { index, station -> chargingContainer.addView(buildStationRow(meta, station, index + 1, riding)) }
+        val planner = EnergyTripPlanner(planForStations)
+        stations.forEachIndexed { index, station ->
+            val advice = planner.adviceAtStation(station.routeKm, AppSettings.finishTarget(this))
+            chargingContainer.addView(buildStationRow(meta, station, index + 1, riding, advice))
+        }
     }
 
-    private fun buildStationRow(meta: CourseMeta, station: ChargingStation, number: Int, riding: Boolean): View {
+    private fun buildStationRow(meta: CourseMeta, station: ChargingStation, number: Int, riding: Boolean, advice: ChargePlanAdvice?): View {
         val outer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), dp(9), dp(11), dp(9))
@@ -178,7 +183,19 @@ class CourseActivity : Activity() {
         outer.addView(TextView(this).apply {
             val off = if (station.distanceFromRouteM >= 80.0) " · 코스 ${station.distanceFromRouteM.roundToInt()}m" else ""
             val detour = if (station.detourKm > 0.01) " · 추가 ${RideFormatter.one(station.detourKm)}km" else ""
-            text = "${station.sourceLabel()} · 충전 후 ${station.chargeToPct.roundToInt()}%$off$detour"
+            text = buildString {
+                append("${station.sourceLabel()} · 사용자 목표 ${station.chargeToPct.roundToInt()}%$off$detour")
+                advice?.let {
+                    append("\n앱 권장 ${it.appRecommendedPct.roundToInt()}% · 도착예상 ${it.predictedArrivalPct.roundToInt()}%")
+                    append(" · 권장 ${AvinoxChargeCurve.minutesText(it.minutesArrivalToRecommended)}")
+                    if (it.userTargetPct.roundToInt() != it.appRecommendedPct.roundToInt()) {
+                        append(" / 사용자 ${AvinoxChargeCurve.minutesText(it.minutesArrivalToUserTarget)}")
+                    }
+                    append(" · 다음 ${it.nextTargetName}")
+                    if (!it.feasibleAt100) append(" · ⚠ 100%도 부족")
+                    else if (it.userTargetPct + 0.49 < it.appRecommendedPct) append(" · ⚠ 사용자 목표 낮음")
+                }
+            }
             textSize = 11f
             setTextColor(getColor(R.color.text_secondary))
             setPadding(0, dp(3), 0, dp(5))
@@ -448,13 +465,19 @@ class CourseActivity : Activity() {
             setTextColor(getColor(R.color.text_secondary))
             setPadding(0, 0, 0, dp(8))
         })
+        root.addView(TextView(this).apply {
+            text = "앱 권장 충전량은 GPX·학습·실주행 소비에 따라 자동 계산됩니다. 아래 목표 %는 사용자가 정하는 값이며 앱 권장값을 덮어쓰지 않습니다."
+            textSize = 12f
+            setTextColor(getColor(R.color.text_secondary))
+            setPadding(0, 0, 0, dp(8))
+        })
         val nameInput = EditText(this).apply {
             hint = "충전소 이름"
             setText(station.name)
             inputType = InputType.TYPE_CLASS_TEXT
         }
         val chargeInput = EditText(this).apply {
-            hint = "충전 후 목표 % (1~100)"
+            hint = "사용자 목표 충전량 % (1~100)"
             setText(station.chargeToPct.roundToInt().toString())
             inputType = InputType.TYPE_CLASS_NUMBER
         }
@@ -485,7 +508,7 @@ class CourseActivity : Activity() {
                 val target = chargeInput.text.toString().toIntOrNull()
                 val detour = detourInput.text.toString().toDoubleOrNull() ?: 0.0
                 if (target == null || target !in 1..100 || detour < 0.0 || detour > 200.0) {
-                    Toast.makeText(this, "충전 목표는 1~100%, 추가 거리는 0~200km로 입력해주세요.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "사용자 목표 충전량은 1~100%, 추가 거리는 0~200km로 입력해주세요.", Toast.LENGTH_LONG).show()
                     return@setOnClickListener
                 }
                 chargingStore.upsert(meta.id, station.copy(name = name, chargeToPct = target.toDouble(), detourKm = detour))

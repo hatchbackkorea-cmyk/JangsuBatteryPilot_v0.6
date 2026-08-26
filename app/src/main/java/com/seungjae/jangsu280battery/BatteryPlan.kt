@@ -112,7 +112,7 @@ class BatteryPlan(
         if (cp?.chargeToPct != null) {
             return BatteryEstimate(
                 cp.arrivalPct,
-                "${cp.name}: 도착 예상 ${cp.arrivalPct.toInt()}% → ${cp.chargeToPct.toInt()}% 충전",
+                "${cp.name}: 도착 예상 ${cp.arrivalPct.toInt()}% → 사용자 목표 ${cp.chargeToPct.toInt()}%",
                 atChargePoint = true,
                 calibrated = learning.samples().isNotEmpty()
             )
@@ -183,7 +183,7 @@ class BatteryPlan(
 
     fun assistText(routeKm: Double, battery: BatteryEstimate, stats10: ElevationStats): String {
         val cp = checkpoints.firstOrNull { it.chargeToPct != null && abs(routeKm - it.km) <= 0.15 }
-        if (cp != null) return "⚡ ${cp.chargeToPct!!.toInt()}%까지 충전 후 다음 구간을 시작하세요."
+        if (cp != null) return "⚡ 사용자 목표 ${cp.chargeToPct!!.toInt()}% · 앱 권장값과 비교해 출발하세요."
         if (battery.percent <= 20.0) return "배터리 여유가 적습니다 · 보조 강도를 보수적으로"
         if (stats10.ascentM >= 600.0) return "강한 업힐 구간 예정 · 초반 과도한 어시스트 사용 주의"
         if (stats10.ascentM >= 400.0) return "오르막 비중 높음 · 계획 페이스 유지"

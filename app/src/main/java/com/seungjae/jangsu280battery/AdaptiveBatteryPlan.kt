@@ -51,7 +51,11 @@ class AdaptiveBatteryPlan(
 
         val plannedLong = base.plannedConsumption(startKm, latest.routeKm)
         val actualLong = startPct - latest.percent
-        if (plannedLong < 1.0 || actualLong < 0.0) return null
+        // 완충 직후 100→99%는 BMS 표시 상단 버퍼/라운딩 때문에 다른 1%보다 오래 유지될 수 있다.
+        // 이 1%만으로 소비계수를 만들면 초반 예상거리를 과도하게 늘릴 수 있으므로 100% 출발 epoch는
+        // 최소 2% 하락(98% 도달) 뒤부터 실시간 소비 보정을 시작한다.
+        val minimumReliableDrop = if (startPct >= 99.5) 2.0 else 0.8
+        if (plannedLong < 1.0 || actualLong < minimumReliableDrop) return null
         var longFactor = actualLong / plannedLong
 
         var recentFactor: Double? = null

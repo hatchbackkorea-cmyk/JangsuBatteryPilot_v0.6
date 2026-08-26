@@ -59,6 +59,7 @@ class MainActivity : Activity() {
     private lateinit var assistProfileStore: AvinoxAssistProfileStore
     private lateinit var plan: AdaptiveBatteryPlan
     private lateinit var pacingAdvisor: EnergyPacingAdvisor
+    private lateinit var tripPlanner: EnergyTripPlanner
 
     private lateinit var btnCourseMenu: Button
     private lateinit var btnCourseImportQuick: Button
@@ -312,6 +313,7 @@ class MainActivity : Activity() {
             basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+            tripPlanner = EnergyTripPlanner(basePlan, plan)
             profileView.setCourse(course)
             val prefs = AppSettings.prefs(this)
             if (resetProgress) {
@@ -381,7 +383,7 @@ class MainActivity : Activity() {
         renderRideState()
         renderAtKm(0.0, testMode)
         if (!testMode) ensurePermissionsAndStart()
-        Toast.makeText(this, "계획주행 시작 · Avinox BLE 배터리 자동 연결 · 실제 어시스트 모드 버튼을 확인하세요.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "계획주행 시작 · Avinox BLE SOC 실시간 보정 · 충전 권장량은 주행 중 자동 재계산됩니다.", Toast.LENGTH_LONG).show()
     }
 
     private fun showRideStartModeDialog() {
@@ -512,15 +514,54 @@ class MainActivity : Activity() {
         btnChargeToggle.isEnabled = active
         btnChargeToggle.text = if (charging != null) "⚡ 충전 완료" else "⚡ 충전 시작"
         tvChargeStatus.text = when {
-            charging != null -> {
+            charging != null && logManager.isFreeRide() -> {
                 val min = ((System.currentTimeMillis() - charging.startMs).coerceAtLeast(0L) / 60_000L)
                 "충전 중 · 시작 ${charging.arrivalPct.roundToInt()}% · ${RideFormatter.one(charging.routeKm)}km · ${min}분"
             }
+            charging != null -> "충전 중 · 실시간 목표 계산 중"
             active -> ""
             else -> "주행 시작 후 충전 기록 가능"
         }
         if (!active) tvGpsStatus.text = if (testMode) "테스트 모드" else "주행 대기"
         renderAssistModeUi()
+    }
+
+    private fun renderChargePlannerStatus(routeKm: Double) {
+        if (!logManager.isActive() || logManager.isFreeRide()) return
+        val activeCharge = chargingSessionStore.active()
+        val advice = if (activeCharge != null) {
+            val factor = plan.calibration(activeCharge.routeKm)?.factor ?: plan.calibration(routeKm)?.factor ?: 1.0
+            tripPlanner.adviceAtStation(activeCharge.routeKm, finishTargetPct, factor, activeCharge.arrivalPct)
+        } else {
+            tripPlanner.nextChargeAdvice(routeKm, finishTargetPct)
+        }
+        if (advice == null) {
+            if (activeCharge == null) tvChargeStatus.text = ""
+            return
+        }
+        if (activeCharge != null) {
+            val currentSoc = (freshBleSoc()?.toDouble() ?: actualStore.latest()?.percent ?: activeCharge.arrivalPct)
+            tvChargeStatus.text = tripPlanner.chargingStatusText(advice, currentSoc)
+            tvChargeStatus.setTextColor(when {
+                !advice.feasibleAt100 -> getColor(R.color.danger)
+                advice.userTargetPct + 0.49 < advice.appRecommendedPct && currentSoc + 0.49 >= advice.userTargetPct -> getColor(R.color.warn)
+                currentSoc + 0.49 >= advice.appRecommendedPct -> getColor(R.color.good)
+                else -> getColor(R.color.accent)
+            })
+        } else {
+            tvChargeStatus.text = buildString {
+                append("⚡ ${advice.stationName}: 앱권장 ${advice.appRecommendedPct.roundToInt()}% · 사용자 ${advice.userTargetPct.roundToInt()}%")
+                append(" · 권장 ${AvinoxChargeCurve.minutesText(advice.minutesArrivalToRecommended)}")
+                if (advice.userTargetPct.roundToInt() != advice.appRecommendedPct.roundToInt()) {
+                    append(" / 사용자 ${AvinoxChargeCurve.minutesText(advice.minutesArrivalToUserTarget)}")
+                }
+                append(" · 소비보정 ${tripPlanner.factorText(routeKm)}")
+            }
+            tvChargeStatus.setTextColor(when {
+                !advice.feasibleAt100 || advice.userTargetPct + 0.49 < advice.appRecommendedPct -> getColor(R.color.warn)
+                else -> getColor(R.color.accent)
+            })
+        }
     }
 
     private fun selectAssistMode(mode: AvinoxAssistMode) {
@@ -1393,7 +1434,11 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         actualStore.save(pct.toDouble(), km, ActualEntryKind.ARRIVAL, now, ActualEntrySource.CHARGE)
         chargingSessionStore.start(km, pct.toDouble(), now)
-        if (logManager.isActive()) logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%", km, pct.toDouble())
+        if (logManager.isActive()) {
+            val advice = if (!logManager.isFreeRide()) tripPlanner.adviceAtStation(km, finishTargetPct, plan.calibration(km)?.factor ?: 1.0, pct.toDouble()) else null
+            val detail = advice?.let { " · 앱권장 ${it.appRecommendedPct.roundToInt()}% · 사용자 ${it.userTargetPct.roundToInt()}%" }.orEmpty()
+            logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%$detail", km, pct.toDouble())
+        }
         renderRideState()
         if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(km, testMode)
         Toast.makeText(this, "충전 시작 · $pct%", Toast.LENGTH_SHORT).show()
@@ -1406,7 +1451,7 @@ class MainActivity : Activity() {
         if (logManager.isActive()) {
             logManager.recordEvent(
                 "CHARGE_COMPLETE",
-                "충전 완료 · ${active.arrivalPct.roundToInt()}% → $pct%",
+                "충전 완료 · ${active.arrivalPct.roundToInt()}% → $pct% · 실제 ${((now - active.startMs).coerceAtLeast(0L) / 60_000L)}분",
                 active.routeKm,
                 pct.toDouble()
             )
@@ -1503,7 +1548,11 @@ class MainActivity : Activity() {
         }.orEmpty()
         val elevText = if (course.hasElevation) "앞으로 10킬로미터 상승 ${stats.ascentM.roundToInt()}미터." else "GPX에 고도 데이터가 없습니다."
         val pacing = pacingAdvisor.advice(km, latestSpeedKmh, reserve)
-        speakText("현재 ${RideFormatter.one(km)}킬로미터. 예상 배터리 ${battery.percent.roundToInt()}퍼센트. 상태 ${reserve.label}. 종점 예상 ${plan.forecast(km, course.totalKm).percent.roundToInt()}퍼센트. 목표 ${finishTargetPct.roundToInt()}퍼센트. $elevText$cpText ${pacing.voiceText}")
+        val chargeAdvice = tripPlanner.nextChargeAdvice(km, finishTargetPct)
+        val chargeText = chargeAdvice?.let {
+            " 다음 충전소 앱 권장 ${it.appRecommendedPct.roundToInt()}퍼센트, 사용자 목표 ${it.userTargetPct.roundToInt()}퍼센트."
+        }.orEmpty()
+        speakText("현재 ${RideFormatter.one(km)}킬로미터. 예상 배터리 ${battery.percent.roundToInt()}퍼센트. 상태 ${reserve.label}. 종점 예상 ${plan.forecast(km, course.totalKm).percent.roundToInt()}퍼센트. 목표 ${finishTargetPct.roundToInt()}퍼센트. $elevText$cpText$chargeText ${pacing.voiceText}")
     }
 
     private fun speakNextCheckpoint() {
@@ -1702,9 +1751,16 @@ class MainActivity : Activity() {
             val atCurrent = abs(cp.km - km) <= 0.15
             val predicted = plan.forecast(km, cp.km).percent.roundToInt()
             tvNextCheckpoint.text = if (atCurrent) "현재 · ${cp.name}" else cp.name
+            val chargeAdvice = if (cp.chargeToPct != null) tripPlanner.nextChargeAdvice(km, finishTargetPct) else null
             tvNextCheckpointDetail.text = when {
-                cp.chargeToPct != null && atCurrent -> "현재 지점\n도착예상 $predicted%\n충전목표 ${cp.chargeToPct.roundToInt()}%"
-                cp.chargeToPct != null -> "${RideFormatter.one(remain)} km 남음\n도착예상 $predicted%\n충전목표 ${cp.chargeToPct.roundToInt()}%"
+                cp.chargeToPct != null && chargeAdvice != null -> buildString {
+                    append(if (atCurrent) "현재 지점" else "${RideFormatter.one(remain)} km 남음")
+                    append("\n도착예상 $predicted%")
+                    append("\n앱권장 ${chargeAdvice.appRecommendedPct.roundToInt()}% · 사용자 ${chargeAdvice.userTargetPct.roundToInt()}%")
+                    if (!chargeAdvice.feasibleAt100) append("\n⚠ 100%로도 ${chargeAdvice.shortagePctAt100.roundToInt()}% 부족")
+                }
+                cp.chargeToPct != null && atCurrent -> "현재 지점\n도착예상 $predicted%\n사용자 목표 ${cp.chargeToPct.roundToInt()}%"
+                cp.chargeToPct != null -> "${RideFormatter.one(remain)} km 남음\n도착예상 $predicted%\n사용자 목표 ${cp.chargeToPct.roundToInt()}%"
                 cp.km >= course.totalKm - 0.05 -> "${RideFormatter.one(remain)} km 남음\n종점예상 $predicted%\nETA ${RideFormatter.etaClock(remain, latestSpeedKmh)}"
                 else -> "${RideFormatter.one(remain)} km 남음\n예상 $predicted%\nETA ${RideFormatter.etaClock(remain, latestSpeedKmh)}"
             }
@@ -1750,6 +1806,7 @@ class MainActivity : Activity() {
         val offText = if (simulated) "테스트" else "이탈 ${latestOffCourseM.roundToInt()}m"
         val ele = if (latestCourseElevation > 0) latestCourseElevation else point.ele
         tvCourseStatus.text = if (course.hasElevation) "고도 ${ele.roundToInt()}m · GPS $accText · $offText" else "GPS $accText · $offText · 고도 없음"
+        renderChargePlannerStatus(km)
 
         if (!simulated) {
             tvGpsStatus.text = when {
@@ -1915,8 +1972,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.17.0"
-    } catch (_: Exception) { "0.17.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.0"
+    } catch (_: Exception) { "0.18.0" }
 
     override fun onResume() {
         super.onResume()
@@ -1933,6 +1990,7 @@ class MainActivity : Activity() {
             basePlan = BatteryPlan(course, learningStore, chargingStore.list(activeId))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+            tripPlanner = EnergyTripPlanner(basePlan, plan)
         }
         loadBleSnapshot()
         applySettings()

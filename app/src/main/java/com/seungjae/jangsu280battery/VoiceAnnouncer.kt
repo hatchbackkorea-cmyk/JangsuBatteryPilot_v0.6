@@ -98,7 +98,7 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
                 val key = "cp_arrive_${checkpoint.km}"
                 if (announced.add(key)) {
                     if (checkpoint.chargeToPct != null) {
-                        enqueue("${checkpoint.name}입니다. 계획상 도착 배터리 ${checkpoint.arrivalPct.roundToInt()}퍼센트. ${checkpoint.chargeToPct.roundToInt()}퍼센트까지 충전하세요.")
+                        enqueue("${checkpoint.name}입니다. 계획상 도착 배터리 ${checkpoint.arrivalPct.roundToInt()}퍼센트. 사용자 설정 충전 목표는 ${checkpoint.chargeToPct.roundToInt()}퍼센트입니다. 앱의 현재 권장값도 확인하세요.")
                     } else if (checkpoint.name.contains("종점")) {
                         enqueue("종점입니다. 예상 배터리 약 ${checkpoint.arrivalPct.roundToInt()}퍼센트입니다.")
                     } else {
