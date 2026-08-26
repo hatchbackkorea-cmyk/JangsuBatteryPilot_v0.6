@@ -103,8 +103,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="3dp"
                         android:orientation="horizontal">
-                        <Button android:id="@+id/btnAssistMin" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="MIN" android:textAllCaps="false" android:textSize="11sp" />
-                        <Button android:id="@+id/btnAssistEco" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Eco" android:textAllCaps="false" android:textSize="11sp" />
+                        <Button android:id="@+id/btnAssistEco" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="Eco" android:textAllCaps="false" android:textSize="11sp" />
                         <Button android:id="@+id/btnAssistAuto" android:layout_width="0dp" android:layout_height="42dp" android:layout_marginStart="3dp" android:layout_weight="1" android:text="Auto" android:textAllCaps="false" android:textSize="11sp" />
                     </LinearLayout>
                     <LinearLayout

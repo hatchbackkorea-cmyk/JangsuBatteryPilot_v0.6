@@ -71,7 +71,6 @@ class MainActivity : Activity() {
     private lateinit var tvRideMode: TextView
     private lateinit var tvAssistModeCurrent: TextView
     private lateinit var btnAssistProfileEdit: Button
-    private lateinit var btnAssistMin: Button
     private lateinit var btnAssistEco: Button
     private lateinit var btnAssistAuto: Button
     private lateinit var btnAssistTrail: Button
@@ -204,7 +203,6 @@ class MainActivity : Activity() {
         btnAvinoxReferenceEdit.setOnClickListener { showAvinoxReferenceDialog() }
         btnRideToggle.setOnClickListener { if (logManager.isActive()) confirmEndRide() else showRideStartModeDialog() }
         btnChargeToggle.setOnClickListener { toggleCharging() }
-        btnAssistMin.setOnClickListener { selectAssistMode(AvinoxAssistMode.MIN) }
         btnAssistEco.setOnClickListener { selectAssistMode(AvinoxAssistMode.ECO) }
         btnAssistAuto.setOnClickListener { selectAssistMode(AvinoxAssistMode.AUTO) }
         btnAssistTrail.setOnClickListener { selectAssistMode(AvinoxAssistMode.TRAIL) }
@@ -242,7 +240,6 @@ class MainActivity : Activity() {
         tvRideMode = findViewById(R.id.tvRideMode)
         tvAssistModeCurrent = findViewById(R.id.tvAssistModeCurrent)
         btnAssistProfileEdit = findViewById(R.id.btnAssistProfileEdit)
-        btnAssistMin = findViewById(R.id.btnAssistMin)
         btnAssistEco = findViewById(R.id.btnAssistEco)
         btnAssistAuto = findViewById(R.id.btnAssistAuto)
         btnAssistTrail = findViewById(R.id.btnAssistTrail)
@@ -567,7 +564,7 @@ class MainActivity : Activity() {
             else -> "Avinox 모드 · 미선택 (주행 전/후 실제 모드를 눌러주세요)"
         }
         val buttons = mapOf(
-            AvinoxAssistMode.MIN to btnAssistMin, AvinoxAssistMode.ECO to btnAssistEco, AvinoxAssistMode.AUTO to btnAssistAuto,
+            AvinoxAssistMode.ECO to btnAssistEco, AvinoxAssistMode.AUTO to btnAssistAuto,
             AvinoxAssistMode.TRAIL to btnAssistTrail, AvinoxAssistMode.TURBO to btnAssistTurbo
         )
         buttons.forEach { (mode, button) ->

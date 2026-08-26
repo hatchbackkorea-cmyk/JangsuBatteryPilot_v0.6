@@ -5,7 +5,6 @@ import org.json.JSONObject
 import java.security.MessageDigest
 
 enum class AvinoxAssistMode(val label: String) {
-    MIN("MIN"),
     ECO("Eco"),
     AUTO("Auto"),
     TRAIL("Trail"),
@@ -123,7 +122,6 @@ class AvinoxAssistProfileStore(context: Context) {
      * The three unlabeled response sliders are stored as relative 0..4 positions only.
      */
     fun defaultProfile(mode: AvinoxAssistMode): AvinoxAssistProfile = when (mode) {
-        AvinoxAssistMode.MIN -> AvinoxAssistProfile(mode, 5, 5, 40, 150, 0, 1, 2, sourceNote = "2026-08-26 사진 기준 초기값")
         AvinoxAssistMode.ECO -> AvinoxAssistProfile(mode, 5, 5, 40, 100, 0, 2, 2, sourceNote = "2026-08-26 사진 기준 초기값")
         AvinoxAssistMode.AUTO -> AvinoxAssistProfile(mode, 3, 8, 105, 900, 0, 4, 2, sourceNote = "2026-08-26 사진 기준 초기값")
         AvinoxAssistMode.TRAIL -> AvinoxAssistProfile(mode, 9, 11, 105, 850, 1, 4, 2, sourceNote = "2026-08-26 사진 기준 초기값")
