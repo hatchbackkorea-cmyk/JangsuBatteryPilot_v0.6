@@ -342,21 +342,13 @@ class RideService : Service(), LocationListener {
         latestAssistDetection = detection
         latestAssistUpdatedMs = timestampMs
 
-        val currentMode = logManager.activeAssistMode()
-        val currentConfidence = logManager.activeAssistConfidence()
-        val compatible = currentMode != null && detection.compatibleModes.contains(currentMode)
         val km = if (logManager.isFreeRide()) freeDistanceKm.coerceAtLeast(0.0) else matcher.currentKm().coerceIn(0.0, course.totalKm)
 
-        when {
-            currentConfidence == "CONFIRMED" && compatible -> Unit
-            currentMode == AvinoxAssistMode.AUTO && currentConfidence == "HIGH" && compatible && !detection.isHighConfidence -> {
-                // AUTO가 2/3으로 내려오는 현장을 이미 확인했다. AUTO를 유지하되 학습은 사용자 재확인 전까지 보류한다.
-                logManager.setDetectedAssistMode(assistProfileStore.get(AvinoxAssistMode.AUTO), km, actualStore.latest()?.percent, "AMBIGUOUS", detection.rawCode)
-            }
-            else -> logManager.setDetectedAssistMode(
-                assistProfileStore.get(detection.primary), km, actualStore.latest()?.percent, detection.confidence, detection.rawCode
-            )
-        }
+        // 2026-08-27 repeated stationary switching verified byte[68] as the selected mode:
+        // 1=ECO, 2=TRAIL, 3=TURBO, 4=AUTO. Never keep AUTO sticky when 2/3 arrives.
+        logManager.setDetectedAssistMode(
+            assistProfileStore.get(detection.primary), km, actualStore.latest()?.percent, detection.confidence, detection.rawCode
+        )
         refreshServiceEnergyModeIfVerified()
         logManager.recordAutoModeDetection(timestampMs, detection, bytes)
         broadcastBleState()

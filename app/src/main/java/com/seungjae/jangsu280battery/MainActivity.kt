@@ -684,16 +684,6 @@ class MainActivity : Activity() {
                 tvAssistModeHint.setTextColor(getColor(R.color.text_secondary))
                 layoutAssistVerify.visibility = View.GONE
             }
-            activeMode == AvinoxAssistMode.AUTO && alternate == AvinoxAssistMode.AUTO && primary in setOf(AvinoxAssistMode.TRAIL, AvinoxAssistMode.TURBO) -> {
-                // AUTO 선택 상태와 현재 유효 어시스트 강도를 분리해 표시한다.
-                // 현장 데이터에서 AUTO는 raw 2/3을 오가므로 이를 TRAIL/TURBO "급"으로만 표현한다.
-                tvAssistModeCurrent.text = "Avinox 모드 · AUTO · ${primary.label}급"
-                tvAssistModeCurrent.setTextColor(getColor(R.color.good))
-                val verifiedText = if (activeConfidence == "CONFIRMED") "선택 AUTO 확인됨" else "AUTO 선택"
-                tvAssistModeHint.text = "$verifiedText · 현재 ${primary.label}급 보조 · BLE raw ${latestAssistRawCode ?: "-"}"
-                tvAssistModeHint.setTextColor(getColor(R.color.text_secondary))
-                layoutAssistVerify.visibility = View.GONE
-            }
             activeConfidence == "CONFIRMED" && compatible -> {
                 tvAssistModeCurrent.text = "Avinox 모드 · ${activeMode!!.label}  ✓"
                 tvAssistModeCurrent.setTextColor(getColor(R.color.good))
@@ -704,7 +694,7 @@ class MainActivity : Activity() {
             latestAssistConfidence == "HIGH" && alternate == null -> {
                 tvAssistModeCurrent.text = "Avinox 모드 · ${primary.label}"
                 tvAssistModeCurrent.setTextColor(getColor(R.color.good))
-                tvAssistModeHint.text = "● BLE 자동감지 · 검증중 · 자전거 표시와 다르면 위 모드 표시를 탭"
+                tvAssistModeHint.text = "● BLE 자동감지 · 선택 모드 · 다르면 위 모드 표시를 탭"
                 tvAssistModeHint.setTextColor(getColor(R.color.good))
                 layoutAssistVerify.visibility = View.GONE
             }
@@ -712,7 +702,7 @@ class MainActivity : Activity() {
                 val altText = alternate?.let { " / ${it.label}" }.orEmpty()
                 tvAssistModeCurrent.text = "Avinox 모드 후보 · ${primary.label}$altText"
                 tvAssistModeCurrent.setTextColor(getColor(R.color.warn))
-                tvAssistModeHint.text = "선택 모드와 유효 보조단계를 분리 검증 중 · raw ${latestAssistRawCode ?: "-"}"
+                tvAssistModeHint.text = "선택 모드 후보 · raw ${latestAssistRawCode ?: "-"}"
                 tvAssistModeHint.setTextColor(getColor(R.color.warn))
                 btnAssistModeConfirm.text = "✓ ${primary.label} 맞음"
                 layoutAssistVerify.visibility = View.VISIBLE

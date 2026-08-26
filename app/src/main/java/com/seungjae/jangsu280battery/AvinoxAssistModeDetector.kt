@@ -1,16 +1,16 @@
 package com.seungjae.jangsu280battery
 
 /**
- * Experimental Avinox assist-mode detector for the verified FFF4 long packet family.
+ * Avinox selected assist-mode detector for the verified FFF4 long packet family.
  *
- * Field findings on 2026-08-26:
- * - byte[68] == 1 tracked ECO repeatedly
- * - byte[68] == 4 tracked AUTO in one clean window
- * - byte[68] == 2 tracked TRAIL, but AUTO can also pass through 2
- * - byte[68] == 3 tracked TURBO, but AUTO can also pass through 3
+ * Repeated stationary switch test on 2026-08-27:
+ *   ECO -> AUTO -> TRAIL -> TURBO -> TRAIL -> AUTO -> ECO ...
+ * tracked byte[68] without a mismatch:
+ *   1=ECO, 2=TRAIL, 3=TURBO, 4=AUTO.
  *
- * Therefore 1 and 4 are strong candidates, while 2/3 are intentionally marked
- * ambiguous until another independent selected-mode field is found.
+ * Important: this field is treated as the rider-selected mode only.
+ * We do NOT infer AUTO's internal/effective assist level from this same byte.
+ * A separate BLE field must be verified before showing AUTO · ECO/TRAIL/TURBO급.
  */
 data class AvinoxAssistDetection(
     val primary: AvinoxAssistMode,
@@ -38,10 +38,10 @@ object AvinoxAssistModeDetector {
         if ((bytes[9].toInt() and 0xff) != 0x57 || (bytes[10].toInt() and 0xff) != 0x09) return null
         val code = bytes[68].toInt() and 0xff
         return when (code) {
-            1 -> AvinoxAssistDetection(AvinoxAssistMode.ECO, rawCode = code, confidence = "HIGH", note = "ECO 강한 후보")
-            4 -> AvinoxAssistDetection(AvinoxAssistMode.AUTO, rawCode = code, confidence = "HIGH", note = "AUTO 강한 후보")
-            2 -> AvinoxAssistDetection(AvinoxAssistMode.TRAIL, AvinoxAssistMode.AUTO, code, "AMBIGUOUS", "TRAIL 또는 AUTO 동적상태")
-            3 -> AvinoxAssistDetection(AvinoxAssistMode.TURBO, AvinoxAssistMode.AUTO, code, "AMBIGUOUS", "TURBO 또는 AUTO 동적상태")
+            1 -> AvinoxAssistDetection(AvinoxAssistMode.ECO, rawCode = code, confidence = "HIGH", note = "선택 모드 ECO")
+            2 -> AvinoxAssistDetection(AvinoxAssistMode.TRAIL, rawCode = code, confidence = "HIGH", note = "선택 모드 TRAIL")
+            3 -> AvinoxAssistDetection(AvinoxAssistMode.TURBO, rawCode = code, confidence = "HIGH", note = "선택 모드 TURBO")
+            4 -> AvinoxAssistDetection(AvinoxAssistMode.AUTO, rawCode = code, confidence = "HIGH", note = "선택 모드 AUTO")
             else -> null
         }
     }

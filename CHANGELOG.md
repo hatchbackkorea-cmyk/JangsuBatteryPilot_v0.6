@@ -1,3 +1,11 @@
+# v0.18.5 — Selected Mode Direct Detect + Settings Compact
+- 2026-08-27 실내 반복 전환 로그를 기준으로 FFF4 long packet byte[68]을 선택 모드로 직접 매핑: 1=ECO, 2=TRAIL, 3=TURBO, 4=AUTO.
+- v0.18.4의 AUTO sticky 해석을 제거해 AUTO 뒤 실제 TRAIL/TURBO 전환이 `AUTO · TRAIL급/TURBO급`으로 잘못 남는 문제 수정.
+- AUTO 내부 유효 어시스트 단계는 같은 byte[68]로 추정하지 않고, 별도 BLE 필드가 검증될 때까지 표시/학습에 사용하지 않음.
+- 선택 모드 변경이 HIGH 신뢰도로 즉시 기록되어 모드별 클린 학습과 에너지 모델 전환에 반영.
+- 설정(3페이지) 최상단 음성안내/화면유지/안내주기 박스를 현재 대비 약 25% 추가 압축.
+- 설정(3페이지) 두 번째 테스트 모드 박스도 현재 대비 약 25% 압축해 스크롤을 더 줄임.
+
 # v0.18.4 — One-Screen Polish + AUTO Effective Assist
 - 코스/GPX 페이지의 최하단 고도 프로필 박스를 약 20% 축소(220dp → 176dp)해 2페이지 스크롤 최소화.
 - 설정 페이지 첫 설정 박스를 약 30% 압축: 스위치/SeekBar/패딩/간격을 줄여 3페이지를 한 화면에 가깝게 정리.
