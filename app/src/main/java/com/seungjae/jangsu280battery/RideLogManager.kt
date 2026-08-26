@@ -480,13 +480,53 @@ class RideLogManager(context: Context) {
                 entries += ActualBatteryEntry(pct, fitKm.coerceIn(0.0, analysis.course.totalKm), ts, kind, source)
             }
         }
-        val learned = learning.trainHistoricalRide(root.optString("sessionId", "free_ride"), analysis.course, entries, analysis.telemetry, analysis.dataQualityScore)
-        root.put("learningStatus", "USED")
+        val modeWindows = readAssistModeWindows(root, json.parentFile)
+        if (modeWindows.isEmpty()) {
+            root.put("learningStatus", "BLOCKED_NO_MODE_LOG")
+            root.put("learnedSamplesAdded", 0)
+            root.put("learningDecisionMs", System.currentTimeMillis())
+            root.put("learningNote", "v0.18.1부터 임의주행 학습은 Eco/Auto/Trail/Turbo 모드 로그가 있는 검증 세션만 허용")
+            json.writeText(root.toString(2))
+            rebuildLastZip(extraFiles = listOf(fitFile))
+            return 0
+        }
+        val learned = learning.trainModeSeparatedRide(
+            root.optString("sessionId", "free_ride"),
+            analysis.course,
+            entries,
+            analysis.telemetry,
+            modeWindows,
+            analysis.dataQualityScore
+        )
+        root.put("learningStatus", if (learned > 0) "USED" else "BLOCKED_NO_CLEAN_INTERVALS")
         root.put("learnedSamplesAdded", learned)
         root.put("learningDecisionMs", System.currentTimeMillis())
+        root.put("learningModePolicy", "모드 전환 없는 SOC 구간만 모드별 분리 학습 · 100→98% 제외")
         json.writeText(root.toString(2))
         rebuildLastZip(extraFiles = listOf(fitFile))
         return learned
+    }
+
+    private fun readAssistModeWindows(root: JSONObject, dir: File?): List<AssistModeWindow> {
+        val parent = dir ?: return emptyList()
+        val fileName = root.optString("assistProfilesFile", "")
+        if (fileName.isBlank()) return emptyList()
+        val file = File(parent, fileName)
+        if (!file.exists()) return emptyList()
+        data class Mark(val at: Long, val mode: AvinoxAssistMode, val profileId: String)
+        val marks = file.readLines().mapNotNull { line ->
+            val o = runCatching { JSONObject(line) }.getOrNull() ?: return@mapNotNull null
+            val at = o.optLong("selectedAtMs", 0L)
+            val mode = runCatching { AvinoxAssistMode.valueOf(o.optString("mode", "")) }.getOrNull()
+            val profileId = o.optString("profileId", "")
+            if (at <= 0L || mode == null || profileId.isBlank()) null else Mark(at, mode, profileId)
+        }.sortedBy { it.at }
+        if (marks.isEmpty()) return emptyList()
+        val rideEnd = root.optLong("endMs", marks.last().at + 1L).coerceAtLeast(marks.last().at + 1L)
+        return marks.mapIndexed { index, m ->
+            val end = if (index + 1 < marks.size) marks[index + 1].at - 1L else rideEnd
+            AssistModeWindow(m.at, end.coerceAtLeast(m.at), m.mode, m.profileId)
+        }
     }
 
     fun setLastRideAvinox(eco: Double?, auto: Double?, trail: Double?, turbo: Double?, selected: AvinoxRideMode?): String {
@@ -641,6 +681,8 @@ class RideLogManager(context: Context) {
                     "USED" -> { append("학습 반영: "); append(o.optInt("learnedSamplesAdded")); append("개 구간\n") }
                     "SKIPPED" -> append("학습: 사용 안 함\n")
                     "TEST_MODE_SKIPPED" -> append("학습: 테스트 모드 제외\n")
+                    "BLOCKED_NO_MODE_LOG" -> append("학습: 모드 로그 없음 · 검증용 데이터로만 보관\n")
+                    "BLOCKED_NO_CLEAN_INTERVALS" -> append("학습: 모드가 섞이지 않은 유효 SOC 구간 없음\n")
                     else -> append("학습: 선택 대기\n")
                 }
                 if (o.optString("rideMode") == RideMode.FREE.name) {
@@ -681,6 +723,9 @@ class RideLogManager(context: Context) {
         val stats = linkedMapOf<String, AssistAccum>()
         if (csv.exists()) {
             var prev: List<String>? = null
+            var segmentKey: String? = null
+            var segmentElevation = ElevationGainFilter()
+            var segmentLastAscent = 0.0
             csv.bufferedReader().use { r ->
                 r.readLine()
                 while (true) {
@@ -691,7 +736,7 @@ class RideLogManager(context: Context) {
                     if (prior != null && prior.size >= 12) {
                         val mode = prior[10]
                         val profileId = prior[11]
-                        if (mode.isNotBlank() && mode != "BOOST" && profileId.isNotBlank() && p[10] == mode && p[11] == profileId) {
+                        if (mode.isNotBlank() && profileId.isNotBlank() && p[10] == mode && p[11] == profileId) {
                             val key = "$mode|$profileId"
                             val a = stats.getOrPut(key) { AssistAccum() }
                             val t0 = prior[0].toLongOrNull()
@@ -700,12 +745,23 @@ class RideLogManager(context: Context) {
                             val d0 = prior[5].toDoubleOrNull()
                             val d1 = p[5].toDoubleOrNull()
                             if (d0 != null && d1 != null && d1 >= d0 && d1 - d0 <= 0.5) a.distanceKm += d1 - d0
-                            val e0 = prior[3].toDoubleOrNull()
-                            val e1 = p[3].toDoubleOrNull()
-                            if (e0 != null && e1 != null) {
-                                val gain = e1 - e0
-                                if (gain in 0.2..25.0) a.ascentM += gain
+
+                            if (segmentKey != key) {
+                                segmentKey = key
+                                segmentElevation = ElevationGainFilter()
+                                segmentLastAscent = 0.0
+                                prior[3].toDoubleOrNull()?.let { segmentElevation.update(it) }
                             }
+                            p[3].toDoubleOrNull()?.let { ele ->
+                                val nowAscent = segmentElevation.update(ele)
+                                val delta = (nowAscent - segmentLastAscent).coerceAtLeast(0.0)
+                                if (delta > 0.0) a.ascentM += delta
+                                segmentLastAscent = nowAscent
+                            }
+                        } else {
+                            segmentKey = null
+                            segmentElevation = ElevationGainFilter()
+                            segmentLastAscent = 0.0
                         }
                     }
                     prev = p
@@ -724,7 +780,7 @@ class RideLogManager(context: Context) {
                 val mode = e.optString("assistMode")
                 val profile = e.optString("assistProfileId")
                 val prevPct = lastBatteryPct
-                if (pct.isFinite() && prevPct != null && !modeChangedSinceBattery && mode.isNotBlank() && mode != "BOOST" && profile.isNotBlank() && mode == lastBatteryMode && profile == lastBatteryProfile) {
+                if (pct.isFinite() && prevPct != null && !modeChangedSinceBattery && mode.isNotBlank() && profile.isNotBlank() && mode == lastBatteryMode && profile == lastBatteryProfile) {
                     val drop = prevPct - pct
                     if (drop in 0.0..5.0) stats.getOrPut("$mode|$profile") { AssistAccum() }.verifiedSocDropPct += drop
                 }
@@ -746,6 +802,7 @@ class RideLogManager(context: Context) {
                     put("durationSec", a.durationSec.roundToInt())
                     put("distanceKm", a.distanceKm)
                     put("gpsAscentM", a.ascentM)
+                    put("gpsAscentFilter", "median21+hysteresis4m")
                     put("verifiedSocDropPct", a.verifiedSocDropPct)
                     put("verifiedEnergyWh800", a.verifiedSocDropPct * 8.0)
                     put("socAttributionRule", "모드 변경 없는 연속 BLE SOC 하락만 해당 모드에 귀속")

@@ -75,7 +75,7 @@ class RideService : Service(), LocationListener {
     private var freeDistanceKm = 0.0
     private var freeAscentM = 0.0
     private var freeLastLocation: Location? = null
-    private var freeLastElevationM: Double? = null
+    private lateinit var freeAscentEstimator: GpsAscentEstimator
     private var lastBleRecordedSoc: Int? = null
     private var latestBleState: String = "BLE 대기"
 
@@ -122,6 +122,7 @@ class RideService : Service(), LocationListener {
             freeDistanceKm = logManager.activeDistanceKm()
             freeAscentM = logManager.activeAscentM()
         }
+        freeAscentEstimator = GpsAscentEstimator(freeAscentM)
         val startLabel = if (logManager.isFreeRide()) "임의주행 · GPX 독립 GPS 준비 중" else "GPS 준비 중 · ${courseMeta.name}"
         startForeground(NOTIFICATION_ID, buildNotification(startLabel))
     }
@@ -281,13 +282,8 @@ class RideService : Service(), LocationListener {
             val plausible = deltaM in 0.5..250.0 && (dtSec <= 0.0 || deltaM / dtSec <= 25.0) && (accuracy < 0f || accuracy <= 60f)
             if (plausible) freeDistanceKm += deltaM / 1000.0
         }
-        if (gpsElevation.isFinite()) {
-            val prevEle = freeLastElevationM
-            if (prevEle != null) {
-                val gain = gpsElevation - prevEle
-                if (gain in 1.0..30.0) freeAscentM += gain
-            }
-            freeLastElevationM = gpsElevation
+        if (::freeAscentEstimator.isInitialized) {
+            freeAscentM = freeAscentEstimator.update(location)
         }
         freeLastLocation = Location(location)
         logManager.updateFreeRideStats(freeDistanceKm, freeAscentM)

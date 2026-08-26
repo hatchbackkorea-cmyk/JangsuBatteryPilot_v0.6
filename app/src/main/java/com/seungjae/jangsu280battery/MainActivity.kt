@@ -566,6 +566,7 @@ class MainActivity : Activity() {
 
     private fun selectAssistMode(mode: AvinoxAssistMode) {
         assistProfileStore.setPreferredMode(mode)
+        rebuildEnergyModelsForSelectedMode()
         if (logManager.isActive()) {
             val profile = assistProfileStore.get(mode)
             logManager.setAssistMode(profile, currentRideKm(), freshBleSoc()?.toDouble())
@@ -574,6 +575,14 @@ class MainActivity : Activity() {
             Toast.makeText(this, "${mode.label}을 시작 모드로 선택했습니다.", Toast.LENGTH_SHORT).show()
         }
         renderAssistModeUi()
+    }
+
+    private fun rebuildEnergyModelsForSelectedMode() {
+        if (!::course.isInitialized || !::learningStore.isInitialized || !::chargingStore.isInitialized || !::actualStore.isInitialized) return
+        basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
+        plan = AdaptiveBatteryPlan(basePlan, actualStore)
+        pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+        tripPlanner = EnergyTripPlanner(basePlan, plan)
     }
 
     private fun activatePreferredAssistMode() {
@@ -1972,8 +1981,8 @@ class MainActivity : Activity() {
 
     private fun appVersionName(): String = try {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.0"
-    } catch (_: Exception) { "0.18.0" }
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.1"
+    } catch (_: Exception) { "0.18.1" }
 
     override fun onResume() {
         super.onResume()

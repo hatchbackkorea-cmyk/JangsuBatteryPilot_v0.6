@@ -17,6 +17,13 @@ data class LearnedAssistProfile(
     val quality: Int
 )
 
+data class AssistModeWindow(
+    val startMs: Long,
+    val endMs: Long,
+    val mode: AvinoxAssistMode,
+    val profileId: String
+)
+
 data class BatteryLearningSample(
     val bucket: TerrainBucket,
     val factor: Double,
@@ -25,6 +32,9 @@ data class BatteryLearningSample(
     val ascentM: Double,
     val timestampMs: Long,
     val sessionId: String,
+    /** v0.18.1부터 Eco/Auto/Trail/Turbo를 섞지 않고 별도 학습한다. */
+    val assistMode: AvinoxAssistMode? = null,
+    val assistProfileId: String? = null,
     /** FIT에서 보존된 보조 설명 변수. 현재 예측식에 억지로 직접 대입하지 않는다. */
     val riderWh: Double = 0.0,
     val motorWh: Double = 0.0,
@@ -49,7 +59,14 @@ class BatteryLearningStore(context: Context) {
         const val ASCENT_PCT_PER_M = 0.028
     }
 
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val assistProfiles = AvinoxAssistProfileStore(appContext)
+
+    private fun selectedMode(): AvinoxAssistMode? =
+        assistProfiles.preferredMode().takeIf { assistProfiles.hasPreferredMode() }
+
+    private fun selectedProfileId(mode: AvinoxAssistMode?): String? = mode?.let { assistProfiles.get(it).profileId }
 
     fun baseConsumption(distanceKm: Double, ascentM: Double): Double =
         (distanceKm.coerceAtLeast(0.0) * FLAT_PCT_PER_KM + ascentM.coerceAtLeast(0.0) * ASCENT_PCT_PER_M).coerceAtLeast(0.0)
@@ -64,17 +81,34 @@ class BatteryLearningStore(context: Context) {
         }
     }
 
-    fun learnedFactor(bucket: TerrainBucket): Double {
-        val specific = samples().filter { it.bucket == bucket }.takeLast(16)
+    fun learnedFactor(bucket: TerrainBucket, mode: AvinoxAssistMode? = selectedMode()): Double {
+        val allSamples = samples()
+        if (mode != null) {
+            val profileId = selectedProfileId(mode)
+            val exactProfile = allSamples.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == profileId }.takeLast(16)
+            if (exactProfile.isNotEmpty()) return weightedFactor(exactProfile)
+            val modeWithoutProfile = allSamples.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == null }.takeLast(12)
+            if (modeWithoutProfile.isNotEmpty()) return weightedFactor(modeWithoutProfile)
+            // 프로필이 바뀌면 같은 모드라도 다른 세팅 학습을 섞지 않는다. 예전 모드미기록 데이터만 안전 fallback.
+            val legacy = allSamples.filter { it.bucket == bucket && it.assistMode == null }.takeLast(12)
+            if (legacy.isNotEmpty()) return weightedFactor(legacy)
+            return 1.0
+        }
+        val specific = allSamples.filter { it.bucket == bucket }.takeLast(16)
         if (specific.isNotEmpty()) return weightedFactor(specific)
-        val all = samples().takeLast(20)
-        return if (all.isNotEmpty()) weightedFactor(all) else 1.0
+        return 1.0
     }
 
-    fun assistProfile(bucket: TerrainBucket): LearnedAssistProfile? {
-        val subset = samples()
-            .filter { it.bucket == bucket && it.qualityScore >= 45 }
-            .takeLast(24)
+    fun assistProfile(bucket: TerrainBucket, mode: AvinoxAssistMode? = selectedMode()): LearnedAssistProfile? {
+        val all = samples()
+        val subset = if (mode != null) {
+            val profileId = selectedProfileId(mode)
+            val exactProfile = all.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == profileId && it.qualityScore >= 45 }.takeLast(24)
+            if (exactProfile.isNotEmpty()) exactProfile
+            else all.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == null && it.qualityScore >= 45 }.takeLast(24)
+        } else {
+            all.filter { it.bucket == bucket && it.qualityScore >= 45 }.takeLast(24)
+        }
         if (subset.isEmpty()) return null
 
         fun weighted(selector: (BatteryLearningSample) -> Double?): Double? {
@@ -113,7 +147,7 @@ class BatteryLearningStore(context: Context) {
         return assistProfile(bucket(dist, ascent))
     }
 
-    fun estimateConsumption(course: CourseData, fromKm: Double, toKm: Double): Double {
+    fun estimateConsumption(course: CourseData, fromKm: Double, toKm: Double, mode: AvinoxAssistMode? = selectedMode()): Double {
         val start = fromKm.coerceIn(0.0, course.totalKm)
         val end = toKm.coerceIn(start, course.totalKm)
         if (end <= start) return 0.0
@@ -123,7 +157,7 @@ class BatteryLearningStore(context: Context) {
             val nx = (x + 0.5).coerceAtMost(end)
             val dist = nx - x
             val ascent = course.elevationBetween(x, nx).ascentM
-            total += baseConsumption(dist, ascent) * learnedFactor(bucket(dist, ascent))
+            total += baseConsumption(dist, ascent) * learnedFactor(bucket(dist, ascent), mode)
             x = nx
         }
         return total
@@ -317,6 +351,75 @@ class BatteryLearningStore(context: Context) {
         return newSamples.size
     }
 
+    /**
+     * v0.18.1 클린 학습 경로.
+     * BLE SOC 1% 경계 사이에 모드 전환이 없고, 그 전체 구간이 하나의 assist window 안에 있을 때만 학습한다.
+     * 따라서 Eco/Auto/Trail/Turbo 소비가 서로 섞이지 않는다.
+     * 완충 직후 100% plateau는 BMS 표시 비선형성이 커 98% 이하부터 학습한다.
+     */
+    fun trainModeSeparatedRide(
+        sessionId: String,
+        course: CourseData,
+        entries: List<ActualBatteryEntry>,
+        telemetry: List<HistoricalTelemetryPoint>,
+        modeWindows: List<AssistModeWindow>,
+        qualityScore: Int = 100
+    ): Int {
+        if (sessionId.isBlank() || isTrained(sessionId) || modeWindows.isEmpty()) return 0
+        val ordered = entries.sortedBy { it.timestampMs }
+        val windows = modeWindows.sortedBy { it.startMs }
+        val newSamples = mutableListOf<BatteryLearningSample>()
+
+        fun stableWindow(aMs: Long, bMs: Long): AssistModeWindow? {
+            if (aMs <= 0L || bMs <= aMs) return null
+            return windows.firstOrNull { aMs >= it.startMs && bMs <= it.endMs }
+        }
+
+        for (i in 1 until ordered.size) {
+            val a = ordered[i - 1]
+            val b = ordered[i]
+            val used = a.percent - b.percent
+            // 100→99 및 99→98은 완충 plateau/표시 보정 영향이 커 학습에서 제외.
+            if (a.percent > 98.5) continue
+            if (used !in 0.8..2.2) continue
+            val modeWindow = stableWindow(a.timestampMs, b.timestampMs) ?: continue
+            val dist = b.routeKm - a.routeKm
+            if (dist < 0.25) continue
+            val ascent = course.elevationBetween(a.routeKm, b.routeKm).ascentM
+            val modeled = baseConsumption(dist, ascent)
+            if (modeled < 0.18) continue
+            val factor = (used / modeled).coerceIn(0.45, 2.20)
+            val ts = if (telemetry.isNotEmpty()) TelemetryMath.segmentStats(telemetry, a.routeKm, b.routeKm)
+            else TelemetrySegmentStats(0.0, 0.0, null, 0.0, 0.0, 0.0, 0.0)
+
+            newSamples += BatteryLearningSample(
+                bucket = bucket(dist, ascent),
+                factor = factor,
+                pctPerKm = used / dist,
+                distanceKm = dist,
+                ascentM = ascent,
+                timestampMs = b.timestampMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                sessionId = sessionId,
+                assistMode = modeWindow.mode,
+                assistProfileId = modeWindow.profileId,
+                riderWh = ts.riderWh,
+                motorWh = ts.motorWh,
+                avgSpeedKph = ts.avgSpeedKph,
+                avgRiderPowerW = ts.avgRiderPowerW,
+                avgMotorPowerW = ts.avgMotorPowerW,
+                avgActiveMotorPowerW = ts.avgActiveMotorPowerW,
+                avgCadenceRpm = ts.avgCadenceRpm,
+                motorActiveRatio = ts.motorActiveRatio,
+                qualityScore = qualityScore.coerceIn(0, 100)
+            )
+        }
+        if (newSamples.isNotEmpty()) {
+            writeSamples((samples() + newSamples).takeLast(MAX_SAMPLES))
+            markTrained(sessionId)
+        }
+        return newSamples.size
+    }
+
     fun hasSession(sessionId: String): Boolean = isTrained(sessionId)
 
     fun removeSession(sessionId: String): Int {
@@ -342,6 +445,8 @@ class BatteryLearningStore(context: Context) {
                     ascentM = o.optDouble("ascentM", 0.0),
                     timestampMs = o.optLong("timestampMs", 0L),
                     sessionId = o.optString("sessionId", ""),
+                    assistMode = if (o.has("assistMode") && !o.isNull("assistMode")) runCatching { AvinoxAssistMode.valueOf(o.optString("assistMode")) }.getOrNull() else null,
+                    assistProfileId = if (o.has("assistProfileId") && !o.isNull("assistProfileId")) o.optString("assistProfileId").takeIf { it.isNotBlank() } else null,
                     riderWh = o.optDouble("riderWh", 0.0),
                     motorWh = o.optDouble("motorWh", 0.0),
                     avgSpeedKph = if (o.has("avgSpeedKph") && !o.isNull("avgSpeedKph")) o.optDouble("avgSpeedKph") else null,
@@ -360,22 +465,21 @@ class BatteryLearningStore(context: Context) {
         val s = samples()
         if (s.isEmpty()) return "개인 소비 학습 없음 · 중립 초기 모델 사용"
         val lines = mutableListOf("개인 소비 학습 ${s.size}개 구간")
-        TerrainBucket.values().forEach { b ->
-            val subset = s.filter { it.bucket == b }.takeLast(16)
-            if (subset.isNotEmpty()) {
-                val factor = weightedFactor(subset)
-                val ppk = subset.map { it.pctPerKm }.average()
-                val profile = assistProfile(b)
-                val pace = profile?.let { p ->
-                    val parts = mutableListOf<String>()
-                    p.avgMotorPowerW?.let { parts += "모터 ${it.toInt()}W" }
-                    p.avgCadenceRpm?.let { parts += "${it.toInt()}rpm" }
-                    p.avgSpeedKph?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it)}km/h" }
-                    if (parts.isNotEmpty()) " · " + parts.joinToString(" · ") else ""
-                }.orEmpty()
-                lines += "${b.label}: ${String.format(java.util.Locale.US, "%.2f", ppk)}%/km · 중립모델×${String.format(java.util.Locale.US, "%.2f", factor)} (${subset.size}회)$pace"
+        AvinoxAssistMode.values().forEach { mode ->
+            val modeSamples = s.filter { it.assistMode == mode }
+            if (modeSamples.isNotEmpty()) {
+                val parts = TerrainBucket.values().mapNotNull { b ->
+                    val subset = modeSamples.filter { it.bucket == b }.takeLast(16)
+                    if (subset.isEmpty()) null else {
+                        val ppk = subset.map { it.pctPerKm }.average()
+                        "${b.label} ${String.format(java.util.Locale.US, "%.2f", ppk)}%/km(${subset.size})"
+                    }
+                }
+                lines += "${mode.label}: ${parts.joinToString(" · ")}"
             }
         }
+        val legacy = s.count { it.assistMode == null }
+        if (legacy > 0) lines += "이전 모드미기록 학습: ${legacy}개 · 모드별 값이 없을 때만 보조 fallback"
         return lines.joinToString("\n")
     }
 
@@ -408,6 +512,8 @@ class BatteryLearningStore(context: Context) {
                 put("ascentM", s.ascentM)
                 put("timestampMs", s.timestampMs)
                 put("sessionId", s.sessionId)
+                if (s.assistMode == null) put("assistMode", JSONObject.NULL) else put("assistMode", s.assistMode.name)
+                if (s.assistProfileId == null) put("assistProfileId", JSONObject.NULL) else put("assistProfileId", s.assistProfileId)
                 put("riderWh", s.riderWh)
                 put("motorWh", s.motorWh)
                 if (s.avgSpeedKph == null) put("avgSpeedKph", JSONObject.NULL) else put("avgSpeedKph", s.avgSpeedKph)
