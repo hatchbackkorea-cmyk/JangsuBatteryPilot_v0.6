@@ -1,3 +1,8 @@
+# v0.19.3
+- Strava 진입 메뉴를 메인 `피드백` 페이지 상단에 추가했습니다.
+- 설정 페이지에서 메뉴가 보이지 않는 기기에서도 `피드백 → Strava 연결 / FIT 업로드`로 바로 진입할 수 있습니다.
+- 피드백 안내 문구를 FIT 분석/Strava 업로드 흐름에 맞게 정리했습니다.
+
 # v0.19.2 — Strava Clean FIT Build Fix
 - `StravaActivity.kt` Assist ratio 계산에서 nullable 평균 파워를 직접 나누던 Kotlin 컴파일 오류 수정.
 - Rider/Motor 평균 파워를 로컬 non-null 값으로 확정한 뒤 Assist ratio를 계산하도록 변경.
