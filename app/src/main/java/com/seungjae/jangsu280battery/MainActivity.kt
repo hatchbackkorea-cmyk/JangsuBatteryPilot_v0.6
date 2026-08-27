@@ -73,6 +73,10 @@ class MainActivity : Activity() {
     private lateinit var tvGpsStatus: TextView
     private lateinit var tvRideMode: TextView
     private lateinit var tvAssistModeCurrent: TextView
+    private lateinit var layoutAssistModeBanner: LinearLayout
+    private lateinit var layoutAutoEstimate: LinearLayout
+    private lateinit var tvAutoEstimateLabel: TextView
+    private lateinit var tvAutoEstimateGrade: TextView
     private lateinit var tvAssistModeHint: TextView
     private lateinit var layoutAssistVerify: LinearLayout
     private lateinit var btnAssistModeConfirm: Button
@@ -157,6 +161,25 @@ class MainActivity : Activity() {
     private var latestAssistRawCode: Int? = null
     private var latestAssistUpdatedMs: Long = 0L
     private var lastPlanAssistMode: AvinoxAssistMode? = null
+
+    // v0.20.0 AUTO 내부 어시스트는 BLE 실측값이 아직 확인되지 않았다.
+    // 아래 값은 주행동역학 + 최근 SOC/km를 섞은 명시적 "추정" HUD 전용이다.
+    private var lastRenderedAssistMode: AvinoxAssistMode? = null
+    private var lastRenderedAutoEstimate: AvinoxAssistMode? = null
+    private var autoEstimateMode: AvinoxAssistMode? = null
+    private var autoEstimateCandidate: AvinoxAssistMode? = null
+    private var autoEstimateCandidateSinceMs: Long = 0L
+    private var autoEstimateWasAuto = false
+    private var autoEstimateLastSampleMs: Long = 0L
+    private var autoEstimateLastKm = 0.0
+    private var autoEstimateLastElevation = Double.NaN
+    private var autoEstimateLastSpeedKmh = 0.0
+    private var autoEstimateSmoothedGradePct = 0.0
+    private var autoEstimateSmoothedAccel = 0.0
+    private var autoEstimateSocAnchor: Int? = null
+    private var autoEstimateSocAnchorKm = 0.0
+    private var autoEstimateWhPerKm: Double? = null
+    private var lastLoggedAutoEstimate: AvinoxAssistMode? = null
     private var testMode = false
     private var receiverRegistered = false
     private var speechPendingAfterPermission = false
@@ -190,6 +213,7 @@ class MainActivity : Activity() {
                 lastPlanAssistMode = activeMode
                 rebuildEnergyModelsForSelectedMode()
             }
+            updateAutoAssistEstimate()
             renderAssistModeUi()
             if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, false)
         }
@@ -288,6 +312,10 @@ class MainActivity : Activity() {
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
         tvRideMode = findViewById(R.id.tvRideMode)
         tvAssistModeCurrent = findViewById(R.id.tvAssistModeCurrent)
+        layoutAssistModeBanner = findViewById(R.id.layoutAssistModeBanner)
+        layoutAutoEstimate = findViewById(R.id.layoutAutoEstimate)
+        tvAutoEstimateLabel = findViewById(R.id.tvAutoEstimateLabel)
+        tvAutoEstimateGrade = findViewById(R.id.tvAutoEstimateGrade)
         tvAssistModeHint = findViewById(R.id.tvAssistModeHint)
         layoutAssistVerify = findViewById(R.id.layoutAssistVerify)
         btnAssistModeConfirm = findViewById(R.id.btnAssistModeConfirm)
@@ -674,43 +702,267 @@ class MainActivity : Activity() {
 
         when {
             !logManager.isActive() -> {
-                tvAssistModeCurrent.text = "Avinox 모드 · 주행 시작 시 자동 감지"
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-                tvAssistModeHint.text = "4개 수동 버튼 없이 BLE에서 자동으로 읽습니다"
+                renderAssistIdle("대기")
+                tvAssistModeHint.text = "주행을 시작하면 Avinox BLE 모드를 자동 감지합니다"
                 tvAssistModeHint.setTextColor(getColor(R.color.text_secondary))
                 layoutAssistVerify.visibility = View.GONE
             }
             primary == null -> {
-                tvAssistModeCurrent.text = "Avinox 모드 · BLE 감지 대기…"
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-                tvAssistModeHint.text = "배터리와 같은 FFF4 실시간 패킷에서 모드를 찾는 중"
+                renderAssistIdle("BLE…")
+                tvAssistModeHint.text = "FFF4 실시간 패킷에서 선택 모드를 찾는 중"
                 tvAssistModeHint.setTextColor(getColor(R.color.text_secondary))
                 layoutAssistVerify.visibility = View.GONE
             }
             activeConfidence == "CONFIRMED" && compatible -> {
-                tvAssistModeCurrent.text = "Avinox 모드 · ${activeMode!!.label}  ✓"
-                tvAssistModeCurrent.setTextColor(getColor(R.color.good))
-                tvAssistModeHint.text = "사용자 확인됨 · BLE raw ${latestAssistRawCode ?: "-"} · 다르면 위 모드 표시를 탭"
+                renderAssistModeBanner(activeMode!!, tentative = false)
+                tvAssistModeHint.text = "사용자 확인됨 · BLE raw ${latestAssistRawCode ?: "-"} · 표시를 탭하면 수정"
                 tvAssistModeHint.setTextColor(getColor(R.color.good))
                 layoutAssistVerify.visibility = View.GONE
             }
             latestAssistConfidence == "HIGH" && alternate == null -> {
-                tvAssistModeCurrent.text = "Avinox 모드 · ${primary.label}"
-                tvAssistModeCurrent.setTextColor(getColor(R.color.good))
-                tvAssistModeHint.text = "● BLE 자동감지 · 선택 모드 · 다르면 위 모드 표시를 탭"
+                renderAssistModeBanner(primary, tentative = false)
+                tvAssistModeHint.text = if (primary == AvinoxAssistMode.AUTO) {
+                    "AUTO 우측은 실측이 아닌 실험적 어시스트 등급 추정"
+                } else {
+                    "● BLE 자동감지 · 다르면 위 모드 표시를 탭"
+                }
                 tvAssistModeHint.setTextColor(getColor(R.color.good))
                 layoutAssistVerify.visibility = View.GONE
             }
             else -> {
-                val altText = alternate?.let { " / ${it.label}" }.orEmpty()
-                tvAssistModeCurrent.text = "Avinox 모드 후보 · ${primary.label}$altText"
-                tvAssistModeCurrent.setTextColor(getColor(R.color.warn))
-                tvAssistModeHint.text = "선택 모드 후보 · raw ${latestAssistRawCode ?: "-"}"
+                renderAssistModeBanner(primary, tentative = true)
+                val altText = alternate?.let { " · 다른 후보 ${it.label}" }.orEmpty()
+                tvAssistModeHint.text = "선택 모드 후보$altText · raw ${latestAssistRawCode ?: "-"}"
                 tvAssistModeHint.setTextColor(getColor(R.color.warn))
                 btnAssistModeConfirm.text = "✓ ${primary.label} 맞음"
                 layoutAssistVerify.visibility = View.VISIBLE
             }
         }
+    }
+
+    private fun renderAssistIdle(text: String) {
+        layoutAutoEstimate.visibility = View.GONE
+        tvAssistModeCurrent.text = text
+        tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
+        tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_idle_bg)
+        lastRenderedAssistMode = null
+        lastRenderedAutoEstimate = null
+    }
+
+    private fun renderAssistModeBanner(mode: AvinoxAssistMode, tentative: Boolean) {
+        val changed = lastRenderedAssistMode != mode
+        tvAssistModeCurrent.text = mode.name + if (tentative) " ?" else ""
+        when (mode) {
+            AvinoxAssistMode.ECO -> {
+                layoutAutoEstimate.visibility = View.GONE
+                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_eco_bg)
+                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
+            }
+            AvinoxAssistMode.AUTO -> {
+                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_auto_left_bg)
+                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
+                layoutAutoEstimate.visibility = View.VISIBLE
+                renderAutoEstimateSegment()
+            }
+            AvinoxAssistMode.TRAIL -> {
+                layoutAutoEstimate.visibility = View.GONE
+                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_trail_bg)
+                tvAssistModeCurrent.setTextColor(getColor(R.color.assist_dark_text))
+            }
+            AvinoxAssistMode.TURBO -> {
+                layoutAutoEstimate.visibility = View.GONE
+                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_turbo_bg)
+                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
+            }
+        }
+        if (changed) popModeBanner()
+        lastRenderedAssistMode = mode
+    }
+
+    private fun renderAutoEstimateSegment() {
+        val estimate = autoEstimateMode
+        tvAutoEstimateLabel.text = "추정"
+        when (estimate) {
+            AvinoxAssistMode.ECO -> {
+                tvAutoEstimateGrade.text = "ECO급"
+                layoutAutoEstimate.setBackgroundResource(R.drawable.assist_estimate_eco_right_bg)
+                tvAutoEstimateLabel.setTextColor(getColor(R.color.text_primary))
+                tvAutoEstimateGrade.setTextColor(getColor(R.color.text_primary))
+            }
+            AvinoxAssistMode.TRAIL -> {
+                tvAutoEstimateGrade.text = "TRAIL급"
+                layoutAutoEstimate.setBackgroundResource(R.drawable.assist_estimate_trail_right_bg)
+                tvAutoEstimateLabel.setTextColor(getColor(R.color.assist_dark_text))
+                tvAutoEstimateGrade.setTextColor(getColor(R.color.assist_dark_text))
+            }
+            AvinoxAssistMode.TURBO -> {
+                tvAutoEstimateGrade.text = "TURBO급"
+                layoutAutoEstimate.setBackgroundResource(R.drawable.assist_estimate_turbo_right_bg)
+                tvAutoEstimateLabel.setTextColor(getColor(R.color.text_primary))
+                tvAutoEstimateGrade.setTextColor(getColor(R.color.text_primary))
+            }
+            else -> {
+                tvAutoEstimateGrade.text = "계산중"
+                layoutAutoEstimate.setBackgroundResource(R.drawable.assist_estimate_idle_right_bg)
+                tvAutoEstimateLabel.setTextColor(getColor(R.color.text_secondary))
+                tvAutoEstimateGrade.setTextColor(getColor(R.color.text_primary))
+            }
+        }
+        if (estimate != null && estimate != lastRenderedAutoEstimate) {
+            layoutAutoEstimate.animate().cancel()
+            layoutAutoEstimate.scaleX = 1f
+            layoutAutoEstimate.scaleY = 1f
+            layoutAutoEstimate.animate().scaleX(1.07f).scaleY(1.07f).setDuration(90L).withEndAction {
+                layoutAutoEstimate.animate().scaleX(1f).scaleY(1f).setDuration(130L).start()
+            }.start()
+        }
+        lastRenderedAutoEstimate = estimate
+    }
+
+    private fun popModeBanner() {
+        layoutAssistModeBanner.animate().cancel()
+        layoutAssistModeBanner.scaleX = 1f
+        layoutAssistModeBanner.scaleY = 1f
+        layoutAssistModeBanner.animate().scaleX(1.055f).scaleY(1.055f).setDuration(90L).withEndAction {
+            layoutAssistModeBanner.animate().scaleX(1f).scaleY(1f).setDuration(150L).start()
+        }.start()
+    }
+
+    /**
+     * AUTO 내부의 실제 모터 지원 단계는 현재 BLE에서 확인되지 않았다.
+     * 그래서 이 값은 절대로 "실측"으로 취급하지 않고 HUD에 '추정'으로만 표시한다.
+     *
+     * 실험 알고리즘 v1:
+     * - 800Wh 기준 최근 SOC 감소량 / 거리(Wh/km)를 가장 강한 신호로 사용
+     * - 자유주행에서는 GPS 고도 노이즈 때문에 경사도는 쓰지 않고 가속만 보조 신호로 사용
+     * - GPX 계획주행에서는 코스 고도 기반 경사 + 가속을 보조 신호로 사용
+     * - 100→98% 구간은 Avinox SOC 비선형성이 커서 Wh/km 신호를 무시
+     */
+    private fun updateAutoAssistEstimate() {
+        if (!logManager.isActive()) {
+            resetAutoAssistEstimator()
+            return
+        }
+        val now = System.currentTimeMillis()
+        val detectionFresh = latestAssistUpdatedMs > 0L && now - latestAssistUpdatedMs <= 15_000L
+        val selected = latestAssistPrimary.takeIf { detectionFresh }
+        if (selected != AvinoxAssistMode.AUTO) {
+            if (autoEstimateWasAuto) resetAutoAssistEstimator()
+            return
+        }
+
+        if (!autoEstimateWasAuto) {
+            resetAutoAssistEstimator()
+            autoEstimateWasAuto = true
+            autoEstimateLastSampleMs = now
+            autoEstimateLastKm = latestRouteKm
+            autoEstimateLastElevation = latestCourseElevation
+            autoEstimateLastSpeedKmh = latestSpeedKmh
+            autoEstimateSocAnchor = latestBleSoc
+            autoEstimateSocAnchorKm = latestRouteKm
+            return
+        }
+
+        val dtSec = (now - autoEstimateLastSampleMs) / 1000.0
+        val dKm = latestRouteKm - autoEstimateLastKm
+        if (dtSec in 0.45..6.0) {
+            val accel = (latestSpeedKmh - autoEstimateLastSpeedKmh) / dtSec
+            if (accel.isFinite() && abs(accel) <= 12.0) {
+                autoEstimateSmoothedAccel = autoEstimateSmoothedAccel * 0.72 + accel * 0.28
+            }
+            if (!logManager.isFreeRide() && dKm in 0.004..0.20 && latestCourseElevation.isFinite() && autoEstimateLastElevation.isFinite()) {
+                val grade = (latestCourseElevation - autoEstimateLastElevation) / (dKm * 1000.0) * 100.0
+                if (grade.isFinite() && abs(grade) <= 25.0) {
+                    autoEstimateSmoothedGradePct = autoEstimateSmoothedGradePct * 0.74 + grade * 0.26
+                }
+            }
+        }
+        autoEstimateLastSampleMs = now
+        autoEstimateLastKm = latestRouteKm
+        autoEstimateLastElevation = latestCourseElevation
+        autoEstimateLastSpeedKmh = latestSpeedKmh
+
+        val soc = latestBleSoc
+        val anchorSoc = autoEstimateSocAnchor
+        if (soc != null) {
+            if (anchorSoc == null || soc > anchorSoc) {
+                autoEstimateSocAnchor = soc
+                autoEstimateSocAnchorKm = latestRouteKm
+            } else if (soc < anchorSoc) {
+                val drop = anchorSoc - soc
+                val distance = latestRouteKm - autoEstimateSocAnchorKm
+                // 상단 SOC 왜곡을 피하고, 너무 짧은 거리/비정상 샘플은 버린다.
+                if (anchorSoc <= 98 && soc <= 98 && drop in 1..5 && distance >= 0.15) {
+                    val rawWhPerKm = drop * 8.0 / distance
+                    if (rawWhPerKm in 1.0..60.0) {
+                        autoEstimateWhPerKm = autoEstimateWhPerKm?.let { it * 0.55 + rawWhPerKm * 0.45 } ?: rawWhPerKm
+                    }
+                }
+                autoEstimateSocAnchor = soc
+                autoEstimateSocAnchorKm = latestRouteKm
+            }
+        }
+
+        val candidate = classifyAutoAssistEstimate()
+        if (candidate != autoEstimateCandidate) {
+            autoEstimateCandidate = candidate
+            autoEstimateCandidateSinceMs = now
+        } else if (candidate != null && candidate != autoEstimateMode && now - autoEstimateCandidateSinceMs >= 650L) {
+            autoEstimateMode = candidate
+            if (candidate != lastLoggedAutoEstimate) {
+                val wh = autoEstimateWhPerKm?.let { String.format(Locale.US, "%.1f", it) } ?: "-"
+                val grade = String.format(Locale.US, "%.1f", autoEstimateSmoothedGradePct)
+                val accel = String.format(Locale.US, "%.2f", autoEstimateSmoothedAccel)
+                logManager.recordEvent(
+                    "AUTO_ASSIST_ESTIMATE",
+                    "${candidate.name}급 · 추정 v1 · ${wh}Wh/km · grade ${grade}% · accel ${accel}kmh/s",
+                    currentRideKm(),
+                    freshBleSoc()?.toDouble()
+                )
+                lastLoggedAutoEstimate = candidate
+            }
+        }
+    }
+
+    private fun classifyAutoAssistEstimate(): AvinoxAssistMode {
+        val whLevel = autoEstimateWhPerKm?.let {
+            when {
+                it < 6.5 -> AvinoxAssistMode.ECO
+                it < 18.0 -> AvinoxAssistMode.TRAIL
+                else -> AvinoxAssistMode.TURBO
+            }
+        }
+        val dynamicLevel = when {
+            !logManager.isFreeRide() && autoEstimateSmoothedGradePct >= 5.5 -> AvinoxAssistMode.TURBO
+            autoEstimateSmoothedAccel >= 2.8 -> AvinoxAssistMode.TURBO
+            !logManager.isFreeRide() && autoEstimateSmoothedGradePct >= 1.7 -> AvinoxAssistMode.TRAIL
+            autoEstimateSmoothedAccel >= 0.9 -> AvinoxAssistMode.TRAIL
+            else -> AvinoxAssistMode.ECO
+        }
+        if (whLevel == null) return dynamicLevel
+        return when {
+            whLevel == AvinoxAssistMode.TURBO || dynamicLevel == AvinoxAssistMode.TURBO -> AvinoxAssistMode.TURBO
+            whLevel == AvinoxAssistMode.TRAIL || dynamicLevel == AvinoxAssistMode.TRAIL -> AvinoxAssistMode.TRAIL
+            else -> AvinoxAssistMode.ECO
+        }
+    }
+
+    private fun resetAutoAssistEstimator() {
+        autoEstimateMode = null
+        autoEstimateCandidate = null
+        autoEstimateCandidateSinceMs = 0L
+        autoEstimateWasAuto = false
+        autoEstimateLastSampleMs = 0L
+        autoEstimateLastKm = latestRouteKm
+        autoEstimateLastElevation = Double.NaN
+        autoEstimateLastSpeedKmh = latestSpeedKmh
+        autoEstimateSmoothedGradePct = 0.0
+        autoEstimateSmoothedAccel = 0.0
+        autoEstimateSocAnchor = null
+        autoEstimateSocAnchorKm = latestRouteKm
+        autoEstimateWhPerKm = null
+        lastLoggedAutoEstimate = null
+        lastRenderedAutoEstimate = null
     }
 
     private fun confirmDetectedAssistPrimary() {
@@ -1555,11 +1807,16 @@ class MainActivity : Activity() {
         val km = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
         val now = System.currentTimeMillis()
         actualStore.save(pct.toDouble(), km, ActualEntryKind.ARRIVAL, now, ActualEntrySource.CHARGE)
-        chargingSessionStore.start(km, pct.toDouble(), now)
+        val plannedTarget = if (!logManager.isFreeRide()) {
+            plan.checkpointAt(km, 0.35)?.chargeToPct?.roundToInt()
+        } else null
+        val alertTarget = plannedTarget ?: AppSettings.chargeAlertTarget(this)
+        chargingSessionStore.start(km, pct.toDouble(), now, alertTarget)
         if (logManager.isActive()) {
             val advice = if (!logManager.isFreeRide()) tripPlanner.adviceAtStation(km, finishTargetPct, plan.calibration(km)?.factor ?: 1.0, pct.toDouble()) else null
             val detail = advice?.let { " · 앱권장 ${it.appRecommendedPct.roundToInt()}% · 사용자 ${it.userTargetPct.roundToInt()}%" }.orEmpty()
-            logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%$detail", km, pct.toDouble())
+            val alertDetail = if (AppSettings.chargeAlertEnabled(this)) " · 알림 ${alertTarget}%" else " · 충전알림 꺼짐"
+            logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%$detail$alertDetail", km, pct.toDouble())
         }
         renderRideState()
         if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(km, testMode)

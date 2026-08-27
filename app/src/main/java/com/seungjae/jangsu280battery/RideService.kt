@@ -53,7 +53,9 @@ class RideService : Service(), LocationListener {
         const val EXTRA_ASSIST_UPDATED_MS = "assist_updated_ms"
 
         private const val CHANNEL_ID = "gpx_ride_tracking"
+        private const val CHARGE_CHANNEL_ID = "charge_target_alerts"
         private const val NOTIFICATION_ID = 280
+        private const val CHARGE_NOTIFICATION_ID = 281
     }
 
     private lateinit var locationManager: LocationManager
@@ -389,8 +391,64 @@ class RideService : Service(), LocationListener {
         } else if (charging != null) {
             // Track the live charging SOC so the first packet after POST_CHARGE is not duplicated as RIDING.
             lastBleRecordedSoc = soc
+            maybeAlertChargingTarget(soc, charging)
         }
         broadcastBleState(soc, timestampMs)
+    }
+
+    private fun maybeAlertChargingTarget(soc: Int, session: ActiveChargeSession) {
+        if (!AppSettings.chargeAlertEnabled(this)) return
+        val plannedTarget = if (!logManager.isFreeRide()) {
+            basePlan.checkpointAt(session.routeKm, 0.35)?.chargeToPct?.roundToInt()
+        } else null
+        val target = (session.targetPct ?: plannedTarget ?: AppSettings.chargeAlertTarget(this)).coerceIn(50, 100)
+        val latest = chargingSessionStore.active() ?: return
+
+        // BLE 재연결이 목표를 건너뛰어 곧바로 100%를 보고해도 알림을 두 번 연속 울리지 않는다.
+        if (soc >= 100) {
+            if (!latest.targetAlerted) chargingSessionStore.markTargetAlerted()
+            val refreshed = chargingSessionStore.active() ?: return
+            if (!refreshed.fullAlerted) {
+                chargingSessionStore.markFullAlerted()
+                val detail = if (target < 100) "설정 목표 ${target}%를 지나 100%에 도달했습니다." else "설정한 충전 목표 100%에 도달했습니다."
+                showChargeAlert("충전 100% 완료", "$detail 충전기는 앱이 제어하지 않습니다.")
+                announcer.speakNow("배터리 충전 100퍼센트입니다.")
+                logManager.recordEvent("CHARGE_FULL_ALERT", "충전 100% 도달 · 목표 $target%", session.routeKm, 100.0)
+            }
+            return
+        }
+
+        if (!latest.targetAlerted && soc >= target) {
+            chargingSessionStore.markTargetAlerted()
+            val planned = plannedTarget != null
+            val title = "충전 목표 ${target}% 도달"
+            val body = if (planned) {
+                "계획주행 충전 목표에 도달했습니다. 충전은 자동으로 멈추지 않고 계속 진행됩니다."
+            } else {
+                "설정한 충전 알림 목표에 도달했습니다. 충전은 자동으로 멈추지 않고 계속 진행됩니다."
+            }
+            showChargeAlert(title, body)
+            announcer.speakNow("배터리 ${soc}퍼센트. 충전 목표 ${target}퍼센트에 도달했습니다. 충전은 계속 진행 중입니다.")
+            logManager.recordEvent("CHARGE_TARGET_ALERT", "충전 목표 $target% 도달 · 현재 $soc% · 계속 충전", session.routeKm, soc.toDouble())
+        }
+    }
+
+    private fun showChargeAlert(title: String, text: String) {
+        val launchIntent = Intent(this, MainActivity::class.java)
+        val contentIntent = PendingIntent.getActivity(this, 9, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHARGE_CHANNEL_ID)
+        else @Suppress("DEPRECATION") Notification.Builder(this)
+        val notification = builder
+            .setSmallIcon(R.drawable.ic_battery_pilot)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(contentIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .setCategory(Notification.CATEGORY_ALARM)
+            .build()
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(CHARGE_NOTIFICATION_ID, notification)
     }
 
     private fun broadcastBleState(socOverride: Int? = null, updatedOverride: Long? = null) {
@@ -432,11 +490,17 @@ class RideService : Service(), LocationListener {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val channel = NotificationChannel(CHANNEL_ID, "GPX 라이딩 GPS 안내", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "화면이 꺼져도 GPS 위치, 배터리 예측, 음성 안내와 주행 로그를 유지합니다."
                 setSound(null, null)
             }
-            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+            manager.createNotificationChannel(channel)
+            val chargeChannel = NotificationChannel(CHARGE_CHANNEL_ID, "충전 목표 도달 알림", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "설정한 충전 목표 또는 계획주행 충전 목표에 도달하면 소리와 진동으로 알려줍니다."
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(chargeChannel)
         }
     }
 

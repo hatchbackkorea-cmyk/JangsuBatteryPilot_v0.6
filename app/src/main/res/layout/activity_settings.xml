@@ -131,6 +131,50 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="충전 도달 알림"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <Switch
+                android:id="@+id/switchChargeAlert"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:checked="true"
+                android:text="충전 목표 도달 시 알림"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/tvChargeAlertTarget"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="기본 충전 알림 100%"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <SeekBar
+                android:id="@+id/seekChargeAlertTarget"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:max="50"
+                android:progress="50" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="50~100% · 계획주행의 충전지점에서는 코스에 설정한 충전 목표가 우선합니다. 목표에 도달해도 충전은 멈추지 않고 알림만 주며, 계속 꽂아두면 100%에서 한 번 더 알려줍니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:background="@drawable/panel_bg"
             android:orientation="vertical"
             android:padding="15dp">
@@ -236,7 +280,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
                 android:layout_marginTop="10dp"
-                android:text="과거 라이딩 학습 가져오기 (FIT / GPX)" />
+                android:text="검증 학습 관리 · FIT + 앱 ZIP" />
             <TextView
                 android:id="@+id/tvHistoricalLearningSummary"
                 android:layout_width="match_parent"
@@ -255,7 +299,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="주행 로그 파일은 유지됩니다. 개인 학습값과 과거 FIT/GPX에서 만든 학습 기록만 초기화됩니다."
+                android:text="정식 학습은 Avinox FIT의 거리·고도·파워와 앱 ZIP의 BLE SOC·모드를 결합합니다. 초기화해도 원래 주행 로그는 유지됩니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>

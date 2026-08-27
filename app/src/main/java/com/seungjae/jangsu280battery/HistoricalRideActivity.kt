@@ -18,6 +18,7 @@ import java.util.Locale
 class HistoricalRideActivity : Activity() {
     companion object {
         private const val REQ_PICK_HISTORY = 4101
+        private const val REQ_PICK_VERIFIED_PAIR = 4102
         const val EXTRA_AUTO_PICK_TYPE = "auto_pick_type"
     }
 
@@ -42,6 +43,7 @@ class HistoricalRideActivity : Activity() {
     private var pendingType = HistoricalSourceType.FIT
     private var pendingUris: List<android.net.Uri> = emptyList()
     private var analysis: HistoricalRideAnalysis? = null
+    private var verifiedPair: VerifiedLearningPair? = null
     private val manualPoints = mutableListOf<ManualPoint>()
     private var nextPointOrder = 0
 
@@ -67,12 +69,14 @@ class HistoricalRideActivity : Activity() {
         btnTrain = findViewById(R.id.btnTrainHistoricalRide)
 
         findViewById<Button>(R.id.btnHistoricalBack).setOnClickListener { finish() }
+        findViewById<Button>(R.id.btnImportVerifiedPair).setOnClickListener { pickVerifiedPair() }
         findViewById<Button>(R.id.btnImportFitHistory).setOnClickListener { pickFile(HistoricalSourceType.FIT) }
         findViewById<Button>(R.id.btnImportGpxHistory).setOnClickListener { pickFile(HistoricalSourceType.GPX) }
         findViewById<Button>(R.id.btnAddHistoricalBatteryPoint).setOnClickListener { showAddPointDialog() }
         btnTrain.setOnClickListener { trainSelectedRide() }
 
         if (logManager.isActive()) {
+            findViewById<Button>(R.id.btnImportVerifiedPair).isEnabled = false
             findViewById<Button>(R.id.btnImportFitHistory).isEnabled = false
             findViewById<Button>(R.id.btnImportGpxHistory).isEnabled = false
             Toast.makeText(this, "주행 기록 중에는 과거 학습 데이터를 가져올 수 없습니다.", Toast.LENGTH_LONG).show()
@@ -96,7 +100,7 @@ class HistoricalRideActivity : Activity() {
     @Deprecated("Deprecated in Android API, kept for min-dependency project")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_PICK_HISTORY || resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK || requestCode !in setOf(REQ_PICK_HISTORY, REQ_PICK_VERIFIED_PAIR)) return
         val uris = mutableListOf<android.net.Uri>()
         data?.clipData?.let { clip ->
             for (i in 0 until clip.itemCount) uris += clip.getItemAt(i).uri
@@ -108,7 +112,22 @@ class HistoricalRideActivity : Activity() {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }
-        analyzeUris(uris)
+        if (requestCode == REQ_PICK_VERIFIED_PAIR) analyzeVerifiedPair(uris) else analyzeUris(uris)
+    }
+
+    private fun pickVerifiedPair() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 종료 후 검증 학습을 가져와 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        Toast.makeText(this, "같은 주행의 Avinox FIT 1개와 앱 ZIP 1개를 함께 선택하세요.", Toast.LENGTH_LONG).show()
+        startActivityForResult(intent, REQ_PICK_VERIFIED_PAIR)
     }
 
     private fun pickFile(type: HistoricalSourceType) {
@@ -127,7 +146,13 @@ class HistoricalRideActivity : Activity() {
     }
 
     private fun analyzeUris(uris: List<android.net.Uri>) {
+        verifiedPair = null
         pendingUris = uris.distinct()
+        etStart.isEnabled = true
+        etEnd.isEnabled = true
+        etUsed.isEnabled = true
+        findViewById<Button>(R.id.btnAddHistoricalBatteryPoint).visibility = View.VISIBLE
+        btnTrain.text = "이 라이딩을 학습에 사용"
         panelAnalysis.visibility = View.VISIBLE
         panelBattery.visibility = View.GONE
         btnTrain.isEnabled = false
@@ -177,6 +202,61 @@ class HistoricalRideActivity : Activity() {
                     tvAnalysis.text = "분석 실패: ${e.message ?: e.javaClass.simpleName}"
                     panelBattery.visibility = View.GONE
                     btnTrain.isEnabled = false
+                }
+            }
+        }.start()
+    }
+
+    private fun analyzeVerifiedPair(uris: List<android.net.Uri>) {
+        val distinct = uris.distinct()
+        val named = distinct.map { it to HistoricalRideImporter.displayName(this, it) }
+        val fit = named.singleOrNull { it.second.endsWith(".fit", ignoreCase = true) }
+        val zip = named.singleOrNull { it.second.endsWith(".zip", ignoreCase = true) }
+        if (fit == null || zip == null || distinct.size != 2) {
+            Toast.makeText(this, "Avinox .fit 1개와 우리 앱 .zip 1개, 총 2개를 선택해 주세요.", Toast.LENGTH_LONG).show()
+            return
+        }
+        panelAnalysis.visibility = View.VISIBLE
+        panelBattery.visibility = View.GONE
+        btnTrain.isEnabled = false
+        tvAnalysis.text = "FIT + 앱 ZIP을 시간·거리 기준으로 교차검증 중…"
+        Thread {
+            val result = runCatching { VerifiedLearningImporter.analyze(this, fit.first, zip.first) }
+            runOnUiThread {
+                result.onSuccess { pair ->
+                    verifiedPair = pair
+                    val pairedAnalysis = pair.analysis.copy(
+                        displayName = "${pair.fitName} + ${pair.zipName}",
+                        fileHash = pair.pairHash,
+                        dataQualityScore = pair.qualityScore,
+                        warnings = (pair.analysis.warnings + pair.warnings).distinct()
+                    )
+                    analysis = pairedAnalysis
+                    pendingUris = listOf(pair.fitUri)
+                    manualPoints.clear()
+                    nextPointOrder = 0
+                    val first = pair.batteryEntries.firstOrNull()?.percent
+                    val last = pair.batteryEntries.lastOrNull()?.percent
+                    val used = verifiedConsumed(pair.batteryEntries)
+                    etStart.setText(first?.let(::formatPct).orEmpty())
+                    etEnd.setText(last?.let(::formatPct).orEmpty())
+                    etUsed.setText(if (used > 0.0) formatPct(used) else "")
+                    etStart.isEnabled = false
+                    etEnd.isEnabled = false
+                    etUsed.isEnabled = false
+                    findViewById<Button>(R.id.btnAddHistoricalBatteryPoint).visibility = View.GONE
+                    panelBattery.visibility = View.VISIBLE
+                    btnTrain.text = "✅ 검증된 FIT + ZIP을 정식 학습"
+                    btnTrain.isEnabled = pair.accepted
+                    tvAnalysis.text = pair.summaryText()
+                    renderManualPoints()
+                }.onFailure { e ->
+                    verifiedPair = null
+                    analysis = null
+                    pendingUris = emptyList()
+                    panelBattery.visibility = View.GONE
+                    btnTrain.isEnabled = false
+                    tvAnalysis.text = "검증 분석 실패: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
         }.start()
@@ -256,6 +336,10 @@ class HistoricalRideActivity : Activity() {
     }
 
     private fun trainSelectedRide() {
+        verifiedPair?.let {
+            trainVerifiedPair(it)
+            return
+        }
         val a = analysis ?: return
         // 같은 파일이라도 분석 알고리즘이 개선된 버전에서는 다시 학습할 수 있다.
         // 실제 교체는 사용자가 최종 확인에서 '학습에 사용'을 누른 뒤 수행한다.
@@ -388,6 +472,107 @@ class HistoricalRideActivity : Activity() {
             .show()
     }
 
+    private fun trainVerifiedPair(pair: VerifiedLearningPair) {
+        val a = analysis ?: return
+        if (!pair.accepted) {
+            Toast.makeText(this, "FIT과 ZIP 검증을 통과하지 못해 정식 학습에 넣지 않습니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val sessionId = "verified_${pair.pairHash.take(28)}"
+        val actualUsed = verifiedConsumed(pair.batteryEntries)
+        val message = buildString {
+            append("거리·고도·GPS·파워는 Avinox FIT을 정답으로 사용합니다.\n")
+            append("SOC·ECO/AUTO/TRAIL/TURBO는 앱 ZIP의 BLE 기록을 사용합니다.\n\n")
+            append("FIT ${String.format(Locale.US, "%.2f", a.distanceKm)} km · 상승 ${a.ascentM.roundToInt()}m\n")
+            append("실제 배터리 소비 ${formatPct(actualUsed)}% · 품질 ${pair.qualityScore}%\n")
+            append("100→98% 완충 상단구간과 모드 전환이 섞인 SOC 구간은 자동 제외합니다.\n\n")
+            append("이 검증 라이딩을 개인 학습에 반영할까요?")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("검증 학습 최종 확인")
+            .setMessage(message)
+            .setPositiveButton("정식 학습") { _, _ ->
+                rideStore.findByHash(pair.pairHash)?.let { old ->
+                    learningStore.removeSession(old.id)
+                    rideStore.remove(old.id)
+                    dataStore.remove(old.fileHash)
+                }
+                learningStore.removeSession(sessionId)
+                val stored = try {
+                    dataStore.save(listOf(pair.fitUri), a, pair.batteryEntries).also {
+                        dataStore.saveCompanion(pair.zipUri, pair.pairHash, pair.zipName)
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "FIT/ZIP 원본 보존 실패: ${e.message ?: "저장소 오류"}", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                if (stored.originals.isEmpty()) {
+                    Toast.makeText(this, "Avinox FIT 원본을 보존하지 못해 학습을 취소했습니다.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                val count = learningStore.trainModeSeparatedRide(
+                    sessionId = sessionId,
+                    course = a.course,
+                    entries = pair.batteryEntries,
+                    telemetry = a.telemetry,
+                    modeWindows = pair.modeWindows,
+                    qualityScore = pair.qualityScore
+                )
+                if (count <= 0) {
+                    learningStore.removeSession(sessionId)
+                    dataStore.remove(pair.pairHash)
+                    Toast.makeText(this, "모드가 안정된 SOC 구간을 만들지 못해 학습하지 않았습니다.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                rideStore.add(
+                    HistoricalRideRecord(
+                        id = sessionId,
+                        fileHash = pair.pairHash,
+                        fileName = "${pair.fitName} + ${pair.zipName}",
+                        sourceType = HistoricalSourceType.FIT,
+                        importedAtMs = System.currentTimeMillis(),
+                        distanceKm = a.distanceKm,
+                        ascentM = a.ascentM,
+                        descentM = a.descentM,
+                        durationSec = a.durationSec,
+                        usedBatteryPct = actualUsed,
+                        avgSpeedKph = a.avgSpeedKph,
+                        sampleCount = count,
+                        telemetryPointCount = a.telemetry.size,
+                        dataQualityScore = pair.qualityScore,
+                        originalStored = true,
+                        fileCount = 2,
+                        gapCount = a.gaps.size
+                    )
+                )
+                Toast.makeText(this, "검증 라이딩을 ${count}개 모드별 학습 샘플로 반영했습니다.", Toast.LENGTH_LONG).show()
+                btnTrain.isEnabled = false
+                tvAnalysis.append("\n\n✅ FIT 기준 정식 학습 완료 · ${count}개 샘플")
+                renderStoredRides()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun verifiedConsumed(entries: List<ActualBatteryEntry>): Double {
+        if (entries.isEmpty()) return 0.0
+        val ordered = entries.sortedBy { it.timestampMs }
+        var chargeAdded = 0.0
+        var arrival: ActualBatteryEntry? = null
+        ordered.forEach { e ->
+            when (e.kind) {
+                ActualEntryKind.ARRIVAL -> arrival = e
+                ActualEntryKind.POST_CHARGE -> {
+                    val a = arrival
+                    if (a != null) chargeAdded += (e.percent - a.percent).coerceAtLeast(0.0)
+                    arrival = null
+                }
+                ActualEntryKind.RIDING -> Unit
+            }
+        }
+        return (ordered.first().percent + chargeAdded - ordered.last().percent).coerceAtLeast(0.0)
+    }
+
     private fun renderStoredRides() {
         llRideList.removeAllViews()
         val records = rideStore.records()
@@ -411,7 +596,12 @@ class HistoricalRideActivity : Activity() {
                 setTextColor(getColor(R.color.text_primary))
                 textSize = 14f
                 setTypeface(typeface, Typeface.BOLD)
-                text = if (record.fileCount > 1) "${record.sourceType.label} ${record.fileCount}개 · ${record.fileName}" else "${record.sourceType.label} · ${record.fileName}"
+                val verified = record.fileName.contains(".fit", ignoreCase = true) && record.fileName.contains(".zip", ignoreCase = true)
+                text = when {
+                    verified -> "✅ 검증 FIT+ZIP · ${record.fileName}"
+                    record.fileCount > 1 -> "${record.sourceType.label} ${record.fileCount}개 · ${record.fileName}"
+                    else -> "${record.sourceType.label} · ${record.fileName}"
+                }
             }
             val details = TextView(this).apply {
                 setTextColor(getColor(R.color.text_secondary))

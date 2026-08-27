@@ -70,6 +70,17 @@ class HistoricalRideDataStore(context: Context) {
         )
     }
 
+    fun saveCompanion(uri: Uri, fileHash: String, fileName: String = "app_ride.zip"): File {
+        require(fileHash.isNotBlank()) { "학습 세션 해시가 없습니다." }
+        val dir = File(root, fileHash).apply { mkdirs() }
+        val safeName = fileName.replace(Regex("[^0-9A-Za-z가-힣._-]"), "_").take(120).ifBlank { "app_ride.zip" }
+        val out = File(dir, safeName)
+        app.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(out).use { output -> input.copyTo(output) }
+        } ?: error("동반 주행 ZIP을 다시 열 수 없습니다.")
+        return out
+    }
+
     fun remove(fileHash: String) {
         if (fileHash.isNotBlank()) File(root, fileHash).deleteRecursively()
     }

@@ -554,6 +554,14 @@ class RideLogManager(context: Context) {
         if (!fitFile.exists()) return 0
         val analysis = HistoricalRideImporter.analyzeFile(fitFile, HistoricalSourceType.FIT)
         val arr = root.optJSONArray("actualBattery") ?: JSONArray()
+        val firstZipTs = (0 until arr.length()).asSequence().mapNotNull { idx ->
+            arr.optJSONObject(idx)?.optLong("timestampMs", 0L)?.takeIf { it > 0L }
+        }.firstOrNull()
+        val rawFitStart = analysis.telemetry.mapNotNull { it.timestampMs }.minOrNull()
+        val fitEpochOffset = if (rawFitStart != null && firstZipTs != null) {
+            val fitToUnix = 631_065_600_000L
+            if (kotlin.math.abs(rawFitStart + fitToUnix - firstZipTs) < kotlin.math.abs(rawFitStart - firstZipTs)) fitToUnix else 0L
+        } else 0L
         val entries = mutableListOf<ActualBatteryEntry>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
@@ -563,7 +571,7 @@ class RideLogManager(context: Context) {
             val ts = o.optLong("timestampMs", 0L)
             if (pct.isFinite() && phoneKm.isFinite()) {
                 val nearest = if (ts > 0L) analysis.telemetry.asSequence()
-                    .mapNotNull { p -> p.timestampMs?.let { t -> kotlin.math.abs(t - ts) to p.routeKm } }
+                    .mapNotNull { p -> p.timestampMs?.let { t -> kotlin.math.abs((t + fitEpochOffset) - ts) to p.routeKm } }
                     .minByOrNull { it.first } else null
                 val fitKm = if (nearest != null && nearest.first <= 300_000L) {
                     nearest.second

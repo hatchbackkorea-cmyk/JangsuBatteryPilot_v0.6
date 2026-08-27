@@ -37,6 +37,9 @@ class SettingsActivity : Activity() {
     private lateinit var tvUpdateStatus: TextView
     private lateinit var switchBetaUpdates: Switch
     private lateinit var btnCheckUpdate: Button
+    private lateinit var switchChargeAlert: Switch
+    private lateinit var tvChargeAlertTarget: TextView
+    private lateinit var seekChargeAlertTarget: SeekBar
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,6 +71,9 @@ class SettingsActivity : Activity() {
         tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
         switchBetaUpdates = findViewById(R.id.switchBetaUpdates)
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
+        switchChargeAlert = findViewById(R.id.switchChargeAlert)
+        tvChargeAlertTarget = findViewById(R.id.tvChargeAlertTarget)
+        seekChargeAlertTarget = findViewById(R.id.seekChargeAlertTarget)
         refreshLearningSummary()
         setupUpdateUi()
 
@@ -91,6 +97,12 @@ class SettingsActivity : Activity() {
         seekFinishTarget.max = 98
         seekFinishTarget.progress = AppSettings.finishTarget(this).roundToInt() - 1
         updateFinishLabel()
+
+        switchChargeAlert.isChecked = AppSettings.chargeAlertEnabled(this)
+        seekChargeAlertTarget.max = 50
+        seekChargeAlertTarget.progress = AppSettings.chargeAlertTarget(this) - 50
+        seekChargeAlertTarget.isEnabled = switchChargeAlert.isChecked
+        updateChargeAlertLabel()
 
         val activeCourse = courseRepo.loadActiveCourse()
         seekTestKm.max = (activeCourse.totalKm * 10.0).roundToInt().coerceAtLeast(1)
@@ -126,6 +138,16 @@ class SettingsActivity : Activity() {
             val pct = (it + 1).coerceIn(1, 99)
             prefs.edit().putInt(AppSettings.KEY_FINISH_TARGET, pct).apply()
             updateFinishLabel()
+        })
+        switchChargeAlert.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean(AppSettings.KEY_CHARGE_ALERT_ENABLED, checked).apply()
+            seekChargeAlertTarget.isEnabled = checked
+            updateChargeAlertLabel()
+        }
+        seekChargeAlertTarget.setOnSeekBarChangeListener(simpleListener { progress ->
+            val pct = (progress + 50).coerceIn(50, 100)
+            prefs.edit().putInt(AppSettings.KEY_CHARGE_ALERT_TARGET, pct).apply()
+            updateChargeAlertLabel()
         })
         switchTestMode.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
@@ -216,6 +238,15 @@ class SettingsActivity : Activity() {
         tvFinishTarget.text = "종점 목표 잔량 ${seekFinishTarget.progress + 1}%"
     }
 
+    private fun updateChargeAlertLabel() {
+        val pct = (seekChargeAlertTarget.progress + 50).coerceIn(50, 100)
+        tvChargeAlertTarget.text = if (switchChargeAlert.isChecked) {
+            "기본 충전 알림 ${pct}%"
+        } else {
+            "충전 도달 알림 사용 안 함"
+        }
+    }
+
     private fun updateTestUi(totalKm: Double) {
         val km = (seekTestKm.progress / 10.0).coerceIn(0.0, totalKm)
         tvTestKm.text = "테스트 위치 ${RideFormatter.one(km)} km / ${RideFormatter.one(totalKm)} km"
@@ -250,16 +281,16 @@ class SettingsActivity : Activity() {
             "저장된 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}"
         }
         tvHistoricalLearningSummary.text = if (historical.isEmpty()) {
-            "과거 FIT/GPX 학습 라이딩 없음"
+            "검증 FIT+ZIP / 과거 FIT·GPX 학습 없음"
         } else {
-            "과거 FIT/GPX 학습 ${historical.size}개 · 생성된 학습 샘플 ${historical.sumOf { it.sampleCount }}개"
+            "검증/과거 학습 ${historical.size}개 · 생성된 학습 샘플 ${historical.sumOf { it.sampleCount }}개"
         }
     }
 
     private fun confirmClearLearning() {
         AlertDialog.Builder(this)
             .setTitle("배터리 학습 데이터 초기화")
-            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? 과거 FIT/GPX에서 가져온 학습 기록도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
+            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? 검증 FIT+ZIP 및 과거 FIT/GPX 학습 기록도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
                 historicalRideStore.clear()
@@ -303,7 +334,8 @@ class SettingsActivity : Activity() {
                     "• 앱 실행 시 하루 1회 자동 확인 · 새 버전이 있을 때만 안내\n" +
                     "• 고정 서명 APK로 기존 데이터 유지 업데이트\n" +
                     "• 업데이트 확인 시 주행/FIT/배터리/학습 데이터 외부 전송 없음\n" +
-                    "• v0.19.2 Strava 클린 FIT 컴파일 수정 · 전체 텔레메트리 유지\n" +
+                    "• v0.21.0 검증 학습: FIT 거리·고도·파워 + ZIP BLE SOC·모드 결합\n" +
+                    "• 충전 목표 도달 알림 · 계획 목표 우선 · 충전은 자동 중단하지 않음\n" +
                     "• Rider Power/심박/Cadence/GPS/고도/속도 + Motor/Battery/Assist Mode 기록"
             )
             .setPositiveButton("확인", null)

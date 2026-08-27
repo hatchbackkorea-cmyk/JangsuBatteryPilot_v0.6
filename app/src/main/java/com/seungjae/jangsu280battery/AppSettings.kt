@@ -16,10 +16,13 @@ object AppSettings {
     const val KEY_TEST_MODE = "test_mode"
     const val KEY_TEST_KM = "test_km"
     const val KEY_BETA_UPDATES = "beta_updates"
+    const val KEY_CHARGE_ALERT_ENABLED = "charge_alert_enabled"
+    const val KEY_CHARGE_ALERT_TARGET = "charge_alert_target"
 
     const val DEFAULT_FINISH_TARGET = 15
     const val DEFAULT_DISTANCE_INTERVAL_KM = 5
     const val DEFAULT_TIME_INTERVAL_MIN = 0
+    const val DEFAULT_CHARGE_ALERT_TARGET = 100
 
     fun finishTarget(context: Context): Double = prefs(context)
         .getIntCompat(KEY_FINISH_TARGET, DEFAULT_FINISH_TARGET)
@@ -37,6 +40,10 @@ object AppSettings {
     fun testMode(context: Context): Boolean = prefs(context).getBoolean(KEY_TEST_MODE, false)
     fun testKm(context: Context): Double = prefs(context).getFloat(KEY_TEST_KM, 0f).toDouble().coerceAtLeast(0.0)
     fun betaUpdates(context: Context): Boolean = prefs(context).getBoolean(KEY_BETA_UPDATES, false)
+    fun chargeAlertEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_CHARGE_ALERT_ENABLED, true)
+    fun chargeAlertTarget(context: Context): Int = prefs(context)
+        .getIntCompat(KEY_CHARGE_ALERT_TARGET, DEFAULT_CHARGE_ALERT_TARGET)
+        .coerceIn(50, 100)
 
     fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

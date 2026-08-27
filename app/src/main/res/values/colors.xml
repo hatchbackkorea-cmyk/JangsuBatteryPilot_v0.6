@@ -12,6 +12,13 @@
     <color name="warn">#F2C84B</color>
     <color name="orange">#F39A4A</color>
     <color name="danger">#F26161</color>
+    <!-- v0.20.0 Avinox mode HUD -->
+    <color name="assist_idle">#263746</color>
+    <color name="assist_eco">#239B56</color>
+    <color name="assist_auto">#1976D2</color>
+    <color name="assist_trail">#F2C84B</color>
+    <color name="assist_turbo">#F57C00</color>
+    <color name="assist_dark_text">#101820</color>
     <color name="profile_line">#D5E3ED</color>
     <color name="profile_fill">#263746</color>
     <color name="preview_band">#263B4C</color>

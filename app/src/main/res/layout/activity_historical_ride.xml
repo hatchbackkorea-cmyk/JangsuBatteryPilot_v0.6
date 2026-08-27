@@ -50,9 +50,22 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Avinox가 쉬는 동안 꺼져 FIT가 여러 개로 나뉘면 여러 파일을 한 번에 선택하세요. 시간·위치 순으로 하나의 실제 라이딩 세션으로 결합합니다. GPX도 지원합니다."
+                android:text="정식 개인학습은 Avinox FIT + 우리 앱 주행 ZIP을 함께 넣는 검증 학습을 권장합니다. 거리·고도·파워는 FIT, 실제 SOC·모드는 ZIP을 기준으로 시간축에서 결합합니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnImportVerifiedPair"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="10dp"
+                android:text="✅ 검증 학습 가져오기 · FIT + 앱 ZIP" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="아래 FIT/GPX 단독 가져오기는 예전 기록이나 수동 배터리 입력용입니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -224,7 +237,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:layout_marginBottom="24dp"
-            android:text="※ FIT 여러 개는 시간·위치 연결성을 검사해 하나의 세션으로 결합합니다. 파일 사이 휴식/전원 OFF 시간은 주행시간과 모터 에너지에서 제외합니다. 중간 충전은 같은 km에 도착 잔량과 충전 후 잔량을 순서대로 추가하세요."
+            android:text="※ 검증 학습은 FIT과 앱 ZIP의 거리·시작시간을 교차검사하고, 통과한 라이딩만 정식 학습합니다. FIT 단독 가져오기는 수동 배터리 입력용입니다. 완충 직후 100→98% SOC 구간은 학습에서 자동 제외합니다."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
     </LinearLayout>

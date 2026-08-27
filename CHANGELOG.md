@@ -1,3 +1,14 @@
+# v0.21.0 — Verified FIT+ZIP Learning + Charge Target Alert
+- 정식 개인학습 입력을 `Avinox FIT + Jangsu 앱 주행 ZIP` 검증 페어로 추가.
+- 학습 기준을 고정: 거리/GPS/고도/획득고도/속도/Rider Power/Motor Power/Cadence는 Avinox FIT, 실제 SOC와 선택 Assist Mode는 앱 ZIP BLE 로그를 사용.
+- FIT와 ZIP을 timestamp로 매칭해 BLE SOC 지점을 FIT routeKm로 재배치하며, Garmin FIT epoch를 Unix 시간으로 보정해 시간매칭 정확도를 개선.
+- FIT↔ZIP 거리 오차 3%, 시작시간 5분, 종료시간 10분, BLE SOC/모드 유효성 검사를 통과한 세션만 정식 학습 허용.
+- 모드 전환이 섞인 SOC 구간과 완충 직후 100→98% 구간은 기존 클린 학습 정책대로 자동 제외.
+- 검증 학습 원본 FIT과 동반 앱 ZIP을 함께 보존하고 학습 목록에 `검증 FIT+ZIP`으로 표시.
+- 최근 주행 FIT 학습의 FIT epoch/휴대폰 Unix timestamp 비교 오류를 수정해 거리 보정이 단순 비례 fallback보다 실제 시간매칭을 우선 사용.
+- 충전 도달 알림 추가: 기본 50~100% 목표 설정, 계획주행에서는 해당 충전지점의 계획 목표가 우선.
+- 목표 도달 시 소리/진동/음성 알림만 제공하며 충전을 강제로 중단하지 않음. 목표를 지나 계속 충전하면 100%에서 한 번 더 알림.
+
 # v0.19.3
 - Strava 진입 메뉴를 메인 `피드백` 페이지 상단에 추가했습니다.
 - 설정 페이지에서 메뉴가 보이지 않는 기기에서도 `피드백 → Strava 연결 / FIT 업로드`로 바로 진입할 수 있습니다.
@@ -302,3 +313,11 @@
 - Avinox 클라우드 자동연동을 우회해 원본 FIT를 Strava `EMountainBikeRide`로 직접 업로드
 - Strava 활동 설명에 Rider/Motor 평균·최대 파워, Rider kJ, Motor Wh, Assist ratio 자동 작성
 - 이번 단계는 원본 FIT 직접 업로드 비교용. 직접 업로드에서도 파워가 이상할 때만 다음 단계에서 새 FIT 생성/정제
+
+## v0.20.0
+- 주행 HUD Avinox 모드 표시를 현재 모드 1개짜리 대형 컬러 배너로 변경.
+- ECO=녹색, AUTO=파랑, TRAIL=노랑, TURBO=주황.
+- 모드 변경 시 배너가 짧게 커졌다 원래 크기로 돌아오는 전환 애니메이션 추가.
+- AUTO일 때 우측 104dp 영역을 분할해 `추정` + `ECO급/TRAIL급/TURBO급` 표시.
+- AUTO 추정 v1은 800Wh 기준 최근 SOC/km + 가속, 계획주행에서는 코스 경사까지 보조 신호로 사용. 100→98% SOC 왜곡 구간은 Wh/km 추정에서 제외.
+- AUTO 추정 등급 변경은 `AUTO_ASSIST_ESTIMATE` 이벤트로 주행 로그에 저장. 실제 BLE 내부 단계가 아니라 실험적 추정값임을 UI/로그에 명시.
