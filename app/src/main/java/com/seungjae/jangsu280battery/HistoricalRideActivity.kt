@@ -666,7 +666,9 @@ class HistoricalRideActivity : Activity() {
         llRideList.removeAllViews()
         val records = rideStore.records()
         val auxRecords = fitAuxStore.records()
-        tvRideCount.text = "A급 ${records.size}개 · B급 FIT ${auxRecords.size}개 · 배터리학습 ${learningStore.samples().size}구간 · 보조 ${fitAuxStore.samples().size}구간"
+        val protoCount = records.count { it.sourceType == HistoricalSourceType.PROTO }
+        val legacyCount = records.size - protoCount
+        tvRideCount.text = "A+ 원본 ${protoCount}개 · 기존 A급 ${legacyCount}개 · B급 FIT ${auxRecords.size}개 · 배터리학습 ${learningStore.samples().size}구간"
         if (records.isEmpty() && auxRecords.isEmpty()) {
             llRideList.addView(TextView(this).apply {
                 text = "아직 가져온 과거 라이딩이 없습니다."
@@ -688,6 +690,7 @@ class HistoricalRideActivity : Activity() {
                 setTypeface(typeface, Typeface.BOLD)
                 val verified = record.fileName.contains(".fit", ignoreCase = true) && record.fileName.contains(".zip", ignoreCase = true)
                 text = when {
+                    record.sourceType == HistoricalSourceType.PROTO -> "🟩 A+ Avinox 원본 · ${record.fileName}"
                     verified -> "✅ A급 검증 FIT+ZIP · ${record.fileName}"
                     record.fileCount > 1 -> "A급 ${record.sourceType.label} ${record.fileCount}개 · ${record.fileName}"
                     else -> "A급 ${record.sourceType.label} · ${record.fileName}"

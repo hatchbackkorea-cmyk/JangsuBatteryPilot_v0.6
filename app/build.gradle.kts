@@ -56,10 +56,13 @@ android {
     }
     buildFeatures {
         buildConfig = true
+        aidl = true
     }
 }
 
 dependencies {
     implementation("com.garmin:fit:21.213.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("androidx.core:core-ktx:1.15.0")
 }

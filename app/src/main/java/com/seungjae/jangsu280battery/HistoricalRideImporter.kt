@@ -18,7 +18,7 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToLong
 
-enum class HistoricalSourceType(val label: String) { FIT("FIT"), GPX("GPX") }
+enum class HistoricalSourceType(val label: String) { FIT("FIT"), GPX("GPX"), PROTO("Avinox 원본") }
 
 data class HistoricalRideSourcePart(
     val displayName: String,
@@ -121,6 +121,7 @@ object HistoricalRideImporter {
         val single = when (requestedType) {
             HistoricalSourceType.FIT -> parseFit(bytes, name, hash)
             HistoricalSourceType.GPX -> parseGpx(bytes, name, hash)
+            HistoricalSourceType.PROTO -> error("Avinox 원본은 Shizuku 원본 동기화 경로에서 불러옵니다.")
         }
         val first = single.telemetry.firstOrNull()
         val last = single.telemetry.lastOrNull()
@@ -146,6 +147,7 @@ object HistoricalRideImporter {
         return when (requestedType) {
             HistoricalSourceType.FIT -> parseFit(bytes, file.name, hash)
             HistoricalSourceType.GPX -> parseGpx(bytes, file.name, hash)
+            HistoricalSourceType.PROTO -> error("Avinox 원본은 AvinoxProtoParser를 사용합니다.")
         }
     }
 

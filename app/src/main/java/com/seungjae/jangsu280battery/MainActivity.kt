@@ -2111,23 +2111,28 @@ class MainActivity : Activity() {
             avinoxReference = ref
         )
         tvCompareActual.text = snapshot.actualConsumedPct?.let(::formatPct) ?: "—"
-        tvCompareModel.text = formatPct(snapshot.modelConsumedPct)
-        tvCompareAvinox.text = snapshot.avinoxConsumedPct?.let(::formatPct) ?: "—"
-
-        val actualDiffModel = snapshot.actualConsumedPct?.let { actual ->
-            val diff = actual - snapshot.modelConsumedPct
-            "실제-자체 ${signedPct(diff)}"
-        } ?: "실제값 입력 전"
-        val avinoxName = snapshot.avinoxMode?.label ?: "미선택"
-        val avinoxTotal = snapshot.avinoxProjectedTotalPct?.let(::formatPct) ?: "—"
-        tvCompareDetail.text =
-            "누적 충전 +${formatPct(snapshot.chargedAddedPct)} · $actualDiffModel · 보정 ${String.format(Locale.US, "%.2f", snapshot.modelFactor)}x\n" +
-            "종점 누적예상  자체 ${formatPct(snapshot.modelProjectedTotalPct)} · Avinox $avinoxName $avinoxTotal"
+        setComparisonWithProjected(
+            tvCompareModel,
+            formatPct(snapshot.modelConsumedPct),
+            "자체 ${formatPct(snapshot.modelProjectedTotalPct)}"
+        )
+        val avinoxConsumed = snapshot.avinoxConsumedPct?.let(::formatPct) ?: "—"
+        val avinoxProjected = snapshot.avinoxProjectedTotalPct?.let { total ->
+            val mode = snapshot.avinoxMode?.name?.takeIf { it.isNotBlank() }
+            if (mode != null) "$mode ${formatPct(total)}" else formatPct(total)
+        }
+        setComparisonWithProjected(tvCompareAvinox, avinoxConsumed, avinoxProjected)
+        tvCompareDetail.text = ""
     }
 
-    private fun signedPct(value: Double): String {
-        val sign = if (value >= 0.0) "+" else ""
-        return sign + formatPct(value)
+    private fun setComparisonWithProjected(view: TextView, main: String, projected: String?) {
+        val suffix = projected?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+        val full = main + suffix
+        val span = SpannableString(full)
+        if (suffix.isNotEmpty()) {
+            span.setSpan(RelativeSizeSpan(0.58f), main.length, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        view.text = span
     }
 
     private fun renderAtKm(kmValue: Double, simulated: Boolean) {
@@ -2179,7 +2184,7 @@ class MainActivity : Activity() {
         })
         val diffAbs = abs(reserve.differencePct).roundToInt()
         val differenceText = if (reserve.differencePct >= 0) "여유 ${diffAbs}%" else "부족 ${diffAbs}%"
-        tvRiskDetail.text = "${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}%\n기준잔량 ${reserve.targetPct.roundToInt()}%\n$differenceText"
+        tvRiskDetail.text = "${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}%\n기준 ${reserve.targetPct.roundToInt()}%   $differenceText"
 
         // 하위 호환용 숨김 뷰. 실제 SOC는 이제 상단의 큰 배터리 카드가 담당한다.
         tvActualBattery.text = displaySoc?.let { "$it%" } ?: "—"
@@ -2288,7 +2293,7 @@ class MainActivity : Activity() {
         tvCompareActual.text = consumed?.let(::formatPct) ?: "—"
         tvCompareModel.text = "사후"
         tvCompareAvinox.text = "사후"
-        tvCompareDetail.text = "누적 충전 +${formatPct(charged)} · 주행 종료 후 FIT을 연결하면 우리 모델 사후예측 생성\nAvinox 예상 소비량도 종료 후 독립 benchmark로 입력"
+        tvCompareDetail.text = ""
         tvRiskStatus.text = "기록 중"
         tvRiskStatus.setTextColor(getColor(R.color.accent))
         tvRiskDetail.text = "임의주행은 목표 코스/종점이 없습니다. Avinox BLE SOC를 자동 기록해 실제 누적 소비량을 계산합니다."
@@ -2449,6 +2454,38 @@ class MainActivity : Activity() {
         refreshInlineSettings()
         refreshLearningPage()
         renderCurrentMode()
+        if (!logManager.isActive()) runAutomaticLearningImportInBackground()
+    }
+
+    private fun runAutomaticLearningImportInBackground() {
+        // v0.26.0: Avinox original .proto is the primary A+ learning source.
+        // FIT folder import remains a fallback only when Shizuku original sync is unavailable.
+        val proto = AvinoxProtoSyncManager(this)
+        if (proto.canAutoSync()) {
+            proto.syncAsync(maxFiles = 8) { result ->
+                runOnUiThread {
+                    if (result.imported > 0) {
+                        refreshLearningPage()
+                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                    } else if (result.failed > 0) {
+                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            return
+        }
+        val manager = AutoFitImportManager(this)
+        if (!manager.folderConfigured()) return
+        manager.scanAsync { result ->
+            runOnUiThread {
+                if (result.imported > 0) {
+                    refreshLearningPage()
+                    Toast.makeText(this, "FIT 백업 · ${result.message}", Toast.LENGTH_LONG).show()
+                } else if (result.failed > 0) {
+                    Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     override fun onStart() {

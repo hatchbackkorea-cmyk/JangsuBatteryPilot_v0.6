@@ -46,7 +46,7 @@ class RideInsightStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
     fun analyzeAndStore(analysis: HistoricalRideAnalysis): RideInsightRecord? {
-        if (analysis.sourceType != HistoricalSourceType.FIT || analysis.telemetry.size < 2) return null
+        if (analysis.sourceType !in setOf(HistoricalSourceType.FIT, HistoricalSourceType.PROTO) || analysis.telemetry.size < 2) return null
         val stats = TelemetryMath.segmentStats(analysis.telemetry, 0.0, analysis.distanceKm)
         val riderWh = stats.riderWh.coerceAtLeast(0.0)
         val motorWh = stats.motorWh.coerceAtLeast(0.0)

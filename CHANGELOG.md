@@ -1,3 +1,14 @@
+# v0.25.0 — 메인 HUD 압축 + FIT 자동 폴더
+- 첫 화면의 `주행 대기 / 주행 방식 선택` 안내 행 제거.
+- Avinox 모드 카드의 시작 안내 문구와 메인 `설정값` 버튼 제거.
+- 현재 거리/배터리 카드의 `BLE 연결 대기 / 계획 / 오차 / 예상범위` 설명 행 제거.
+- 누적 에너지 비교의 하단 상세 설명을 제거하고, 우리 예측/Avinox 큰 소비율 옆에 종점 누적 예상값을 괄호로 축약 표시.
+- 배터리 판단 카드에서 `기준잔량`을 `기준`으로 축약하고 `기준 xx% · 여유/부족 xx%`를 같은 줄에 배치.
+- 설정 > 배터리 학습 데이터에 `FIT 자동 폴더 지정` 추가. 한 번 폴더 권한을 주면 앱 실행/복귀 시 새 `.fit`을 자동 검색.
+- 자동 FIT은 B급 보조학습만 수행하여 거리/고도/속도/Rider Power/Motor Power/Cadence를 반영하며, 배터리 SOC·모드 소비계수는 자동 수정하지 않음.
+- 실시간 Rider/Motor Power·Cadence와 AUTO 내부 실제 어시스트 단계는 검증된 Avinox BLE 필드가 없어 이번 버전에는 넣지 않음.
+- SRAM 자동변속 연구는 보류하고 v0.24의 읽기 전용 SRAM 실험실은 유지.
+
 # v0.24.0 — SRAM 실험실 진입 수정
 
 - 메인 앱의 **설정 페이지**에 `🧪 SRAM 실험실 · AXS/T-Type 스캔` 버튼을 직접 노출했습니다.
@@ -379,3 +390,17 @@
 - FIT 라이더/eMTB 분석 추가: Rider Power 파워커브, 최근12주/전체 최고, 추정 FTP, 사람/모터 기여도, Rider work, Motor Wh/km, 케이던스별 모터출력 효율 참고.
 - B급 FIT 단독 보조학습 및 A급 FIT+ZIP 정식학습 시 라이더 분석도 자동 누적.
 - v0.22.4의 모드별 실시간 km, 충전 계획/권장 분리, 충전 알림, A/B급 학습, Strava 기능 유지.
+
+## v0.26.0
+- Shizuku UserService 기반 Avinox 원본 `cloud_ride_rec_*.proto` 자동동기화 추가
+- Android 다른 앱 `/Android/data/com.avinox.ride/...` 직접접근 제한을 Shizuku shell 권한으로 안전하게 우회
+- Avinox 원본 v8 바이너리 파서 내장: 실제 SOC, Assist, Rider/Motor Power, Rider/Motor Torque, Cadence, Gear, GPS, 고도, 심박, 온도
+- 원본 A+ 학습: SOC 1% 경계 + 동일 Assist window + Power/Cadence/지형을 한 시간축으로 학습
+- 원본 형식/샘플수/배터리/시간/GPS 품질검사 및 미검증 버전 자동 거부
+- 앱 복귀 시 Shizuku가 준비되어 있으면 새 원본 최대 8개 자동학습
+- 수동 `원본 지금 동기화`는 과거 원본 최대 80개 일괄 수집
+- FIT 자동 폴더는 원본 동기화 불가 시 B급 백업 경로로 유지
+- 과거 학습 목록에 `A+ Avinox 원본` 구분 표시
+- 원본 telemetry의 Torque/Gear/Gradient 필드도 보존해 후속 효율모델 준비
+- 원본 중간 충전(SOC 상승)과 30초 이상 전원 OFF/센서 공백을 학습 경계로 분리
+- 원본 A+ 학습 누적 한도를 1,600구간으로 확대(예측은 기존처럼 최근 검증구간 우선 가중)

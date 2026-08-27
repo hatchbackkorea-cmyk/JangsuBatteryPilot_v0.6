@@ -3,6 +3,7 @@ package com.seungjae.jangsu280battery
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
@@ -11,8 +12,10 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import kotlin.math.roundToInt
+import rikka.shizuku.Shizuku
 
 class SettingsActivity : Activity() {
+    companion object { private const val REQ_AUTO_FIT_FOLDER = 7301 }
     private lateinit var courseRepo: CourseRepository
     private lateinit var logManager: RideLogManager
     private lateinit var prefs: android.content.SharedPreferences
@@ -22,6 +25,14 @@ class SettingsActivity : Activity() {
     private lateinit var historicalRideStore: HistoricalRideStore
     private lateinit var fitAuxStore: FitAuxLearningStore
     private lateinit var rideInsightStore: RideInsightStore
+    private lateinit var autoFitManager: AutoFitImportManager
+    private lateinit var protoSyncManager: AvinoxProtoSyncManager
+    private lateinit var tvProtoSyncStatus: TextView
+    private lateinit var btnProtoPermission: Button
+    private lateinit var btnProtoSync: Button
+    private lateinit var tvAutoFitStatus: TextView
+    private lateinit var btnAutoFitFolder: Button
+    private lateinit var btnAutoFitScan: Button
     private lateinit var tvHistoricalLearningSummary: TextView
     private lateinit var tvRideInsightSummary: TextView
 
@@ -44,6 +55,13 @@ class SettingsActivity : Activity() {
     private lateinit var tvChargeAlertTarget: TextView
     private lateinit var seekChargeAlertTarget: SeekBar
 
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == AvinoxProtoSyncManager.PERMISSION_REQUEST) {
+            refreshProtoSyncUi(if (grantResult == PackageManager.PERMISSION_GRANTED) "Shizuku 권한 허용됨" else "Shizuku 권한 거부됨")
+            if (grantResult == PackageManager.PERMISSION_GRANTED) runProtoSync(manual = true)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -56,6 +74,9 @@ class SettingsActivity : Activity() {
         historicalRideStore = HistoricalRideStore(this)
         fitAuxStore = FitAuxLearningStore(this)
         rideInsightStore = RideInsightStore(this)
+        autoFitManager = AutoFitImportManager(this)
+        protoSyncManager = AvinoxProtoSyncManager(this)
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         findViewById<Button>(R.id.btnSettingsBack).setOnClickListener { finish() }
         switchVoice = findViewById(R.id.switchSettingsVoice)
@@ -74,6 +95,12 @@ class SettingsActivity : Activity() {
         btnClearLearning = findViewById(R.id.btnClearLearning)
         tvHistoricalLearningSummary = findViewById(R.id.tvHistoricalLearningSummary)
         tvRideInsightSummary = findViewById(R.id.tvRideInsightSummary)
+        tvProtoSyncStatus = findViewById(R.id.tvProtoSyncStatus)
+        btnProtoPermission = findViewById(R.id.btnProtoPermission)
+        btnProtoSync = findViewById(R.id.btnProtoSync)
+        tvAutoFitStatus = findViewById(R.id.tvAutoFitStatus)
+        btnAutoFitFolder = findViewById(R.id.btnAutoFitFolder)
+        btnAutoFitScan = findViewById(R.id.btnAutoFitScan)
         tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
         switchBetaUpdates = findViewById(R.id.switchBetaUpdates)
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
@@ -83,6 +110,8 @@ class SettingsActivity : Activity() {
         refreshLearningSummary()
         tvRideInsightSummary.text = rideInsightStore.summaryText()
         setupUpdateUi()
+        refreshProtoSyncUi()
+        refreshAutoFitUi()
 
         findViewById<TextView>(R.id.tvSettingsCourse).text = runCatching {
             val m = courseRepo.activeMeta()
@@ -175,6 +204,14 @@ class SettingsActivity : Activity() {
                 startActivity(Intent(this, HistoricalRideActivity::class.java))
             }
         }
+        btnProtoPermission.setOnClickListener {
+            if (!protoSyncManager.binderReady()) Toast.makeText(this, "Shizuku 앱을 실행하고 먼저 시작해 주세요.", Toast.LENGTH_LONG).show()
+            else if (protoSyncManager.permissionGranted()) Toast.makeText(this, "Shizuku 권한이 이미 허용되어 있습니다.", Toast.LENGTH_SHORT).show()
+            else protoSyncManager.requestPermission()
+        }
+        btnProtoSync.setOnClickListener { runProtoSync(manual = true) }
+        btnAutoFitFolder.setOnClickListener { pickAutoFitFolder() }
+        btnAutoFitScan.setOnClickListener { runAutoFitScan(showNoNew = true) }
         btnClearLearning.setOnClickListener { confirmClearLearning() }
         btnClearLearning.isEnabled = !logManager.isActive()
         if (logManager.isActive()) btnClearLearning.text = "주행 종료 후 학습 데이터 초기화"
@@ -191,6 +228,88 @@ class SettingsActivity : Activity() {
             startActivity(Intent(this, StravaActivity::class.java))
         }
         findViewById<Button>(R.id.btnSettingsVersion).setOnClickListener { showVersionInfo() }
+    }
+
+    @Deprecated("Deprecated in Android API, kept for min-dependency project")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_AUTO_FIT_FOLDER || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        autoFitManager.setFolder(uri)
+        refreshAutoFitUi("폴더 연결 완료 · 새 FIT을 자동 검색합니다.")
+        runAutoFitScan(showNoNew = true)
+    }
+
+    private fun refreshProtoSyncUi(extra: String? = null) {
+        if (!::protoSyncManager.isInitialized) return
+        tvProtoSyncStatus.text = buildString {
+            append(protoSyncManager.statusText())
+            if (!extra.isNullOrBlank()) append("\n").append(extra)
+        }
+        btnProtoPermission.isEnabled = !logManager.isActive()
+        btnProtoSync.isEnabled = !logManager.isActive() && protoSyncManager.permissionGranted()
+    }
+
+    private fun runProtoSync(manual: Boolean) {
+        if (logManager.isActive()) { Toast.makeText(this, "주행 종료 후 원본 동기화를 실행해 주세요.", Toast.LENGTH_SHORT).show(); return }
+        if (!protoSyncManager.binderReady()) { Toast.makeText(this, "Shizuku 앱을 실행하고 시작해 주세요.", Toast.LENGTH_LONG).show(); return }
+        if (!protoSyncManager.permissionGranted()) { protoSyncManager.requestPermission(); return }
+        btnProtoSync.isEnabled = false
+        refreshProtoSyncUi("새 Avinox 원본 검색 중…")
+        protoSyncManager.syncAsync(if (manual) 80 else 8) { result ->
+            runOnUiThread {
+                refreshProtoSyncUi(result.message)
+                refreshLearningSummary()
+                if (manual || result.imported > 0 || result.failed > 0) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun pickAutoFitFolder() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 종료 후 자동 FIT 폴더를 변경해 주세요.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQ_AUTO_FIT_FOLDER)
+    }
+
+    private fun refreshAutoFitUi(extra: String? = null) {
+        if (!::autoFitManager.isInitialized) return
+        tvAutoFitStatus.text = buildString {
+            append(autoFitManager.statusText())
+            if (!extra.isNullOrBlank()) append("\n").append(extra)
+        }
+        btnAutoFitScan.isEnabled = autoFitManager.folderConfigured() && !logManager.isActive()
+        btnAutoFitFolder.isEnabled = !logManager.isActive()
+    }
+
+    private fun runAutoFitScan(showNoNew: Boolean) {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 종료 후 FIT 백업 검색을 실행해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!autoFitManager.folderConfigured()) {
+            Toast.makeText(this, "먼저 FIT 백업 폴더를 지정해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        btnAutoFitScan.isEnabled = false
+        tvAutoFitStatus.text = autoFitManager.statusText() + "\n새 FIT 검색 중…"
+        autoFitManager.scanAsync { result ->
+            runOnUiThread {
+                refreshAutoFitUi(result.message)
+                refreshLearningSummary()
+                tvRideInsightSummary.text = rideInsightStore.summaryText()
+                if (result.imported > 0 || result.failed > 0 || showNoNew) {
+                    Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun setupUpdateUi() {
@@ -273,6 +392,8 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (::protoSyncManager.isInitialized) refreshProtoSyncUi()
+        if (::autoFitManager.isInitialized) refreshAutoFitUi()
         if (::tvLearningSummary.isInitialized) refreshLearningSummary()
         if (::tvRideInsightSummary.isInitialized) tvRideInsightSummary.text = rideInsightStore.summaryText()
         if (::tvUpdateStatus.isInitialized) {
@@ -289,30 +410,33 @@ class SettingsActivity : Activity() {
     private fun refreshLearningSummary() {
         val count = learningStore.samples().size
         val historical = historicalRideStore.records()
+        val protoRecords = historical.filter { it.sourceType == HistoricalSourceType.PROTO }
+        val legacyA = historical.filter { it.sourceType != HistoricalSourceType.PROTO }
         val auxRecords = fitAuxStore.records()
         tvLearningSummary.text = if (count == 0) {
             if (auxRecords.isEmpty()) "학습 데이터 없음 · 중립 초기 모델 사용 중"
             else "A급 배터리 학습 없음 · 중립 소비모델 유지\n${fitAuxStore.summaryText()}"
         } else {
             buildString {
-                append("저장된 A급 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}")
+                append("저장된 A+/A급 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}")
                 if (auxRecords.isNotEmpty()) append("\n${fitAuxStore.summaryText()}")
             }
         }
         tvHistoricalLearningSummary.text = when {
-            historical.isEmpty() && auxRecords.isEmpty() -> "검증 FIT+ZIP / FIT 단독 보조학습 없음"
-            else -> "A급 ${historical.size}개 · B급 FIT ${auxRecords.size}개 · A급 샘플 ${historical.sumOf { it.sampleCount }}개 · B급 보조 ${auxRecords.sumOf { it.sampleCount }}개"
+            historical.isEmpty() && auxRecords.isEmpty() -> "Avinox 원본 A+ / FIT 백업 학습 없음"
+            else -> "A+ 원본 ${protoRecords.size}개 · 기존 A급 ${legacyA.size}개 · B급 FIT ${auxRecords.size}개 · A+/A급 샘플 ${historical.sumOf { it.sampleCount }}개"
         }
     }
 
     private fun confirmClearLearning() {
         AlertDialog.Builder(this)
             .setTitle("배터리 학습 데이터 초기화")
-            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? A급 검증 FIT+ZIP과 B급 FIT 단독 보조학습도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
+            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? Avinox 원본 A+ 학습과 기존 A급, B급 FIT 보조학습도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
                 historicalRideStore.clear()
                 fitAuxStore.clear()
+                protoSyncManager.clearHistory()
                 HistoricalRideDataStore(this).clearAll()
                 refreshLearningSummary()
                 Toast.makeText(this, "배터리 학습 데이터를 초기화했습니다.", Toast.LENGTH_SHORT).show()
@@ -353,13 +477,18 @@ class SettingsActivity : Activity() {
                     "• 앱 실행 시 하루 1회 자동 확인 · 새 버전이 있을 때만 안내\n" +
                     "• 고정 서명 APK로 기존 데이터 유지 업데이트\n" +
                     "• 업데이트 확인 시 주행/FIT/배터리/학습 데이터 외부 전송 없음\n" +
-                    "• v0.22.0 A급 검증 학습 + B급 FIT 단독 지형/파워 보조학습\n" +
+                    "• v0.26.0 Shizuku 기반 Avinox 원본 .proto 자동동기화 + A+ 학습\n• FIT 단독은 원본 동기화 불가 시 B급 백업 학습\n" +
                     "• 기준 잔량으로 앱 권장 SOC 역산 · 계획 % 도달 알림\n" +
                     "• 목표 도달 후에도 충전은 자동 중단하지 않으며 100%에서 재알림\n" +
                     "• Rider Power/심박/Cadence/GPS/고도/속도 + Motor/Battery/Assist Mode 기록"
             )
             .setPositiveButton("확인", null)
             .show()
+    }
+
+    override fun onDestroy() {
+        runCatching { Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener) }
+        super.onDestroy()
     }
 
     private fun appVersionName(): String = try {

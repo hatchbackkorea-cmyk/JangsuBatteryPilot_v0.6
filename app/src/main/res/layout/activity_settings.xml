@@ -280,15 +280,88 @@
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
                 android:layout_marginTop="10dp"
-                android:text="학습 관리 · A급 FIT+ZIP / B급 FIT" />
+                android:text="학습 관리 · 원본 A+ / FIT 백업" />
             <TextView
                 android:id="@+id/tvHistoricalLearningSummary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="과거 학습 라이딩 0개"
+                android:text="학습 라이딩 0개"
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tvProtoSyncStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Avinox 원본 자동동기화 · Shizuku 확인 중"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnProtoPermission"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="Shizuku 권한"
+                    android:textSize="11sp" />
+                <Button
+                    android:id="@+id/btnProtoSync"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="원본 지금 동기화"
+                    android:textSize="11sp" />
+            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="Avinox 앱에서 라이딩을 동기화한 뒤 cloud_ride_rec_*.proto를 자동 수집합니다. SOC·모드·Rider/Motor Power·Torque·Cadence·Gear를 같은 시간축으로 검증해 A+ 학습합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
+            <TextView
+                android:id="@+id/tvAutoFitStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="9dp"
+                android:text="FIT 백업 자동폴더 미지정"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnAutoFitFolder"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="FIT 백업 폴더"
+                    android:textSize="11sp" />
+                <Button
+                    android:id="@+id/btnAutoFitScan"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="FIT 백업 검색"
+                    android:textSize="11sp" />
+            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="FIT 단독은 원본 .proto를 가져올 수 없을 때만 B급 보조학습으로 사용합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
             <Button
                 android:id="@+id/btnClearLearning"
                 android:layout_width="match_parent"
@@ -299,7 +372,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="A급은 Avinox FIT + 앱 ZIP으로 배터리까지 학습합니다. B급 FIT 단독은 지형·Rider/Motor Power·Cadence만 보조학습합니다. 초기화해도 원래 주행 로그는 유지됩니다."
+                android:text="A+는 Avinox 원본 .proto의 실제 SOC·모드·파워를 함께 학습합니다. FIT 단독은 B급 백업입니다. 초기화해도 Avinox 앱의 원본 파일은 삭제하지 않습니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>

@@ -8,11 +8,11 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="top" android:orientation="vertical" android:paddingLeft="8dp" android:paddingTop="4dp" android:paddingRight="8dp" android:paddingBottom="4dp">
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
-                    <TextView android:id="@+id/tvGpsStatus" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="주행 대기" android:textColor="@color/text_secondary" android:textSize="12sp" android:textStyle="bold"/>
+                    <TextView android:id="@+id/tvGpsStatus" android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone"/>
                     <TextView android:id="@+id/tvVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="v0.15.0" android:textColor="@color/text_secondary" android:textSize="9sp"/>
                 </LinearLayout>
 
-                <TextView android:id="@+id/tvRideMode" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:background="@drawable/pill_bg" android:gravity="center" android:paddingTop="4dp" android:paddingBottom="4dp" android:text="계획주행 대기 · 시작 버튼에서 주행 방식을 선택하세요" android:textColor="@color/accent" android:textSize="11sp" android:textStyle="bold"/>
+                <TextView android:id="@+id/tvRideMode" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="5dp">
 
@@ -87,27 +87,9 @@
                         <Button android:id="@+id/btnAssistModeMismatch" android:layout_width="0dp" android:layout_height="36dp" android:layout_marginStart="4dp" android:layout_weight="1" android:minHeight="0dp" android:text="다름 · 실제모드 선택" android:textAllCaps="false" android:textSize="10sp"/>
                     </LinearLayout>
 
-                    <LinearLayout android:layout_width="match_parent" android:layout_height="30dp" android:layout_marginTop="3dp" android:gravity="center_vertical" android:orientation="horizontal">
-                        <TextView
-                            android:id="@+id/tvAssistModeHint"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:maxLines="1"
-                            android:text="주행 시작 시 Avinox BLE에서 모드를 자동 감지합니다"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="8sp" />
-                        <Button
-                            android:id="@+id/btnAssistProfileEdit"
-                            android:layout_width="wrap_content"
-                            android:layout_height="28dp"
-                            android:minHeight="0dp"
-                            android:minWidth="0dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:text="⚙ 설정값"
-                            android:textAllCaps="false"
-                            android:textSize="9sp" />
+                    <LinearLayout android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" android:orientation="horizontal">
+                        <TextView android:id="@+id/tvAssistModeHint" android:layout_width="0dp" android:layout_height="0dp" />
+                        <Button android:id="@+id/btnAssistProfileEdit" android:layout_width="0dp" android:layout_height="0dp" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -126,7 +108,7 @@
                         </LinearLayout>
                     </LinearLayout>
                     <ProgressBar android:id="@+id/progressBattery" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="8dp" android:max="100" android:progress="100"/>
-                    <TextView android:id="@+id/tvBatteryRange" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="예상 범위" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <TextView android:id="@+id/tvBatteryRange" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal">
                         <TextView android:id="@+id/tvSpeed" android:layout_width="0dp" android:layout_height="30dp" android:layout_weight="1" android:background="@drawable/pill_bg" android:gravity="center" android:text="속도 -" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
                         <TextView android:id="@+id/tvFinishEta" android:layout_width="0dp" android:layout_height="30dp" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/pill_bg" android:gravity="center" android:text="종점" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
@@ -153,22 +135,22 @@
                         </LinearLayout>
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="우리 예측" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-                            <TextView android:id="@+id/tvCompareModel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0%" android:textColor="@color/accent" android:textSize="20sp" android:textStyle="bold"/>
+                            <TextView android:id="@+id/tvCompareModel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:maxLines="1" android:text="0%" android:textColor="@color/accent" android:textSize="19sp" android:textStyle="bold"/>
                         </LinearLayout>
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Avinox" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-                            <TextView android:id="@+id/tvCompareAvinox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold"/>
+                            <TextView android:id="@+id/tvCompareAvinox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:maxLines="1" android:text="—" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold"/>
                         </LinearLayout>
                     </LinearLayout>
 
-                    <TextView android:id="@+id/tvCompareDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:gravity="center" android:lineSpacingExtra="1dp" android:text="누적 충전 +0% · 실제값 입력 전 종점 누적예상  자체 — · Avinox —" android:textColor="@color/text_secondary" android:textSize="10sp"/>
+                    <TextView android:id="@+id/tvCompareDetail" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
                 </LinearLayout>
 
                 <!-- 2열 1행: 배터리 판단 + 실제 배터리 -->
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal" android:baselineAligned="false">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:background="@drawable/panel_bg" android:gravity="center_vertical" android:minHeight="96dp" android:orientation="vertical" android:padding="8dp" android:layout_weight="1">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:background="@drawable/panel_bg" android:gravity="center_vertical" android:minHeight="82dp" android:orientation="vertical" android:padding="7dp" android:layout_weight="1">
                         <TextView android:id="@+id/tvRiskStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="여유" android:textColor="@color/good" android:textSize="27sp" android:textStyle="bold"/>
-                        <TextView android:id="@+id/tvRiskDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:lineSpacingExtra="2dp" android:text="종점 20%\n목표 15%\n여유 5%" android:textColor="@color/text_primary" android:textSize="13sp" android:textStyle="bold"/>
+                        <TextView android:id="@+id/tvRiskDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:lineSpacingExtra="2dp" android:text="종점 예상 25%\n기준 20% · 여유 5%" android:textColor="@color/text_primary" android:textSize="13sp" android:textStyle="bold"/>
                     </LinearLayout>
                     <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/panel_bg" android:gravity="center_vertical" android:minHeight="96dp" android:orientation="vertical" android:padding="8dp"><TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="주행 어시스트" android:textColor="@color/text_secondary" android:textSize="10sp" android:textStyle="bold"/><TextView android:id="@+id/tvAssist" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:gravity="start|center_vertical" android:maxLines="4" android:minHeight="0dp" android:paddingStart="0dp" android:paddingEnd="0dp" android:paddingTop="0dp" android:paddingBottom="0dp" android:text="에너지 페이스" android:textColor="@color/good" android:textSize="12sp" android:textStyle="bold"/>
 

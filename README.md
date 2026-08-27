@@ -1,3 +1,10 @@
+
+## v0.26.0 · Avinox 원본 A+ 자동학습
+- Shizuku를 통해 Avinox 앱의 `/Android/data/com.avinox.ride/files/ebike/data/.../cloud_ride_rec_*.proto`를 자동 수집합니다.
+- `.proto`의 실제 SOC·Assist·Rider/Motor Power·Torque·Cadence·Gear·GPS·고도를 같은 시간축으로 학습합니다.
+- Shizuku가 준비되지 않았을 때만 기존 FIT 단독 자동학습을 B급 백업으로 사용합니다.
+- 미검증 Avinox 원본 버전은 예측 모델 오염 방지를 위해 자동 학습하지 않습니다.
+
 # GPX Battery Copilot v0.22.1
 
 ## v0.22.1 계획/권장 분리 + A/B 학습

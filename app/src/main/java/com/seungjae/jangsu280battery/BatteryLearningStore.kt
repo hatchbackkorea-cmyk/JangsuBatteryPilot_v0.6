@@ -21,7 +21,7 @@ data class AssistModeWindow(
     val startMs: Long,
     val endMs: Long,
     val mode: AvinoxAssistMode,
-    val profileId: String
+    val profileId: String?
 )
 
 data class BatteryLearningSample(
@@ -52,7 +52,7 @@ class BatteryLearningStore(context: Context) {
         private const val PREFS = "battery_learning_v1"
         private const val KEY_SAMPLES = "samples"
         private const val KEY_TRAINED = "trained_sessions"
-        private const val MAX_SAMPLES = 240
+        private const val MAX_SAMPLES = 1600
 
         // v0.11.0 중립 seed. 장수280 실측값으로 미리 보정한 계수가 아니다.
         const val FLAT_PCT_PER_KM = 0.45

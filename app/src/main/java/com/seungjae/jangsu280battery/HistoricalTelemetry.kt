@@ -34,7 +34,12 @@ data class HistoricalTelemetryPoint(
     val ebikeAssistMode: Int? = null,
     /** FIT ebike_assist_level_percent when present. */
     val ebikeAssistLevelPercent: Double? = null,
-    val temperatureC: Double? = null
+    val temperatureC: Double? = null,
+    /** Avinox original .proto telemetry; retained for A+ analysis and future efficiency models. */
+    val riderTorqueNm: Double? = null,
+    val motorTorqueNm: Double? = null,
+    val gear: Int? = null,
+    val gradientPct: Double? = null
 )
 
 data class TelemetrySegmentStats(

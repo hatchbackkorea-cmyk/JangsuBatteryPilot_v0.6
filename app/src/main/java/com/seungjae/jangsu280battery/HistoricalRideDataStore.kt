@@ -33,6 +33,7 @@ class HistoricalRideDataStore(context: Context) {
         val ext = when (analysis.sourceType) {
             HistoricalSourceType.FIT -> "fit"
             HistoricalSourceType.GPX -> "gpx"
+            HistoricalSourceType.PROTO -> "proto"
         }
 
         val orderedUris = if (analysis.sourceParts.isNotEmpty()) {
