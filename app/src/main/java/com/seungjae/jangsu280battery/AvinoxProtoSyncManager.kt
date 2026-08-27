@@ -16,6 +16,7 @@ class AvinoxProtoSyncManager(context: Context) {
         const val PERMISSION_REQUEST = 8260
         private const val PREFS = "avinox_proto_sync_v1"
         private const val KEY_SEEN = "seen"
+        private const val KEY_LAST_AUTO_SCAN_MS = "last_auto_scan_ms"
         private const val ROOT = AvinoxFileUserService.ROOT
         private const val MAX_COPY_BYTES = 64L * 1024L * 1024L
         private const val CHUNK = 192 * 1024
@@ -35,6 +36,17 @@ class AvinoxProtoSyncManager(context: Context) {
     fun binderReady(): Boolean = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
     fun permissionGranted(): Boolean = binderReady() && runCatching { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false)
     fun canAutoSync(): Boolean = permissionGranted()
+
+    /** v0.26.2: avoid starting a Shizuku directory scan on every Activity resume. */
+    fun canAutoSyncNow(minIntervalMs: Long = 90_000L): Boolean {
+        if (!permissionGranted()) return false
+        val last = prefs.getLong(KEY_LAST_AUTO_SCAN_MS, 0L)
+        return System.currentTimeMillis() - last >= minIntervalMs.coerceAtLeast(15_000L)
+    }
+
+    fun markAutoScanAttempt() {
+        prefs.edit().putLong(KEY_LAST_AUTO_SCAN_MS, System.currentTimeMillis()).apply()
+    }
     fun requestPermission(): Boolean {
         if (!binderReady()) return false
         if (permissionGranted()) return true

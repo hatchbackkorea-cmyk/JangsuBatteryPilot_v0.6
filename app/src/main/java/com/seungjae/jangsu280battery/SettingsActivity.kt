@@ -477,7 +477,7 @@ class SettingsActivity : Activity() {
                     "• 앱 실행 시 하루 1회 자동 확인 · 새 버전이 있을 때만 안내\n" +
                     "• 고정 서명 APK로 기존 데이터 유지 업데이트\n" +
                     "• 업데이트 확인 시 주행/FIT/배터리/학습 데이터 외부 전송 없음\n" +
-                    "• v0.26.1 과거 라이딩 학습 화면에 Avinox Proto A+ 동기화 메뉴 추가\n• 누적 에너지 비교 보조값 2줄 표시 + 상단 버전 표기 확대\n• v0.26.0 Shizuku 기반 Avinox 원본 .proto 자동동기화 + A+ 학습\n• FIT 단독은 원본 동기화 불가 시 B급 백업 학습\n" +
+                    "• v0.26.2 Proto 대량학습 성능패치 · 학습 캐시/코스 계산 최적화\n• v0.26.1 과거 라이딩 학습 화면에 Avinox Proto A+ 동기화 메뉴 추가\n• 누적 에너지 비교 보조값 2줄 표시 + 상단 버전 표기 확대\n• v0.26.0 Shizuku 기반 Avinox 원본 .proto 자동동기화 + A+ 학습\n• FIT 단독은 원본 동기화 불가 시 B급 백업 학습\n" +
                     "• 기준 잔량으로 앱 권장 SOC 역산 · 계획 % 도달 알림\n" +
                     "• 목표 도달 후에도 충전은 자동 중단하지 않으며 100%에서 재알림\n" +
                     "• Rider Power/심박/Cadence/GPS/고도/속도 + Motor/Battery/Assist Mode 기록"

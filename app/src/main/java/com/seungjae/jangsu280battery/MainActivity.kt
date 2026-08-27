@@ -2463,7 +2463,8 @@ class MainActivity : Activity() {
         // v0.26.0: Avinox original .proto is the primary A+ learning source.
         // FIT folder import remains a fallback only when Shizuku original sync is unavailable.
         val proto = AvinoxProtoSyncManager(this)
-        if (proto.canAutoSync()) {
+        if (proto.canAutoSyncNow()) {
+            proto.markAutoScanAttempt()
             proto.syncAsync(maxFiles = 8) { result ->
                 runOnUiThread {
                     if (result.imported > 0) {

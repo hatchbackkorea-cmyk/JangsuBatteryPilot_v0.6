@@ -52,7 +52,13 @@ class BatteryLearningStore(context: Context) {
         private const val PREFS = "battery_learning_v1"
         private const val KEY_SAMPLES = "samples"
         private const val KEY_TRAINED = "trained_sessions"
+        private const val KEY_REV = "samples_revision"
         private const val MAX_SAMPLES = 1600
+
+        @Volatile private var cachedRevision: Int = Int.MIN_VALUE
+        @Volatile private var cachedSamples: List<BatteryLearningSample>? = null
+        private val cacheLock = Any()
+        private val factorCache = HashMap<String, Double>()
 
         // v0.11.0 중립 seed. 장수280 실측값으로 미리 보정한 계수가 아니다.
         const val FLAT_PCT_PER_KM = 0.45
@@ -83,22 +89,46 @@ class BatteryLearningStore(context: Context) {
     }
 
     fun learnedFactor(bucket: TerrainBucket, mode: AvinoxAssistMode? = selectedMode()): Double {
-        val allSamples = samples()
-        if (mode != null) {
-            val profileId = selectedProfileId(mode)
-            val exactProfile = allSamples.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == profileId }.takeLast(16)
-            if (exactProfile.isNotEmpty()) return weightedFactor(exactProfile)
-            val modeWithoutProfile = allSamples.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == null }.takeLast(12)
-            if (modeWithoutProfile.isNotEmpty()) return weightedFactor(modeWithoutProfile)
-            // 프로필이 바뀌면 같은 모드라도 다른 세팅 학습을 섞지 않는다. 예전 모드미기록 데이터만 안전 fallback.
-            val legacy = allSamples.filter { it.bucket == bucket && it.assistMode == null }.takeLast(12)
-            if (legacy.isNotEmpty()) return weightedFactor(legacy)
-            return 1.0
+        val profileId = mode?.let { selectedProfileId(it) }
+        val revision = prefs.getInt(KEY_REV, 0)
+        val cacheKey = "$revision|${bucket.name}|${mode?.name ?: "-"}|${profileId ?: "-"}"
+        synchronized(cacheLock) {
+            factorCache[cacheKey]?.let { return it }
         }
-        val specific = allSamples.filter { it.bucket == bucket }.takeLast(16)
-        if (specific.isNotEmpty()) return weightedFactor(specific)
-        return 1.0
+
+        val allSamples = samples()
+        val value = if (mode != null) {
+            val exactProfile = allSamples.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == profileId }.takeLast(16)
+            when {
+                exactProfile.isNotEmpty() -> weightedFactor(exactProfile)
+                else -> {
+                    val modeWithoutProfile = allSamples.filter { it.bucket == bucket && it.assistMode == mode && it.assistProfileId == null }.takeLast(12)
+                    when {
+                        modeWithoutProfile.isNotEmpty() -> weightedFactor(modeWithoutProfile)
+                        else -> {
+                            // 프로필이 바뀌면 같은 모드라도 다른 세팅 학습을 섞지 않는다.
+                            val legacy = allSamples.filter { it.bucket == bucket && it.assistMode == null }.takeLast(12)
+                            if (legacy.isNotEmpty()) weightedFactor(legacy) else 1.0
+                        }
+                    }
+                }
+            }
+        } else {
+            val specific = allSamples.filter { it.bucket == bucket }.takeLast(16)
+            if (specific.isNotEmpty()) weightedFactor(specific) else 1.0
+        }
+
+        synchronized(cacheLock) {
+            factorCache[cacheKey] = value
+            // Revision is part of the key; keep the map bounded across learning updates.
+            if (factorCache.size > 64) {
+                val prefix = "$revision|"
+                factorCache.keys.removeAll { !it.startsWith(prefix) }
+            }
+        }
+        return value
     }
+
 
 
     /** 현재 선택된 Avinox 프로필 기준으로 이 모드의 A급 배터리 학습 샘플 수를 반환한다. */
@@ -188,13 +218,19 @@ class BatteryLearningStore(context: Context) {
         val start = fromKm.coerceIn(0.0, course.totalKm)
         val end = toKm.coerceIn(start, course.totalKm)
         if (end <= start) return 0.0
+
+        // v0.26.2: resolve terrain factors once. Do not parse/filter the learning set
+        // again for every 0.5 km course block.
+        val factors = TerrainBucket.values().associateWith { learnedFactor(it, mode) }
+
         var x = start
         var total = 0.0
         while (x < end - 0.0001) {
             val nx = (x + 0.5).coerceAtMost(end)
             val dist = nx - x
             val ascent = course.elevationBetween(x, nx).ascentM
-            total += baseConsumption(dist, ascent) * learnedFactor(bucket(dist, ascent), mode)
+            val terrain = bucket(dist, ascent)
+            total += baseConsumption(dist, ascent) * (factors[terrain] ?: 1.0)
             x = nx
         }
         return total
@@ -469,33 +505,48 @@ class BatteryLearningStore(context: Context) {
     }
 
     fun samples(): List<BatteryLearningSample> {
-        val raw = prefs.getString(KEY_SAMPLES, null) ?: return emptyList()
-        return try {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
-                BatteryLearningSample(
-                    bucket = runCatching { TerrainBucket.valueOf(o.optString("bucket")) }.getOrDefault(TerrainBucket.ROLLING),
-                    factor = o.optDouble("factor", 1.0),
-                    pctPerKm = o.optDouble("pctPerKm", 0.0),
-                    distanceKm = o.optDouble("distanceKm", 0.0),
-                    ascentM = o.optDouble("ascentM", 0.0),
-                    timestampMs = o.optLong("timestampMs", 0L),
-                    sessionId = o.optString("sessionId", ""),
-                    assistMode = if (o.has("assistMode") && !o.isNull("assistMode")) runCatching { AvinoxAssistMode.valueOf(o.optString("assistMode")) }.getOrNull() else null,
-                    assistProfileId = if (o.has("assistProfileId") && !o.isNull("assistProfileId")) o.optString("assistProfileId").takeIf { it.isNotBlank() } else null,
-                    riderWh = o.optDouble("riderWh", 0.0),
-                    motorWh = o.optDouble("motorWh", 0.0),
-                    avgSpeedKph = if (o.has("avgSpeedKph") && !o.isNull("avgSpeedKph")) o.optDouble("avgSpeedKph") else null,
-                    avgRiderPowerW = if (o.has("avgRiderPowerW") && !o.isNull("avgRiderPowerW")) o.optDouble("avgRiderPowerW") else null,
-                    avgMotorPowerW = if (o.has("avgMotorPowerW") && !o.isNull("avgMotorPowerW")) o.optDouble("avgMotorPowerW") else null,
-                    avgActiveMotorPowerW = if (o.has("avgActiveMotorPowerW") && !o.isNull("avgActiveMotorPowerW")) o.optDouble("avgActiveMotorPowerW") else null,
-                    avgCadenceRpm = if (o.has("avgCadenceRpm") && !o.isNull("avgCadenceRpm")) o.optDouble("avgCadenceRpm") else null,
-                    motorActiveRatio = o.optDouble("motorActiveRatio", 0.0),
-                    qualityScore = o.optInt("qualityScore", 100).coerceIn(0, 100)
-                )
+        val revision = prefs.getInt(KEY_REV, 0)
+        cachedSamples?.takeIf { cachedRevision == revision }?.let { return it }
+
+        synchronized(cacheLock) {
+            cachedSamples?.takeIf { cachedRevision == revision }?.let { return it }
+            val raw = prefs.getString(KEY_SAMPLES, null)
+            val parsed = if (raw.isNullOrBlank()) {
+                emptyList()
+            } else {
+                try {
+                    val arr = JSONArray(raw)
+                    (0 until arr.length()).map { i ->
+                        val o = arr.getJSONObject(i)
+                        BatteryLearningSample(
+                            bucket = runCatching { TerrainBucket.valueOf(o.optString("bucket")) }.getOrDefault(TerrainBucket.ROLLING),
+                            factor = o.optDouble("factor", 1.0),
+                            pctPerKm = o.optDouble("pctPerKm", 0.0),
+                            distanceKm = o.optDouble("distanceKm", 0.0),
+                            ascentM = o.optDouble("ascentM", 0.0),
+                            timestampMs = o.optLong("timestampMs", 0L),
+                            sessionId = o.optString("sessionId", ""),
+                            assistMode = if (o.has("assistMode") && !o.isNull("assistMode")) runCatching { AvinoxAssistMode.valueOf(o.optString("assistMode")) }.getOrNull() else null,
+                            assistProfileId = if (o.has("assistProfileId") && !o.isNull("assistProfileId")) o.optString("assistProfileId").takeIf { it.isNotBlank() } else null,
+                            riderWh = o.optDouble("riderWh", 0.0),
+                            motorWh = o.optDouble("motorWh", 0.0),
+                            avgSpeedKph = if (o.has("avgSpeedKph") && !o.isNull("avgSpeedKph")) o.optDouble("avgSpeedKph") else null,
+                            avgRiderPowerW = if (o.has("avgRiderPowerW") && !o.isNull("avgRiderPowerW")) o.optDouble("avgRiderPowerW") else null,
+                            avgMotorPowerW = if (o.has("avgMotorPowerW") && !o.isNull("avgMotorPowerW")) o.optDouble("avgMotorPowerW") else null,
+                            avgActiveMotorPowerW = if (o.has("avgActiveMotorPowerW") && !o.isNull("avgActiveMotorPowerW")) o.optDouble("avgActiveMotorPowerW") else null,
+                            avgCadenceRpm = if (o.has("avgCadenceRpm") && !o.isNull("avgCadenceRpm")) o.optDouble("avgCadenceRpm") else null,
+                            motorActiveRatio = o.optDouble("motorActiveRatio", 0.0),
+                            qualityScore = o.optInt("qualityScore", 100).coerceIn(0, 100)
+                        )
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
             }
-        } catch (_: Exception) { emptyList() }
+            cachedSamples = parsed
+            cachedRevision = revision
+            return parsed
+        }
     }
 
     fun summaryText(): String {
@@ -522,6 +573,11 @@ class BatteryLearningStore(context: Context) {
 
     fun clear() {
         prefs.edit().clear().apply()
+        synchronized(cacheLock) {
+            cachedSamples = emptyList()
+            cachedRevision = 0
+            factorCache.clear()
+        }
     }
 
     private fun weightedFactor(items: List<BatteryLearningSample>): Double {
@@ -562,7 +618,16 @@ class BatteryLearningStore(context: Context) {
                 put("qualityScore", s.qualityScore)
             })
         }
-        prefs.edit().putString(KEY_SAMPLES, arr.toString()).apply()
+        val nextRevision = prefs.getInt(KEY_REV, 0) + 1
+        prefs.edit()
+            .putString(KEY_SAMPLES, arr.toString())
+            .putInt(KEY_REV, nextRevision)
+            .apply()
+        synchronized(cacheLock) {
+            cachedSamples = items.toList()
+            cachedRevision = nextRevision
+            factorCache.clear()
+        }
     }
 
     private fun trainedSessions(): MutableSet<String> =
