@@ -1,3 +1,13 @@
+# v0.19.1 — Strava Clean FIT Full Telemetry
+- Avinox 원본 FIT의 GPS/시간/거리/속도/고도/심박/케이던스/Rider Power/Motor Power를 읽어 Strava용 새 FIT으로 재구성.
+- 표준 FIT `power`에는 반드시 사람이 낸 Rider Power만 기록하고 Motor Power는 e-bike 전용 `motor_power` 필드로 분리.
+- 같은 주행의 Jangsu 앱 로그를 시간 우선으로 자동 매칭해 Avinox FIT에 빠진 실제 BLE Battery SOC와 선택 Assist Mode(ECO/AUTO/TRAIL/TURBO)를 합성.
+- FIT 표준/e-bike 필드에 Heart Rate, Cadence, Motor Power, Battery SOC, e-bike Battery Level, Assist Mode를 가능한 범위에서 모두 기록. 없는 센서값은 추정해서 만들지 않음.
+- Strava 업로드 전 미리보기에서 Rider/HR/Cadence/Motor/Battery/Mode와 각 필드 기록률을 확인 가능.
+- `클린 FIT → STRAVA 업로드`를 기본 경로로 추가하고 `원본 FIT 직접 업로드 (비교)`를 A/B 검증용으로 유지.
+- Strava 활동 설명에 Rider 에너지, Motor Wh, Assist ratio, Battery 변화, Mode 사용비율을 자동 작성.
+- Client ID 274909 사용. Client Secret/Access Token/Refresh Token은 소스나 채팅에 넣지 않고 사용자 휴대폰의 Android Keystore 암호화 저장소에서만 관리.
+
 # v0.18.5 — Selected Mode Direct Detect + Settings Compact
 - 2026-08-27 실내 반복 전환 로그를 기준으로 FFF4 long packet byte[68]을 선택 모드로 직접 매핑: 1=ECO, 2=TRAIL, 3=TURBO, 4=AUTO.
 - v0.18.4의 AUTO sticky 해석을 제거해 AUTO 뒤 실제 TRAIL/TURBO 전환이 `AUTO · TRAIL급/TURBO급`으로 잘못 남는 문제 수정.
@@ -274,3 +284,11 @@
 ## 0.9.0 — GPX Charging Planner
 - GPX 웨이포인트/주소/km/현재 위치 기반 충전소 계획
 - 다음 충전소 우선 배터리 판단
+
+## v0.19.0
+- Strava 개인 계정 OAuth 연결(Client ID 274909) 추가
+- Client Secret 및 OAuth 토큰을 Android Keystore 기반 AES-GCM으로 기기 내 암호화 저장
+- Avinox 원본 FIT를 선택해 Rider/Motor 파워·에너지·케이던스 사전 분석
+- Avinox 클라우드 자동연동을 우회해 원본 FIT를 Strava `EMountainBikeRide`로 직접 업로드
+- Strava 활동 설명에 Rider/Motor 평균·최대 파워, Rider kJ, Motor Wh, Assist ratio 자동 작성
+- 이번 단계는 원본 FIT 직접 업로드 비교용. 직접 업로드에서도 파워가 이상할 때만 다음 단계에서 새 FIT 생성/정제

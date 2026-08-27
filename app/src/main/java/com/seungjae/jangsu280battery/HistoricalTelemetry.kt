@@ -23,7 +23,18 @@ data class HistoricalTelemetryPoint(
     val cadenceRpm: Double?,
     val riderPowerW: Double?,
     val motorPowerW: Double?,
-    val state: TelemetryState = TelemetryState.NORMAL
+    val state: TelemetryState = TelemetryState.NORMAL,
+    /** Standard FIT heart_rate. Kept separate from learning; used for Strava/export analytics. */
+    val heartRateBpm: Double? = null,
+    /** FIT battery_soc when present. Avinox files may omit this and phone BLE can fill it later. */
+    val batterySocPercent: Double? = null,
+    /** FIT ebike_battery_level when present. */
+    val ebikeBatteryLevelPercent: Double? = null,
+    /** FIT ebike_assist_mode numeric code when present. */
+    val ebikeAssistMode: Int? = null,
+    /** FIT ebike_assist_level_percent when present. */
+    val ebikeAssistLevelPercent: Double? = null,
+    val temperatureC: Double? = null
 )
 
 data class TelemetrySegmentStats(

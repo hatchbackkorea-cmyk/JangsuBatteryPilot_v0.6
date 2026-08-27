@@ -52,7 +52,7 @@ data class HistoricalRideAnalysis(
     /** 이동시간. FIT은 total_timer_time, GPX는 GPS 이동 구간으로 계산한다. */
     val durationSec: Long?,
     val avgSpeedKph: Double?,
-    /** 심박은 의도적으로 포함하지 않는다. */
+    /** 학습은 기존 파워/지형 중심. 심박·e-bike 필드는 Strava/export 검증에도 함께 보존한다. */
     val telemetry: List<HistoricalTelemetryPoint> = emptyList(),
     val dataQualityScore: Int = 0,
     val sourceParts: List<HistoricalRideSourcePart> = emptyList(),
@@ -298,7 +298,13 @@ object HistoricalRideImporter {
         val speedKph: Double?,
         val cadenceRpm: Double?,
         val riderPowerW: Double?,
-        val motorPowerW: Double?
+        val motorPowerW: Double?,
+        val heartRateBpm: Double?,
+        val batterySocPercent: Double?,
+        val ebikeBatteryLevelPercent: Double?,
+        val ebikeAssistMode: Int?,
+        val ebikeAssistLevelPercent: Double?,
+        val temperatureC: Double?
     )
 
     private data class FitSummary(
@@ -339,7 +345,13 @@ object HistoricalRideImporter {
                         speedKph = speedMps?.takeIf { it in 0.0..60.0 }?.times(3.6),
                         cadenceRpm = reflectiveNumber(r, "getCadence")?.takeIf { it in 0.0..250.0 },
                         riderPowerW = reflectiveNumber(r, "getPower")?.takeIf { it in 0.0..2500.0 },
-                        motorPowerW = reflectiveNumber(r, "getMotorPower")?.takeIf { it in 0.0..3000.0 }
+                        motorPowerW = reflectiveNumber(r, "getMotorPower")?.takeIf { it in 0.0..3000.0 },
+                        heartRateBpm = reflectiveNumber(r, "getHeartRate")?.takeIf { it in 20.0..250.0 },
+                        batterySocPercent = reflectiveNumber(r, "getBatterySoc")?.takeIf { it in 0.0..100.0 },
+                        ebikeBatteryLevelPercent = reflectiveNumber(r, "getEbikeBatteryLevel")?.takeIf { it in 0.0..100.0 },
+                        ebikeAssistMode = reflectiveNumber(r, "getEbikeAssistMode")?.toInt()?.takeIf { it in 0..255 },
+                        ebikeAssistLevelPercent = reflectiveNumber(r, "getEbikeAssistLevelPercent")?.takeIf { it in 0.0..100.0 },
+                        temperatureC = reflectiveNumber(r, "getTemperature")?.takeIf { it in -50.0..100.0 }
                     )
                 }
                 MesgNum.SESSION -> {
@@ -428,7 +440,13 @@ object HistoricalRideImporter {
                 speedKph = t.raw.speedKph,
                 cadenceRpm = t.raw.cadenceRpm,
                 riderPowerW = t.raw.riderPowerW,
-                motorPowerW = t.raw.motorPowerW
+                motorPowerW = t.raw.motorPowerW,
+                heartRateBpm = t.raw.heartRateBpm,
+                batterySocPercent = t.raw.batterySocPercent,
+                ebikeBatteryLevelPercent = t.raw.ebikeBatteryLevelPercent,
+                ebikeAssistMode = t.raw.ebikeAssistMode,
+                ebikeAssistLevelPercent = t.raw.ebikeAssistLevelPercent,
+                temperatureC = t.raw.temperatureC
             )
         }
         val motorAware = rawTelemetry.any { it.motorPowerW != null }
