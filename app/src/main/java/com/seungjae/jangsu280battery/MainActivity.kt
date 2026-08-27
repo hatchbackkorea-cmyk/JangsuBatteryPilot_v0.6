@@ -28,6 +28,9 @@ import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
 import android.widget.Toast
 import android.widget.ViewFlipper
 import androidx.core.view.ViewCompat
@@ -751,7 +754,7 @@ class MainActivity : Activity() {
 
     private fun renderAssistModeBanner(mode: AvinoxAssistMode, tentative: Boolean) {
         val changed = lastRenderedAssistMode != mode
-        tvAssistModeCurrent.text = mode.name + if (tentative) " ?" else ""
+        renderAssistModeAndRange(mode, tentative)
         when (mode) {
             AvinoxAssistMode.ECO -> {
                 layoutAutoEstimate.visibility = View.GONE
@@ -777,6 +780,53 @@ class MainActivity : Activity() {
         }
         if (changed) popModeBanner()
         lastRenderedAssistMode = mode
+    }
+
+    /**
+     * 현재 BLE SOC와 A급 개인학습을 이용한 선택 모드별 예상 주행거리.
+     * 계획주행은 현재 GPX의 남은 고도 프로파일을 따라 적분하고,
+     * 임의주행은 같은 모드의 검증된 평균 %/km를 사용한다.
+     * 표시 거리는 설정의 '충전권장 기준 잔량'을 남겨두는 안전거리다.
+     */
+    private fun assistModeRangeText(mode: AvinoxAssistMode): String {
+        if (!::learningStore.isInitialized || learningStore.batterySampleCountForMode(mode) <= 0) return "학습중"
+        val soc = freshBleSoc()?.toDouble() ?: actualStore.latest()?.percent ?: return "SOC 대기"
+        val reserve = finishTargetPct.coerceIn(1.0, 99.0)
+        val usable = (soc - reserve).coerceAtLeast(0.0)
+        if (usable <= 0.05) return "0 km"
+
+        if (logManager.isFreeRide()) {
+            val pctPerKm = learningStore.learnedPctPerKmForMode(mode) ?: return "학습중"
+            val km = (usable / pctPerKm).coerceIn(0.0, 999.0)
+            return "${km.roundToInt()} km"
+        }
+
+        if (!::course.isInitialized) return "학습중"
+        val startKm = currentRideKm().coerceIn(0.0, course.totalKm)
+        val remaining = (course.totalKm - startKm).coerceAtLeast(0.0)
+        if (remaining <= 0.05) return "0 km"
+        val liveFactor = if (::plan.isInitialized) (plan.calibration(startKm)?.factor ?: 1.0) else 1.0
+        val fullUse = learningStore.estimateConsumption(course, startKm, course.totalKm, mode) * liveFactor
+        if (fullUse <= usable + 1e-6) return "${remaining.roundToInt()}+ km"
+
+        var lo = startKm
+        var hi = course.totalKm
+        repeat(22) {
+            val mid = (lo + hi) / 2.0
+            val use = learningStore.estimateConsumption(course, startKm, mid, mode) * liveFactor
+            if (use <= usable) lo = mid else hi = mid
+        }
+        val km = (lo - startKm).coerceAtLeast(0.0)
+        return "${km.roundToInt()} km"
+    }
+
+    private fun renderAssistModeAndRange(mode: AvinoxAssistMode, tentative: Boolean) {
+        val modeText = mode.name + if (tentative) " ?" else ""
+        val rangeText = assistModeRangeText(mode)
+        val full = "$modeText   $rangeText"
+        val span = SpannableString(full)
+        span.setSpan(RelativeSizeSpan(0.50f), modeText.length, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        tvAssistModeCurrent.text = span
     }
 
     private fun renderAutoEstimateSegment() {

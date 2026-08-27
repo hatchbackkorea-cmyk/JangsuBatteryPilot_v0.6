@@ -100,6 +100,42 @@ class BatteryLearningStore(context: Context) {
         return 1.0
     }
 
+
+    /** 현재 선택된 Avinox 프로필 기준으로 이 모드의 A급 배터리 학습 샘플 수를 반환한다. */
+    fun batterySampleCountForMode(mode: AvinoxAssistMode): Int {
+        val all = samples().filter { it.assistMode == mode && it.qualityScore >= 45 }
+        val profileId = selectedProfileId(mode)
+        val exact = all.filter { it.assistProfileId == profileId }
+        if (exact.isNotEmpty()) return exact.size
+        return all.count { it.assistProfileId == null }
+    }
+
+    /**
+     * 자유주행 HUD용 모드별 평균 소비율(%/km).
+     * FIT+ZIP으로 검증된 A급 SOC/모드 샘플만 사용하며 B급 FIT 단독 자료는 섞지 않는다.
+     */
+    fun learnedPctPerKmForMode(mode: AvinoxAssistMode): Double? {
+        val all = samples().filter {
+            it.assistMode == mode && it.qualityScore >= 45 &&
+                it.pctPerKm.isFinite() && it.pctPerKm in 0.03..25.0 && it.distanceKm >= 0.3
+        }
+        val profileId = selectedProfileId(mode)
+        val exact = all.filter { it.assistProfileId == profileId }
+        val subset = (if (exact.isNotEmpty()) exact else all.filter { it.assistProfileId == null }).takeLast(24)
+        if (subset.isEmpty()) return null
+        var sum = 0.0
+        var weight = 0.0
+        subset.forEachIndexed { index, sample ->
+            val recency = 0.8 + (index + 1).toDouble() / subset.size.coerceAtLeast(1)
+            val distanceWeight = sample.distanceKm.coerceIn(0.5, 12.0)
+            val qualityWeight = (sample.qualityScore.coerceIn(0, 100) / 100.0).coerceAtLeast(0.25)
+            val w = recency * distanceWeight * qualityWeight
+            sum += sample.pctPerKm * w
+            weight += w
+        }
+        return (sum / weight).takeIf { weight > 0.0 && it.isFinite() && it > 0.0 }
+    }
+
     fun assistProfile(bucket: TerrainBucket, mode: AvinoxAssistMode? = selectedMode()): LearnedAssistProfile? {
         val all = samples()
         val subset = if (mode != null) {

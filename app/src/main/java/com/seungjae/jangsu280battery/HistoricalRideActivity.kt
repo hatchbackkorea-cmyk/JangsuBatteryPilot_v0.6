@@ -180,15 +180,15 @@ class HistoricalRideActivity : Activity() {
             runOnUiThread {
                 tvAnalysis.text = buildString {
                     append("🟦 FIT 단독 B급 보조학습 완료\n")
-                    append("성공 $ok / ${fitUris.size}개 · 보조구간 $samples개")
-                    if (failed > 0) append(" · 제외/실패 $failed개")
+                    append("성공 ${ok} / ${fitUris.size}개 · 보조구간 ${samples}개")
+                    if (failed > 0) append(" · 제외/실패 ${failed}개")
                     append("\n\n거리·고도·속도·Rider/Motor Power·Cadence만 지형별 보조학습에 사용합니다.")
                     append("\n배터리 SOC/모드별 소비계수는 절대 수정하지 않습니다.")
                     details.take(12).forEach { append("\n$it") }
                     if (details.size > 12) append("\n… 외 ${details.size - 12}개")
                 }
                 renderStoredRides()
-                Toast.makeText(this, "FIT 보조학습 $ok개 · $samples구간 반영", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "FIT 보조학습 ${ok}개 · ${samples}구간 반영", Toast.LENGTH_LONG).show()
             }
         }.start()
     }
