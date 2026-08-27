@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootRideInsights"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnInsightBack"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:minHeight="0dp"
+                android:text="← 설정" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:text="라이더 · eMTB 분석"
+                android:textColor="@color/text_primary"
+                android:textSize="21sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/tvInsightSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/panel_accent_bg"
+            android:padding="14dp"
+            android:text="FIT 분석 데이터 없음"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+        <TextView
+            android:id="@+id/tvInsightPowerCurve"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:background="@drawable/panel_bg"
+            android:padding="14dp"
+            android:text="파워커브"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+        <Button
+            android:id="@+id/btnInsightImport"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="10dp"
+            android:text="FIT 보조학습 / 분석 가져오기" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:text="※ 신체 능력은 Rider Power만 사용합니다. Motor Power는 절대 사람 파워에 더하지 않습니다. FIT 단독 분석은 배터리 SOC/모드 계수를 수정하지 않습니다. 케이던스별 Wh/km는 모터 출력 기준 참고값이며 실제 배터리 전비와 동일하지 않습니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="최근 분석"
+            android:textColor="@color/text_primary"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+        <LinearLayout
+            android:id="@+id/llInsightRecords"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+        <Button
+            android:id="@+id/btnInsightClear"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:layout_marginTop="12dp"
+            android:text="라이더 분석 기록만 초기화" />
+    </LinearLayout>
+</ScrollView>

@@ -69,6 +69,16 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <activity
+            android:name=".RideInsightsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".SramBleActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
 
         <provider
             android:name="androidx.core.content.FileProvider"

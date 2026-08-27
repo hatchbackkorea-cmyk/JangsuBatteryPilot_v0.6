@@ -31,6 +31,7 @@ class HistoricalRideActivity : Activity() {
     private lateinit var logManager: RideLogManager
     private lateinit var dataStore: HistoricalRideDataStore
     private lateinit var fitAuxStore: FitAuxLearningStore
+    private lateinit var insightStore: RideInsightStore
 
     private lateinit var panelAnalysis: View
     private lateinit var panelBattery: View
@@ -60,6 +61,7 @@ class HistoricalRideActivity : Activity() {
         logManager = RideLogManager(this)
         dataStore = HistoricalRideDataStore(this)
         fitAuxStore = FitAuxLearningStore(this)
+        insightStore = RideInsightStore(this)
 
         panelAnalysis = findViewById(R.id.panelHistoricalAnalysis)
         panelBattery = findViewById(R.id.panelHistoricalBattery)
@@ -164,10 +166,15 @@ class HistoricalRideActivity : Activity() {
                 val result = runCatching { HistoricalRideImporter.analyze(this, uri, HistoricalSourceType.FIT) }
                 result.onSuccess { a ->
                     val count = fitAuxStore.trainFit(a)
+                    val insight = insightStore.analyzeAndStore(a)
                     if (count > 0) {
                         ok += 1
                         samples += count
-                        details += "${index + 1}. $name · ${String.format(Locale.US, "%.1f", a.distanceKm)}km · +${a.ascentM.roundToInt()}m · 보조 $count"
+                        details += buildString {
+                            append("${index + 1}. $name · ${String.format(Locale.US, "%.1f", a.distanceKm)}km · +${a.ascentM.roundToInt()}m · 보조 $count")
+                            insight?.humanSharePct?.let { append(" · 사람 ${String.format(Locale.US, "%.0f", it)}%") }
+                            insight?.motorOutputWhPerKm?.let { append(" · Motor ${String.format(Locale.US, "%.1f", it)}Wh/km") }
+                        }
                     } else {
                         failed += 1
                         details += "${index + 1}. $name · 보조학습 가능한 FIT 시계열 부족"
@@ -541,9 +548,11 @@ class HistoricalRideActivity : Activity() {
                         gapCount = a.gaps.size
                     )
                 )
+                val insight = if (a.sourceType == HistoricalSourceType.FIT) insightStore.analyzeAndStore(a) else null
                 Toast.makeText(this, "과거 라이딩을 ${count}개 학습 샘플로 반영했습니다.", Toast.LENGTH_LONG).show()
                 btnTrain.isEnabled = false
                 tvAnalysis.append("\n\n✅ 학습 반영 완료")
+                if (insight != null) tvAnalysis.append("\n🧍 라이더/eMTB 분석도 함께 누적")
                 renderStoredRides()
             }
             .setNegativeButton("취소", null)
@@ -623,9 +632,11 @@ class HistoricalRideActivity : Activity() {
                         gapCount = a.gaps.size
                     )
                 )
+                val insight = insightStore.analyzeAndStore(pair.analysis)
                 Toast.makeText(this, "검증 라이딩을 ${count}개 모드별 학습 샘플로 반영했습니다.", Toast.LENGTH_LONG).show()
                 btnTrain.isEnabled = false
                 tvAnalysis.append("\n\n✅ FIT 기준 정식 학습 완료 · ${count}개 샘플")
+                if (insight != null) tvAnalysis.append("\n🧍 라이더/eMTB 분석도 함께 누적")
                 renderStoredRides()
             }
             .setNegativeButton("취소", null)

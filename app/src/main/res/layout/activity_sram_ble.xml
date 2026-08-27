@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootSramBle"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="10dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnSramBack"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:minHeight="0dp"
+                android:text="← 설정" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="SRAM AXS BLE 실험실"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:background="@drawable/panel_accent_bg"
+            android:padding="9dp"
+            android:text="읽기 전용 안전모드 · 앱은 SRAM에 변속/설정 WRITE 명령을 보내지 않습니다. 모든 READ/NOTIFY를 자동 수집해 변속할 때 바뀌는 UUID를 찾아냅니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:id="@+id/tvSramStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="1) 드레일러 깨우기 → 2) SRAM 검색 → 3) SRAM 장치 선택"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnSramScan"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:minHeight="0dp"
+                    android:text="SRAM 검색" />
+                <Button
+                    android:id="@+id/btnSramDisconnect"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="5dp"
+                    android:layout_weight="1"
+                    android:minHeight="0dp"
+                    android:text="연결 해제" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/llSramDevices"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="자동 GATT 수집"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvSramBattery"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="SRAM 배터리 —"
+                android:textColor="@color/good"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvSramGatt"
+                android:layout_width="match_parent"
+                android:layout_height="150dp"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:gravity="top"
+                android:maxLines="12"
+                android:text="아직 GATT 데이터가 없습니다."
+                android:textColor="@color/text_secondary"
+                android:textIsSelectable="true"
+                android:textSize="9sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="변속 UUID 자동 찾기"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="연결 준비가 끝나면 ‘캡처 시작’을 누르고 SRAM 버튼으로 여러 단을 천천히 변속하세요. 마지막 기어는 시작 기어와 다르게 두세요. 종료하면 모든 READ 값을 다시 읽고 바뀐 특성을 점수순으로 보여줍니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnSramCapture"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:minHeight="0dp"
+                    android:text="▶ 캡처 시작" />
+                <Button
+                    android:id="@+id/btnSramFinish"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="5dp"
+                    android:layout_weight="1"
+                    android:minHeight="0dp"
+                    android:text="■ 종료 · 분석" />
+            </LinearLayout>
+            <TextView
+                android:id="@+id/tvSramCandidates"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:fontFamily="monospace"
+                android:text="후보가 여기에 표시됩니다."
+                android:textColor="@color/text_primary"
+                android:textIsSelectable="true"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnSramSave"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:layout_marginTop="8dp"
+            android:text="진단 로그 TXT 저장" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:layout_marginBottom="18dp"
+            android:text="※ d905ee52처럼 WRITE 권한이 보이는 특성도 기록만 합니다. SRAM 보안/본딩 및 변속 명령은 별도 검증 전까지 전송하지 않습니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp" />
+    </LinearLayout>
+</ScrollView>

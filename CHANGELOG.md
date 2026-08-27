@@ -364,3 +364,11 @@
 - 임의주행: 같은 모드의 검증된 FIT+ZIP A급 학습 %/km 가중평균으로 거리 계산.
 - 해당 모드의 A급 배터리 학습이 없으면 숫자를 꾸며내지 않고 `학습중`, BLE SOC가 없으면 `SOC 대기` 표시.
 - B급 FIT 단독 보조학습은 지형/파워용이므로 모드별 배터리 주행거리 계산에는 직접 사용하지 않음.
+
+## 0.23.0
+- SRAM AXS BLE 실험실 추가: SRAM 우선 스캔, 표준 배터리 읽기, 전체 GATT READ 수집, 모든 NOTIFY/INDICATE 자동 구독.
+- SRAM 변속 캡처 추가: 캡처 전/후 전체 READ 재검사 + Notify 변화 횟수로 변속 관련 characteristic 후보 자동 랭킹.
+- SRAM 진단은 읽기 전용. characteristic WRITE 명령은 보내지 않음.
+- FIT 라이더/eMTB 분석 추가: Rider Power 파워커브, 최근12주/전체 최고, 추정 FTP, 사람/모터 기여도, Rider work, Motor Wh/km, 케이던스별 모터출력 효율 참고.
+- B급 FIT 단독 보조학습 및 A급 FIT+ZIP 정식학습 시 라이더 분석도 자동 누적.
+- v0.22.4의 모드별 실시간 km, 충전 계획/권장 분리, 충전 알림, A/B급 학습, Strava 기능 유지.

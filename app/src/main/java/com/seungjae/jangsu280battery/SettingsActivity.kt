@@ -21,7 +21,9 @@ class SettingsActivity : Activity() {
     private lateinit var btnClearLearning: Button
     private lateinit var historicalRideStore: HistoricalRideStore
     private lateinit var fitAuxStore: FitAuxLearningStore
+    private lateinit var rideInsightStore: RideInsightStore
     private lateinit var tvHistoricalLearningSummary: TextView
+    private lateinit var tvRideInsightSummary: TextView
 
     private lateinit var switchVoice: Switch
     private lateinit var switchKeepScreen: Switch
@@ -53,6 +55,7 @@ class SettingsActivity : Activity() {
         learningStore = BatteryLearningStore(this)
         historicalRideStore = HistoricalRideStore(this)
         fitAuxStore = FitAuxLearningStore(this)
+        rideInsightStore = RideInsightStore(this)
 
         findViewById<Button>(R.id.btnSettingsBack).setOnClickListener { finish() }
         switchVoice = findViewById(R.id.switchSettingsVoice)
@@ -70,6 +73,7 @@ class SettingsActivity : Activity() {
         tvLearningSummary = findViewById(R.id.tvLearningSummary)
         btnClearLearning = findViewById(R.id.btnClearLearning)
         tvHistoricalLearningSummary = findViewById(R.id.tvHistoricalLearningSummary)
+        tvRideInsightSummary = findViewById(R.id.tvRideInsightSummary)
         tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
         switchBetaUpdates = findViewById(R.id.switchBetaUpdates)
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
@@ -77,6 +81,7 @@ class SettingsActivity : Activity() {
         tvChargeAlertTarget = findViewById(R.id.tvChargeAlertTarget)
         seekChargeAlertTarget = findViewById(R.id.seekChargeAlertTarget)
         refreshLearningSummary()
+        tvRideInsightSummary.text = rideInsightStore.summaryText()
         setupUpdateUi()
 
         findViewById<TextView>(R.id.tvSettingsCourse).text = runCatching {
@@ -173,8 +178,14 @@ class SettingsActivity : Activity() {
         btnClearLearning.setOnClickListener { confirmClearLearning() }
         btnClearLearning.isEnabled = !logManager.isActive()
         if (logManager.isActive()) btnClearLearning.text = "주행 종료 후 학습 데이터 초기화"
+        findViewById<Button>(R.id.btnRideInsights).setOnClickListener {
+            startActivity(Intent(this, RideInsightsActivity::class.java))
+        }
         findViewById<Button>(R.id.btnBleDiagnostic).setOnClickListener {
             startActivity(Intent(this, BleDiagnosticActivity::class.java))
+        }
+        findViewById<Button>(R.id.btnSramDiagnostic).setOnClickListener {
+            startActivity(Intent(this, SramBleActivity::class.java))
         }
         findViewById<Button>(R.id.btnStravaSettings).setOnClickListener {
             startActivity(Intent(this, StravaActivity::class.java))
@@ -263,6 +274,7 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (::tvLearningSummary.isInitialized) refreshLearningSummary()
+        if (::tvRideInsightSummary.isInitialized) tvRideInsightSummary.text = rideInsightStore.summaryText()
         if (::tvUpdateStatus.isInitialized) {
             refreshUpdateStatus()
             UpdateManager.resumePendingInstall(this)

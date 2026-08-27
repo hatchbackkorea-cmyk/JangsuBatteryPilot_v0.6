@@ -308,6 +308,72 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="라이더 · eMTB 분석"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvRideInsightSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="라이더 분석 데이터 없음"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnRideInsights"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:text="파워커브 · 사람/모터 기여도 보기" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Rider Power만 사람의 운동능력에 사용합니다. Motor Power는 분리해 모터 출력 Wh/km와 페달링 효율 참고값을 계산합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="SRAM AXS BLE 실험실"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="SRAM 드레일러의 전체 READ/NOTIFY를 자동 수집하고 변속 전후에 바뀌는 UUID를 찾아냅니다. WRITE는 보내지 않습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnSramDiagnostic"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="8dp"
+                android:text="⚙ SRAM 자동 스캔 · 변속 캡처" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:background="@drawable/panel_accent_bg"
             android:orientation="vertical"
             android:padding="15dp">
