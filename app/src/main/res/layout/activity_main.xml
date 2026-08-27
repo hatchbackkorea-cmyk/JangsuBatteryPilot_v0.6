@@ -265,6 +265,10 @@
 
                     <Button android:id="@+id/btnPageBleDiagnostic" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="🧪 Avinox BLE 진단 시작" android:textStyle="bold"/>
 
+                    <Button android:id="@+id/btnPageSramDiagnostic" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="7dp" android:text="🧪 SRAM 실험실 · AXS/T-Type 스캔" android:textStyle="bold"/>
+
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="SRAM 장치 검색 → 연결 → GATT 수집 → 변속 전후 UUID 자동 분석. WRITE 명령은 보내지 않습니다." android:textColor="@color/text_secondary" android:textSize="11sp"/>
+
                     <TextView android:id="@+id/tvPageUpdateStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp" android:text="현재 앱 버전 확인 중…" android:textColor="@color/text_secondary" android:textSize="12sp"/>
 
                     <Switch android:id="@+id/switchPageBetaUpdates" android:layout_width="match_parent" android:layout_height="46dp" android:text="테스트판 업데이트 포함" android:textColor="@color/text_primary" android:textSize="14sp"/>

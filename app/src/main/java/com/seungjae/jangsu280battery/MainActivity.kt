@@ -1439,6 +1439,9 @@ class MainActivity : Activity() {
         btnPageBleDiagnostic.setOnClickListener {
             startActivity(Intent(this, BleDiagnosticActivity::class.java))
         }
+        findViewById<Button>(R.id.btnPageSramDiagnostic).setOnClickListener {
+            startActivity(Intent(this, SramBleActivity::class.java))
+        }
         switchPageBetaUpdates.isChecked = AppSettings.betaUpdates(this)
         switchPageBetaUpdates.setOnCheckedChangeListener { _, checked ->
             AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_BETA_UPDATES, checked).apply()
