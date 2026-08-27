@@ -4,7 +4,7 @@ data class ActiveChargeSession(
     val routeKm: Double,
     val arrivalPct: Double,
     val startMs: Long,
-    /** 계획주행이면 해당 충전지점 목표, 임의주행이면 설정의 기본 충전 알림 목표. */
+    /** 계획주행이면 사용자가 정한 해당 충전소의 충전 계획 SOC, 임의주행이면 설정의 기본 충전 알림 목표. */
     val targetPct: Int? = null,
     val targetAlerted: Boolean = false,
     val fullAlerted: Boolean = false

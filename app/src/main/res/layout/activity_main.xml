@@ -247,7 +247,7 @@
                     <SeekBar android:id="@+id/seekPageDistanceInterval" android:layout_width="match_parent" android:layout_height="22dp" android:minHeight="0dp"/>
                     <TextView android:id="@+id/tvPageTimeInterval" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="시간 기준 안내" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
                     <SeekBar android:id="@+id/seekPageTimeInterval" android:layout_width="match_parent" android:layout_height="22dp" android:minHeight="0dp"/>
-                    <TextView android:id="@+id/tvPageFinishTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="종점 목표 잔량" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
+                    <TextView android:id="@+id/tvPageFinishTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="충전권장 기준 잔량" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
                     <SeekBar android:id="@+id/seekPageFinishTarget" android:layout_width="match_parent" android:layout_height="22dp" android:minHeight="0dp"/>
                 </LinearLayout>
 

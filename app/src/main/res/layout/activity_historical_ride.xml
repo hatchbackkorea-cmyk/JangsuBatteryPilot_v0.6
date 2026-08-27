@@ -59,11 +59,17 @@
                 android:layout_height="54dp"
                 android:layout_marginTop="10dp"
                 android:text="✅ 검증 학습 가져오기 · FIT + 앱 ZIP" />
+            <Button
+                android:id="@+id/btnImportAuxFit"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="8dp"
+                android:text="🟦 FIT 단독 보조학습 · 여러 개 선택" />
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="5dp"
-                android:text="아래 FIT/GPX 단독 가져오기는 예전 기록이나 수동 배터리 입력용입니다."
+                android:text="B급 FIT 단독 보조학습은 거리·고도·속도·Rider/Motor Power·Cadence만 사용합니다. SOC·모드별 배터리 소비계수는 수정하지 않습니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="10sp" />
             <LinearLayout
@@ -213,7 +219,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="학습된 과거 라이딩"
+                android:text="학습된 라이딩 · A급 / B급"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
@@ -237,7 +243,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:layout_marginBottom="24dp"
-            android:text="※ 검증 학습은 FIT과 앱 ZIP의 거리·시작시간을 교차검사하고, 통과한 라이딩만 정식 학습합니다. FIT 단독 가져오기는 수동 배터리 입력용입니다. 완충 직후 100→98% SOC 구간은 학습에서 자동 제외합니다."
+            android:text="※ A급 검증 학습은 FIT+ZIP을 교차검사하고 SOC·모드 배터리 모델까지 학습합니다. B급 FIT 단독 보조학습은 지형/파워 특성만 보조하며 배터리 소비계수는 건드리지 않습니다. 완충 직후 100→98% SOC 구간은 A급 학습에서 자동 제외합니다."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
     </LinearLayout>

@@ -20,6 +20,7 @@ class SettingsActivity : Activity() {
     private lateinit var tvLearningSummary: TextView
     private lateinit var btnClearLearning: Button
     private lateinit var historicalRideStore: HistoricalRideStore
+    private lateinit var fitAuxStore: FitAuxLearningStore
     private lateinit var tvHistoricalLearningSummary: TextView
 
     private lateinit var switchVoice: Switch
@@ -51,6 +52,7 @@ class SettingsActivity : Activity() {
         prefs = AppSettings.prefs(this)
         learningStore = BatteryLearningStore(this)
         historicalRideStore = HistoricalRideStore(this)
+        fitAuxStore = FitAuxLearningStore(this)
 
         findViewById<Button>(R.id.btnSettingsBack).setOnClickListener { finish() }
         switchVoice = findViewById(R.id.switchSettingsVoice)
@@ -235,7 +237,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun updateFinishLabel() {
-        tvFinishTarget.text = "종점 목표 잔량 ${seekFinishTarget.progress + 1}%"
+        tvFinishTarget.text = "충전권장 기준 잔량 ${seekFinishTarget.progress + 1}%"
     }
 
     private fun updateChargeAlertLabel() {
@@ -275,25 +277,30 @@ class SettingsActivity : Activity() {
     private fun refreshLearningSummary() {
         val count = learningStore.samples().size
         val historical = historicalRideStore.records()
+        val auxRecords = fitAuxStore.records()
         tvLearningSummary.text = if (count == 0) {
-            "학습 데이터 없음 · 중립 초기 모델 사용 중"
+            if (auxRecords.isEmpty()) "학습 데이터 없음 · 중립 초기 모델 사용 중"
+            else "A급 배터리 학습 없음 · 중립 소비모델 유지\n${fitAuxStore.summaryText()}"
         } else {
-            "저장된 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}"
+            buildString {
+                append("저장된 A급 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}")
+                if (auxRecords.isNotEmpty()) append("\n${fitAuxStore.summaryText()}")
+            }
         }
-        tvHistoricalLearningSummary.text = if (historical.isEmpty()) {
-            "검증 FIT+ZIP / 과거 FIT·GPX 학습 없음"
-        } else {
-            "검증/과거 학습 ${historical.size}개 · 생성된 학습 샘플 ${historical.sumOf { it.sampleCount }}개"
+        tvHistoricalLearningSummary.text = when {
+            historical.isEmpty() && auxRecords.isEmpty() -> "검증 FIT+ZIP / FIT 단독 보조학습 없음"
+            else -> "A급 ${historical.size}개 · B급 FIT ${auxRecords.size}개 · A급 샘플 ${historical.sumOf { it.sampleCount }}개 · B급 보조 ${auxRecords.sumOf { it.sampleCount }}개"
         }
     }
 
     private fun confirmClearLearning() {
         AlertDialog.Builder(this)
             .setTitle("배터리 학습 데이터 초기화")
-            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? 검증 FIT+ZIP 및 과거 FIT/GPX 학습 기록도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
+            .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? A급 검증 FIT+ZIP과 B급 FIT 단독 보조학습도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
                 historicalRideStore.clear()
+                fitAuxStore.clear()
                 HistoricalRideDataStore(this).clearAll()
                 refreshLearningSummary()
                 Toast.makeText(this, "배터리 학습 데이터를 초기화했습니다.", Toast.LENGTH_SHORT).show()
@@ -334,8 +341,9 @@ class SettingsActivity : Activity() {
                     "• 앱 실행 시 하루 1회 자동 확인 · 새 버전이 있을 때만 안내\n" +
                     "• 고정 서명 APK로 기존 데이터 유지 업데이트\n" +
                     "• 업데이트 확인 시 주행/FIT/배터리/학습 데이터 외부 전송 없음\n" +
-                    "• v0.21.0 검증 학습: FIT 거리·고도·파워 + ZIP BLE SOC·모드 결합\n" +
-                    "• 충전 목표 도달 알림 · 계획 목표 우선 · 충전은 자동 중단하지 않음\n" +
+                    "• v0.22.0 A급 검증 학습 + B급 FIT 단독 지형/파워 보조학습\n" +
+                    "• 기준 잔량으로 앱 권장 SOC 역산 · 계획 % 도달 알림\n" +
+                    "• 목표 도달 후에도 충전은 자동 중단하지 않으며 100%에서 재알림\n" +
                     "• Rider Power/심박/Cadence/GPS/고도/속도 + Motor/Battery/Assist Mode 기록"
             )
             .setPositiveButton("확인", null)

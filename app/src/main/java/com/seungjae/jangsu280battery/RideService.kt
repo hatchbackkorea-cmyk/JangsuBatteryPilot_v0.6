@@ -398,10 +398,13 @@ class RideService : Service(), LocationListener {
 
     private fun maybeAlertChargingTarget(soc: Int, session: ActiveChargeSession) {
         if (!AppSettings.chargeAlertEnabled(this)) return
-        val plannedTarget = if (!logManager.isFreeRide()) {
-            basePlan.checkpointAt(session.routeKm, 0.35)?.chargeToPct?.roundToInt()
-        } else null
-        val target = (session.targetPct ?: plannedTarget ?: AppSettings.chargeAlertTarget(this)).coerceIn(50, 100)
+
+        // v0.22.1: "계획"과 "권장"을 분리한다.
+        // 계획주행 알림은 사용자가 충전소에 직접 설정한 충전 계획 %에서 울린다.
+        // 앱 권장 %는 다음 충전소(없으면 종점)에 설정 잔량을 남기기 위한 최소 권장치이며 알림 목표를 바꾸지 않는다.
+        val planned = !logManager.isFreeRide() && session.targetPct != null
+        val rawTarget = session.targetPct ?: AppSettings.chargeAlertTarget(this)
+        val target = if (planned) rawTarget.coerceIn(1, 100) else rawTarget.coerceIn(50, 100)
         val latest = chargingSessionStore.active() ?: return
 
         // BLE 재연결이 목표를 건너뛰어 곧바로 100%를 보고해도 알림을 두 번 연속 울리지 않는다.
@@ -410,26 +413,30 @@ class RideService : Service(), LocationListener {
             val refreshed = chargingSessionStore.active() ?: return
             if (!refreshed.fullAlerted) {
                 chargingSessionStore.markFullAlerted()
-                val detail = if (target < 100) "설정 목표 ${target}%를 지나 100%에 도달했습니다." else "설정한 충전 목표 100%에 도달했습니다."
+                val detail = when {
+                    target >= 100 && planned -> "내 충전 계획 100%에 도달했습니다."
+                    target >= 100 -> "설정한 충전 목표 100%에 도달했습니다."
+                    planned -> "내 충전 계획 ${target}%를 지나 100%에 도달했습니다."
+                    else -> "설정 목표 ${target}%를 지나 100%에 도달했습니다."
+                }
                 showChargeAlert("충전 100% 완료", "$detail 충전기는 앱이 제어하지 않습니다.")
                 announcer.speakNow("배터리 충전 100퍼센트입니다.")
-                logManager.recordEvent("CHARGE_FULL_ALERT", "충전 100% 도달 · 목표 $target%", session.routeKm, 100.0)
+                logManager.recordEvent("CHARGE_FULL_ALERT", "충전 100% 도달 · 계획/목표 $target%", session.routeKm, 100.0)
             }
             return
         }
 
         if (!latest.targetAlerted && soc >= target) {
             chargingSessionStore.markTargetAlerted()
-            val planned = plannedTarget != null
-            val title = "충전 목표 ${target}% 도달"
+            val title = if (planned) "충전 계획 ${target}% 도달" else "충전 목표 ${target}% 도달"
             val body = if (planned) {
-                "계획주행 충전 목표에 도달했습니다. 충전은 자동으로 멈추지 않고 계속 진행됩니다."
+                "내가 설정한 충전 계획에 도달했습니다. 앱 권장량은 별도 안내값이며, 충전은 자동으로 멈추지 않고 계속 진행됩니다."
             } else {
                 "설정한 충전 알림 목표에 도달했습니다. 충전은 자동으로 멈추지 않고 계속 진행됩니다."
             }
             showChargeAlert(title, body)
-            announcer.speakNow("배터리 ${soc}퍼센트. 충전 목표 ${target}퍼센트에 도달했습니다. 충전은 계속 진행 중입니다.")
-            logManager.recordEvent("CHARGE_TARGET_ALERT", "충전 목표 $target% 도달 · 현재 $soc% · 계속 충전", session.routeKm, soc.toDouble())
+            announcer.speakNow("배터리 ${soc}퍼센트. ${if (planned) "충전 계획" else "충전 목표"} ${target}퍼센트에 도달했습니다. 충전은 계속 진행 중입니다.")
+            logManager.recordEvent("CHARGE_TARGET_ALERT", "${if (planned) "충전 계획" else "충전 목표"} $target% 도달 · 현재 $soc% · 계속 충전", session.routeKm, soc.toDouble())
         }
     }
 
@@ -497,7 +504,7 @@ class RideService : Service(), LocationListener {
             }
             manager.createNotificationChannel(channel)
             val chargeChannel = NotificationChannel(CHARGE_CHANNEL_ID, "충전 목표 도달 알림", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "설정한 충전 목표 또는 계획주행 충전 목표에 도달하면 소리와 진동으로 알려줍니다."
+                description = "임의주행 설정 목표 또는 계획주행에서 사용자가 정한 충전 계획 SOC에 도달하면 소리와 진동으로 알려줍니다."
                 enableVibration(true)
             }
             manager.createNotificationChannel(chargeChannel)

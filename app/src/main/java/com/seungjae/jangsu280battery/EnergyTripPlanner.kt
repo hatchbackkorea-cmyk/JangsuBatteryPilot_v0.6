@@ -61,23 +61,23 @@ data class ChargePlanAdvice(
 ) {
     fun recommendationComparisonText(): String = when {
         !feasibleAt100 -> "100%로도 약 ${shortagePctAt100.roundToInt()}% 부족"
-        userTargetPct + 0.49 < appRecommendedPct -> "사용자 목표가 권장보다 ${(appRecommendedPct - userTargetPct).roundToInt()}% 낮음"
-        userTargetPct > appRecommendedPct + 0.49 -> "사용자가 권장보다 ${(userTargetPct - appRecommendedPct).roundToInt()}% 여유 설정"
-        else -> "사용자 목표와 권장값 일치"
+        userTargetPct + 0.49 < appRecommendedPct -> "내 충전 계획이 권장보다 ${(appRecommendedPct - userTargetPct).roundToInt()}% 낮음"
+        userTargetPct > appRecommendedPct + 0.49 -> "내 충전 계획이 권장보다 ${(userTargetPct - appRecommendedPct).roundToInt()}% 여유"
+        else -> "내 충전 계획과 권장값 일치"
     }
 
     fun compactText(): String = buildString {
-        append("앱 권장 ${appRecommendedPct.roundToInt()}% · 사용자 ${userTargetPct.roundToInt()}%")
+        append("앱 권장 ${appRecommendedPct.roundToInt()}% · 내 계획 ${userTargetPct.roundToInt()}%")
         append(" · 권장 ${AvinoxChargeCurve.minutesText(minutesArrivalToRecommended)}")
         if (userTargetPct.roundToInt() != appRecommendedPct.roundToInt()) {
-            append(" / 사용자 ${AvinoxChargeCurve.minutesText(minutesArrivalToUserTarget)}")
+            append(" / 계획 ${AvinoxChargeCurve.minutesText(minutesArrivalToUserTarget)}")
         }
     }
 }
 
 /**
  * GPX + 등록 충전지점 + 개인 학습 모델을 바탕으로 충전 목표를 보조한다.
- * 앱 권장값은 어디까지나 추천이며 ChargingStation.chargeToPct(사용자 목표)를 덮어쓰지 않는다.
+ * 앱 권장값은 어디까지나 추천이며 ChargingStation.chargeToPct(사용자 충전 계획)를 덮어쓰지 않는다.
  * 주행 중에는 AdaptiveBatteryPlan의 현재 소비계수를 사용해 권장값을 다시 계산한다.
  */
 class EnergyTripPlanner(
@@ -102,6 +102,7 @@ class EnergyTripPlanner(
         val next = base.checkpoints.firstOrNull { it.km > cp.km + 0.10 } ?: return null
         val factor = consumptionFactor.coerceIn(0.55, 1.80)
         val expectedUse = base.plannedConsumption(cp.km, next.km) * factor
+        // 설정값은 "다음 충전소 도착 잔량"이며, 다음 충전소가 없으면 종점 도착 잔량으로 사용한다.
         val requiredArrival = finishTargetPct.coerceIn(1.0, 99.0)
         val rawRecommended = requiredArrival + expectedUse
         val feasible = rawRecommended <= 100.0
@@ -134,14 +135,14 @@ class EnergyTripPlanner(
         val appRemain = AvinoxChargeCurve.minutesBetween(current, advice.appRecommendedPct)
         val userRemain = AvinoxChargeCurve.minutesBetween(current, advice.userTargetPct)
         return when {
+            current + 0.49 >= advice.userTargetPct && current + 0.49 >= advice.appRecommendedPct ->
+                "✓ 앱 권장 ${advice.appRecommendedPct.roundToInt()}% · 내 계획 ${advice.userTargetPct.roundToInt()}% 모두 충족"
             current + 0.49 >= advice.userTargetPct && advice.userTargetPct + 0.49 < advice.appRecommendedPct ->
-                "⚠ 사용자 목표 ${advice.userTargetPct.roundToInt()}% 도달 · 앱 권장 ${advice.appRecommendedPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(appRemain)} · 출발은 사용자 판단"
-            current + 0.49 >= advice.userTargetPct ->
-                "✓ 사용자 목표 ${advice.userTargetPct.roundToInt()}% 도달 · 출발 가능"
+                "⚠ 내 충전 계획 ${advice.userTargetPct.roundToInt()}% 도달 · 앱 권장 ${advice.appRecommendedPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(appRemain)}"
             current + 0.49 >= advice.appRecommendedPct ->
-                "✓ 앱 권장 ${advice.appRecommendedPct.roundToInt()}% 도달 · 사용자 목표 ${advice.userTargetPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(userRemain)}"
+                "✓ 앱 권장 ${advice.appRecommendedPct.roundToInt()}% 충족 · 내 계획 ${advice.userTargetPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(userRemain)}"
             else ->
-                "충전 ${current.roundToInt()}% · 앱 권장 ${advice.appRecommendedPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(appRemain)} · 사용자 ${advice.userTargetPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(userRemain)}"
+                "충전 ${current.roundToInt()}% · 앱 권장 ${advice.appRecommendedPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(appRemain)} · 내 계획 ${advice.userTargetPct.roundToInt()}%까지 ${AvinoxChargeCurve.minutesText(userRemain)}"
         }
     }
 

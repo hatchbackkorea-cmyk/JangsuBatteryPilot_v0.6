@@ -62,6 +62,7 @@ class BatteryLearningStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val assistProfiles = AvinoxAssistProfileStore(appContext)
+    private val fitAuxStore = FitAuxLearningStore(appContext)
 
     private fun selectedMode(): AvinoxAssistMode? =
         assistProfiles.preferredMode().takeIf { assistProfiles.hasPreferredMode() }
@@ -109,7 +110,7 @@ class BatteryLearningStore(context: Context) {
         } else {
             all.filter { it.bucket == bucket && it.qualityScore >= 45 }.takeLast(24)
         }
-        if (subset.isEmpty()) return null
+        if (subset.isEmpty()) return fitAuxStore.profile(bucket)
 
         fun weighted(selector: (BatteryLearningSample) -> Double?): Double? {
             var sum = 0.0

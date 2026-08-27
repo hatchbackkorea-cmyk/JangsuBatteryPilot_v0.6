@@ -612,7 +612,7 @@ class MainActivity : Activity() {
                 val min = ((System.currentTimeMillis() - charging.startMs).coerceAtLeast(0L) / 60_000L)
                 "충전 중 · 시작 ${charging.arrivalPct.roundToInt()}% · ${RideFormatter.one(charging.routeKm)}km · ${min}분"
             }
-            charging != null -> "충전 중 · 실시간 목표 계산 중"
+            charging != null -> "충전 중 · 계획/권장 확인 중"
             active -> ""
             else -> "주행 시작 후 충전 기록 가능"
         }
@@ -644,10 +644,10 @@ class MainActivity : Activity() {
             })
         } else {
             tvChargeStatus.text = buildString {
-                append("⚡ ${advice.stationName}: 앱권장 ${advice.appRecommendedPct.roundToInt()}% · 사용자 ${advice.userTargetPct.roundToInt()}%")
+                append("⚡ ${advice.stationName}: 내 계획 ${advice.userTargetPct.roundToInt()}% · 앱권장 ${advice.appRecommendedPct.roundToInt()}%")
                 append(" · 권장 ${AvinoxChargeCurve.minutesText(advice.minutesArrivalToRecommended)}")
                 if (advice.userTargetPct.roundToInt() != advice.appRecommendedPct.roundToInt()) {
-                    append(" / 사용자 ${AvinoxChargeCurve.minutesText(advice.minutesArrivalToUserTarget)}")
+                    append(" / 계획 ${AvinoxChargeCurve.minutesText(advice.minutesArrivalToUserTarget)}")
                 }
                 append(" · 소비보정 ${tripPlanner.factorText(routeKm)}")
             }
@@ -1449,7 +1449,7 @@ class MainActivity : Activity() {
             seekPageTestKm.isEnabled = switchPageTestMode.isChecked && !logManager.isActive()
             btnPageResetProgress.isEnabled = !logManager.isActive()
             tvPageSettingsHint.text = if (logManager.isActive()) {
-                "주행 중에는 테스트 모드를 변경할 수 없습니다. 음성 안내와 종점 목표는 즉시 반영됩니다."
+                "주행 중에는 테스트 모드를 변경할 수 없습니다. 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
             } else {
                 "선택 코스 · ${courseMeta.name} · 테스트 위치와 모든 예측은 이 GPX 기준으로 계산됩니다."
             }
@@ -1464,7 +1464,7 @@ class MainActivity : Activity() {
         tvPageDistanceInterval.text = if (d == 0) "거리 기준 안내 · 사용 안 함" else "거리 기준 안내 · ${d} km마다"
         val t = seekPageTimeInterval.progress
         tvPageTimeInterval.text = if (t == 0) "시간 기준 안내 · 사용 안 함" else "시간 기준 안내 · ${t}분마다"
-        tvPageFinishTarget.text = "종점 목표 잔량 ${seekPageFinishTarget.progress + 1}%"
+        tvPageFinishTarget.text = "충전권장 기준 잔량 ${seekPageFinishTarget.progress + 1}%"
         val km = (seekPageTestKm.progress / 10.0).coerceIn(0.0, if (::course.isInitialized) course.totalKm else 0.0)
         tvPageTestKm.text = if (::course.isInitialized) "테스트 위치 ${RideFormatter.one(km)} / ${RideFormatter.one(course.totalKm)} km" else "테스트 위치"
     }
@@ -1617,7 +1617,7 @@ class MainActivity : Activity() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ko-KR")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, if (logManager.isFreeRide()) "임의주행 · 배터리 48프로야 · 현재 상태 · 주행 종료" else "자연스럽게 말하세요 · 배터리 48프로야 · 종점 목표 20 · 5킬로마다 알려줘 · 앞에 업힐 있어?")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, if (logManager.isFreeRide()) "임의주행 · 배터리 48프로야 · 현재 상태 · 주행 종료" else "자연스럽게 말하세요 · 배터리 48프로야 · 충전 권장 20 · 5킬로마다 알려줘 · 앞에 업힐 있어?")
         }
         try { startActivityForResult(intent, REQ_SPEECH) }
         catch (_: ActivityNotFoundException) {
@@ -1683,7 +1683,7 @@ class MainActivity : Activity() {
                 finishTargetPct = command.percent.toDouble().coerceIn(1.0, 99.0)
                 AppSettings.prefs(this).edit().putInt(AppSettings.KEY_FINISH_TARGET, finishTargetPct.roundToInt()).apply()
                 renderAtKm(latestRouteKm, testMode)
-                speakText("종점 목표 잔량을 ${finishTargetPct.roundToInt()}퍼센트로 설정했습니다.")
+                speakText("충전권장 기준 잔량을 ${finishTargetPct.roundToInt()}퍼센트로 설정했습니다.")
             }
             is VoiceCommand.SetVoiceEnabled -> {
                 AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_VOICE, command.enabled).apply()
@@ -1807,14 +1807,15 @@ class MainActivity : Activity() {
         val km = if (logManager.isFreeRide()) latestRouteKm.coerceAtLeast(0.0) else latestRouteKm.coerceIn(0.0, course.totalKm)
         val now = System.currentTimeMillis()
         actualStore.save(pct.toDouble(), km, ActualEntryKind.ARRIVAL, now, ActualEntrySource.CHARGE)
-        val plannedTarget = if (!logManager.isFreeRide()) {
-            plan.checkpointAt(km, 0.35)?.chargeToPct?.roundToInt()
+        val advice = if (!logManager.isFreeRide()) {
+            tripPlanner.adviceAtStation(km, finishTargetPct, plan.calibration(km)?.factor ?: 1.0, pct.toDouble())
         } else null
-        val alertTarget = plannedTarget ?: AppSettings.chargeAlertTarget(this)
+        // v0.22.1: 계획주행 알림은 "내 충전 계획"에 맞춘다. 앱 권장은 별도 안내값이다.
+        val alertTarget = advice?.userTargetPct?.roundToInt()?.coerceIn(1, 100)
+            ?: AppSettings.chargeAlertTarget(this)
         chargingSessionStore.start(km, pct.toDouble(), now, alertTarget)
         if (logManager.isActive()) {
-            val advice = if (!logManager.isFreeRide()) tripPlanner.adviceAtStation(km, finishTargetPct, plan.calibration(km)?.factor ?: 1.0, pct.toDouble()) else null
-            val detail = advice?.let { " · 앱권장 ${it.appRecommendedPct.roundToInt()}% · 사용자 ${it.userTargetPct.roundToInt()}%" }.orEmpty()
+            val detail = advice?.let { " · 내계획 ${it.userTargetPct.roundToInt()}% · 앱권장 ${it.appRecommendedPct.roundToInt()}% · 기준잔량 ${finishTargetPct.roundToInt()}%" }.orEmpty()
             val alertDetail = if (AppSettings.chargeAlertEnabled(this)) " · 알림 ${alertTarget}%" else " · 충전알림 꺼짐"
             logManager.recordEvent("CHARGE_START", "충전 시작 · $pct%$detail$alertDetail", km, pct.toDouble())
         }
@@ -1929,9 +1930,9 @@ class MainActivity : Activity() {
         val pacing = pacingAdvisor.advice(km, latestSpeedKmh, reserve)
         val chargeAdvice = tripPlanner.nextChargeAdvice(km, finishTargetPct)
         val chargeText = chargeAdvice?.let {
-            " 다음 충전소 앱 권장 ${it.appRecommendedPct.roundToInt()}퍼센트, 사용자 목표 ${it.userTargetPct.roundToInt()}퍼센트."
+            " ${it.stationName}에서 내 충전 계획 ${it.userTargetPct.roundToInt()}퍼센트, 앱 권장 ${it.appRecommendedPct.roundToInt()}퍼센트입니다. 권장은 다음 ${it.nextTargetName}에 ${it.requiredArrivalPctAtNext.roundToInt()}퍼센트를 남기는 기준입니다."
         }.orEmpty()
-        speakText("현재 ${RideFormatter.one(km)}킬로미터. 예상 배터리 ${battery.percent.roundToInt()}퍼센트. 상태 ${reserve.label}. 종점 예상 ${plan.forecast(km, course.totalKm).percent.roundToInt()}퍼센트. 목표 ${finishTargetPct.roundToInt()}퍼센트. $elevText$cpText$chargeText ${pacing.voiceText}")
+        speakText("현재 ${RideFormatter.one(km)}킬로미터. 예상 배터리 ${battery.percent.roundToInt()}퍼센트. 상태 ${reserve.label}. 종점 예상 ${plan.forecast(km, course.totalKm).percent.roundToInt()}퍼센트. 기준 잔량 ${finishTargetPct.roundToInt()}퍼센트. $elevText$cpText$chargeText ${pacing.voiceText}")
     }
 
     private fun speakNextCheckpoint() {
@@ -1942,7 +1943,7 @@ class MainActivity : Activity() {
     }
 
     private fun speakFinishInfo() {
-        speakText("종점까지 ${RideFormatter.one((course.totalKm - latestRouteKm).coerceAtLeast(0.0))}킬로미터. 종점 예상 배터리 ${plan.forecast(latestRouteKm, course.totalKm).percent.roundToInt()}퍼센트, 목표 ${finishTargetPct.roundToInt()}퍼센트입니다.")
+        speakText("종점까지 ${RideFormatter.one((course.totalKm - latestRouteKm).coerceAtLeast(0.0))}킬로미터. 종점 예상 배터리 ${plan.forecast(latestRouteKm, course.totalKm).percent.roundToInt()}퍼센트, 기준 잔량 ${finishTargetPct.roundToInt()}퍼센트입니다.")
     }
 
     private fun speakRemainingOverview() = speakNextCheckpoint()
@@ -1966,7 +1967,7 @@ class MainActivity : Activity() {
     }
 
     private fun speakVoiceHelp() {
-        speakText("자연스럽게 말하세요. 지금 배터리 48프로야, 종점 목표 20프로, 5킬로마다 알려줘, 10분마다 알려줘, 앞에 업힐 있어, 종점까지 얼마나 남았어, 여기를 보급소로 등록해처럼 말할 수 있습니다.")
+        speakText("자연스럽게 말하세요. 지금 배터리 48프로야, 충전 권장 20프로, 5킬로마다 알려줘, 10분마다 알려줘, 앞에 업힐 있어, 종점까지 얼마나 남았어, 여기를 보급소로 등록해처럼 말할 수 있습니다.")
     }
 
     private fun speakText(text: String) {
@@ -2125,7 +2126,7 @@ class MainActivity : Activity() {
         })
         val diffAbs = abs(reserve.differencePct).roundToInt()
         val differenceText = if (reserve.differencePct >= 0) "여유 ${diffAbs}%" else "부족 ${diffAbs}%"
-        tvRiskDetail.text = "${reserve.targetName} ${reserve.predictedPct.roundToInt()}%\n목표 ${reserve.targetPct.roundToInt()}%\n$differenceText"
+        tvRiskDetail.text = "${reserve.targetName} 예상 ${reserve.predictedPct.roundToInt()}%\n기준잔량 ${reserve.targetPct.roundToInt()}%\n$differenceText"
 
         // 하위 호환용 숨김 뷰. 실제 SOC는 이제 상단의 큰 배터리 카드가 담당한다.
         tvActualBattery.text = displaySoc?.let { "$it%" } ?: "—"
@@ -2145,11 +2146,12 @@ class MainActivity : Activity() {
                 cp.chargeToPct != null && chargeAdvice != null -> buildString {
                     append(if (atCurrent) "현재 지점" else "${RideFormatter.one(remain)} km 남음")
                     append("\n도착예상 $predicted%")
-                    append("\n앱권장 ${chargeAdvice.appRecommendedPct.roundToInt()}% · 사용자 ${chargeAdvice.userTargetPct.roundToInt()}%")
+                    append("\n내 계획 ${chargeAdvice.userTargetPct.roundToInt()}% · 앱권장 ${chargeAdvice.appRecommendedPct.roundToInt()}%")
+                    append("\n→ ${chargeAdvice.nextTargetName} ${chargeAdvice.requiredArrivalPctAtNext.roundToInt()}% 도착 기준")
                     if (!chargeAdvice.feasibleAt100) append("\n⚠ 100%로도 ${chargeAdvice.shortagePctAt100.roundToInt()}% 부족")
                 }
-                cp.chargeToPct != null && atCurrent -> "현재 지점\n도착예상 $predicted%\n사용자 목표 ${cp.chargeToPct.roundToInt()}%"
-                cp.chargeToPct != null -> "${RideFormatter.one(remain)} km 남음\n도착예상 $predicted%\n사용자 목표 ${cp.chargeToPct.roundToInt()}%"
+                cp.chargeToPct != null && atCurrent -> "현재 지점\n도착예상 $predicted%\n내 충전 계획 ${cp.chargeToPct.roundToInt()}%"
+                cp.chargeToPct != null -> "${RideFormatter.one(remain)} km 남음\n도착예상 $predicted%\n내 충전 계획 ${cp.chargeToPct.roundToInt()}%"
                 cp.km >= course.totalKm - 0.05 -> "${RideFormatter.one(remain)} km 남음\n종점예상 $predicted%\nETA ${RideFormatter.etaClock(remain, latestSpeedKmh)}"
                 else -> "${RideFormatter.one(remain)} km 남음\n예상 $predicted%\nETA ${RideFormatter.etaClock(remain, latestSpeedKmh)}"
             }

@@ -39,7 +39,7 @@ object VoiceCommandParser {
             return VoiceCommand.UndoActual
         }
 
-        // 종점 목표는 실제 배터리 입력보다 먼저 판정. v0.8은 1~99%만 허용한다.
+        // 충전권장 기준 잔량은 실제 배터리 입력보다 먼저 판정. 1~99%만 허용한다.
         if (percent != null && hasFinishTargetContext(t)) {
             return VoiceCommand.FinishTarget(percent.coerceIn(1, 99))
         }
@@ -115,8 +115,9 @@ object VoiceCommandParser {
             (t.contains("분") && hasAny(t, "안내", "알려", "말해", "마다", "간격"))
 
     private fun hasFinishTargetContext(t: String): Boolean {
-        val targetWord = hasAny(t, "목표", "남기고싶", "남겨", "잔량설정", "마지막에", "도착할때", "종점에서", "완주할때")
-        val finishWord = hasAny(t, "종점", "완주", "끝", "도착", "목표잔량", "목표배터리")
+        if (hasAny(t, "충전권장", "충전권장기준", "권장잔량", "기준잔량", "도착잔량")) return true
+        val targetWord = hasAny(t, "목표", "남기고싶", "남겨", "잔량설정", "마지막에", "도착할때", "종점에서", "완주할때", "권장")
+        val finishWord = hasAny(t, "종점", "완주", "끝", "도착", "목표잔량", "목표배터리", "충전")
         return (targetWord && finishWord) || hasAny(t, "종점목표", "목표잔량", "목표배터리")
     }
 

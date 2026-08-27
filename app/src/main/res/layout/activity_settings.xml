@@ -109,7 +109,7 @@
                 android:id="@+id/tvSettingsFinishTarget"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="종점 목표 잔량 15%"
+                android:text="충전권장 기준 잔량 15%"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
@@ -122,7 +122,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="1% ~ 99% · 코파일럿의 여유/주의/위험 판단과 종점 역산 기준"
+                android:text="1% ~ 99% · 다음 충전소에 도착할 때 남기고 싶은 잔량입니다. 다음 충전소가 없으면 종점 도착 잔량 기준입니다. 앱 권장은 이 잔량을 확보하도록 현재 충전지점에서 필요한 최소 충전 %를 계산합니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -166,7 +166,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="50~100% · 계획주행의 충전지점에서는 코스에 설정한 충전 목표가 우선합니다. 목표에 도달해도 충전은 멈추지 않고 알림만 주며, 계속 꽂아두면 100%에서 한 번 더 알려줍니다."
+                android:text="50~100% · 임의주행의 기본 알림 목표입니다. 계획주행에서는 내가 충전소에 설정한 ‘충전 계획 %’에 도달하면 알려줍니다. 앱 권장 %는 별도 안내값이며 알림 목표를 바꾸지 않습니다. 그대로 꽂아두면 100%에서 한 번 더 알려줍니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -280,7 +280,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
                 android:layout_marginTop="10dp"
-                android:text="검증 학습 관리 · FIT + 앱 ZIP" />
+                android:text="학습 관리 · A급 FIT+ZIP / B급 FIT" />
             <TextView
                 android:id="@+id/tvHistoricalLearningSummary"
                 android:layout_width="match_parent"
@@ -299,7 +299,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="정식 학습은 Avinox FIT의 거리·고도·파워와 앱 ZIP의 BLE SOC·모드를 결합합니다. 초기화해도 원래 주행 로그는 유지됩니다."
+                android:text="A급은 Avinox FIT + 앱 ZIP으로 배터리까지 학습합니다. B급 FIT 단독은 지형·Rider/Motor Power·Cadence만 보조학습합니다. 초기화해도 원래 주행 로그는 유지됩니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
