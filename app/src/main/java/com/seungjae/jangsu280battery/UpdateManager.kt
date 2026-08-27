@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -31,6 +34,7 @@ data class AppUpdateInfo(
     val apkUrl: String,
     val apkName: String,
     val sha256: String?,
+    val sha256Url: String?,
     val prerelease: Boolean
 )
 
@@ -93,8 +97,16 @@ object UpdateManager {
                 n.endsWith(".apk") && !n.contains("unsigned")
             } ?: throw IllegalStateException("릴리스에 설치용 APK가 없습니다.")
 
+        val apkName = apk.optString("name").ifBlank { "GPXBatteryCopilot-$tag.apk" }
         val digest = apk.optString("digest").takeIf { it.startsWith("sha256:", ignoreCase = true) }
             ?.substringAfter(':')?.trim()?.lowercase(Locale.US)
+        val checksumAsset = (0 until assets.length())
+            .mapNotNull { assets.optJSONObject(it) }
+            .firstOrNull { asset ->
+                val n = asset.optString("name")
+                n.equals("$apkName.sha256", ignoreCase = true) ||
+                    n.equals("${apkName.substringBeforeLast('.')}.sha256", ignoreCase = true)
+            }
 
         return AppUpdateInfo(
             versionName = remoteVersion,
@@ -102,8 +114,9 @@ object UpdateManager {
             title = release.optString("name").ifBlank { tag },
             notes = release.optString("body").trim(),
             apkUrl = apk.getString("browser_download_url"),
-            apkName = apk.optString("name").ifBlank { "GPXBatteryCopilot-$tag.apk" },
+            apkName = apkName,
             sha256 = digest,
+            sha256Url = checksumAsset?.optString("browser_download_url")?.takeIf { it.isNotBlank() },
             prerelease = release.optBoolean("prerelease", false)
         )
     }
@@ -112,10 +125,12 @@ object UpdateManager {
         val p = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         if (now - p.getLong(KEY_LAST_AUTO_CHECK, 0L) < AUTO_CHECK_MS) return
-        p.edit().putLong(KEY_LAST_AUTO_CHECK, now).apply()
         checkAsync(activity) { result ->
-            result.getOrNull()?.let { showUpdateDialog(activity, it) }
-            // 자동 확인 오류/최신 버전은 조용히 처리한다.
+            if (result.isSuccess) {
+                p.edit().putLong(KEY_LAST_AUTO_CHECK, System.currentTimeMillis()).apply()
+                result.getOrNull()?.let { showUpdateDialog(activity, it) }
+            }
+            // 네트워크 오류는 조용히 처리하되 24시간 잠그지 않는다.
         }
     }
 
@@ -147,18 +162,26 @@ object UpdateManager {
         Thread {
             runCatching {
                 val dir = File(activity.getExternalFilesDir(null), "updates").apply { mkdirs() }
+                dir.listFiles()?.filter { it.isFile && it.extension.equals("apk", true) }?.forEach { old ->
+                    if (old.name != safeName(info.apkName)) old.delete()
+                }
                 val file = File(dir, safeName(info.apkName))
                 download(info.apkUrl, file)
-                info.sha256?.let { expected ->
+
+                val expectedHash = info.sha256 ?: info.sha256Url?.let { readChecksum(it) }
+                expectedHash?.let { expected ->
                     val actual = sha256(file)
                     check(actual.equals(expected, ignoreCase = true)) {
                         "APK SHA-256 검증 실패. 설치하지 않았습니다."
                     }
                 }
+
+                verifyPackageIdentity(activity, file)
+
                 activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .edit().putString(KEY_PENDING_APK, file.absolutePath).apply()
                 activity.runOnUiThread {
-                    status("다운로드 완료 · 설치를 시작합니다.")
+                    status("검증 완료 · Android 설치 화면을 엽니다.")
                     requestInstall(activity, file)
                 }
             }.onFailure { e ->
@@ -176,7 +199,12 @@ object UpdateManager {
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) return
-        requestInstall(activity, file)
+        runCatching { verifyPackageIdentity(activity, file) }
+            .onSuccess { requestInstall(activity, file) }
+            .onFailure {
+                p.edit().remove(KEY_PENDING_APK).apply()
+                android.widget.Toast.makeText(activity, "업데이트 APK 검증 실패: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
     }
 
     private fun requestInstall(activity: Activity, apk: File) {
@@ -238,6 +266,49 @@ object UpdateManager {
             FileOutputStream(target, false).use { output -> input.copyTo(output) }
         }
         if (target.length() < 100_000L) throw IllegalStateException("다운로드한 APK 파일이 비정상적으로 작습니다.")
+    }
+
+    private fun readChecksum(url: String): String {
+        val text = requestText(url)
+        return Regex("(?i)\\b[0-9a-f]{64}\\b").find(text)?.value?.lowercase(Locale.US)
+            ?: throw IllegalStateException("릴리스 SHA-256 파일을 해석하지 못했습니다.")
+    }
+
+    private fun verifyPackageIdentity(context: Context, apk: File) {
+        val pm = context.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val archive = pm.getPackageArchiveInfo(apk.absolutePath, flags)
+            ?: throw IllegalStateException("다운로드한 APK를 Android가 읽지 못했습니다.")
+        check(archive.packageName == context.packageName) {
+            "다른 앱 패키지입니다 (${archive.packageName}). 설치하지 않았습니다."
+        }
+
+        @Suppress("DEPRECATION")
+        val current = pm.getPackageInfo(context.packageName, flags)
+        val currentCerts = signingFingerprints(current)
+        val newCerts = signingFingerprints(archive)
+        check(currentCerts.isNotEmpty() && newCerts.isNotEmpty() && currentCerts.intersect(newCerts).isNotEmpty()) {
+            "현재 앱과 새 APK의 서명이 다릅니다. 고정 서명 Release APK로 한 번 전환해야 합니다."
+        }
+    }
+
+    private fun signingFingerprints(info: PackageInfo): Set<String> {
+        val signatures: Array<Signature> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val si = info.signingInfo ?: return emptySet()
+            if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures ?: emptyArray()
+        }
+        return signatures.map { sig ->
+            MessageDigest.getInstance("SHA-256").digest(sig.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }.toSet()
     }
 
     private fun sha256(file: File): String {

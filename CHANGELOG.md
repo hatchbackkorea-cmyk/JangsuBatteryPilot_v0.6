@@ -420,3 +420,12 @@
 - 원본 telemetry의 Torque/Gear/Gradient 필드도 보존해 후속 효율모델 준비
 - 원본 중간 충전(SOC 상승)과 30초 이상 전원 OFF/센서 공백을 학습 경계로 분리
 - 원본 A+ 학습 누적 한도를 1,600구간으로 확대(예측은 기존처럼 최근 검증구간 우선 가중)
+
+## v0.26.3 - Phone-only self update
+- 앱 설정에서 GitHub Releases 최신 버전 확인 → APK 직접 다운로드 → Android 설치 화면 연결.
+- 앱 시작 시 24시간 간격으로 새 버전을 백그라운드 확인. 네트워크 실패 시 24시간 동안 재확인을 막지 않도록 수정.
+- GitHub Release API의 SHA-256 digest 또는 함께 게시된 `.sha256` 파일을 이용해 APK 무결성 검증.
+- 설치 전 APK packageName과 서명 인증서를 현재 설치 앱과 비교. 다른 앱/다른 서명 APK는 설치 시도 전에 차단.
+- `알 수 없는 앱 설치` 권한을 처음 허용하고 앱으로 돌아오면 보류 중 APK 설치를 자동 재개.
+- main 브랜치에 새 VERSION을 push하면 고정 서명 APK + SHA-256을 GitHub Release로 자동 게시하는 workflow 추가.
+- 자동/수동 Release 빌드에는 항상 실제 `${GITHUB_REPOSITORY}`를 업데이트 저장소로 내장하여 과거 잘못된 저장소 주소 재발 방지.

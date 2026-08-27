@@ -139,3 +139,11 @@ Avinox 앱의 ECO / AUTO / TRAIL / TURBO **전체 코스 예상 소비량**은 �
 
 ## 첫 임의주행 테스트
 현장에서는 `FIELD_TEST_v0.15.0.md` 순서대로 테스트하면 됩니다. 특히 출발 직후 시작 배터리를 먼저 입력해야 실제 누적 소비량이 전체 라이딩을 정확히 커버합니다.
+
+## v0.26.3 폰 단독 자동 업데이트
+- 설정의 `앱 업데이트 확인 · 바로 설치`에서 GitHub Release의 새 APK를 폰이 직접 내려받고 설치합니다.
+- 앱 시작 시 24시간 간격으로 새 안정판을 자동 확인합니다. `테스트판 업데이트 포함`을 켜면 Beta/RC도 대상으로 봅니다.
+- Release API digest 또는 `.sha256` sidecar로 APK 해시를 확인하고, packageName 및 Android 서명 인증서가 현재 앱과 일치할 때만 설치를 진행합니다.
+- 최초 1회 `이 출처 허용(알 수 없는 앱 설치)` 권한이 필요합니다. 허용 후 앱으로 돌아오면 설치가 자동 재개됩니다.
+- `main`에 VERSION이 올라오면 `.github/workflows/auto-release-main.yml`이 고정 서명 Release APK를 자동 게시합니다.
+- Release 빌드의 업데이트 저장소는 항상 실제 GitHub 저장소(`${GITHUB_REPOSITORY}`)를 사용합니다.

@@ -1,18 +1,15 @@
-name: Release signed Android APK
+name: Auto Release signed APK from main
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (example: v0.16.0 or v0.16.1-beta1)'
-        required: true
-        type: string
+    branches: [ main ]
 
 permissions:
   contents: write
+
+concurrency:
+  group: auto-release-main
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -33,23 +30,32 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Resolve release tag and update repository
+      - name: Read version and resolve release
         id: meta
         shell: bash
         env:
-          MANUAL_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "$MANUAL_TAG" ]; then TAG="$MANUAL_TAG"; else TAG="${GITHUB_REF_NAME}"; fi
-          UPDATE_REPO="$GITHUB_REPOSITORY"
+          VERSION=$(tr -d '\r\n[:space:]' < VERSION.txt)
+          test -n "$VERSION" || (echo "VERSION.txt is empty" && exit 1)
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "repo=$UPDATE_REPO" >> "$GITHUB_OUTPUT"
-          if [[ "$TAG" == *-beta* || "$TAG" == *-rc* || "$TAG" == *-alpha* ]]; then
+          echo "repo=$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-beta* || "$VERSION" == *-rc* || "$VERSION" == *-alpha* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping duplicate release."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Verify signing secrets
+      - name: Verify fixed signing secrets
+        if: steps.meta.outputs.skip != 'true'
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -63,6 +69,7 @@ jobs:
           test -n "$KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
 
       - name: Restore fixed signing key
+        if: steps.meta.outputs.skip != 'true'
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -71,6 +78,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/gpxbattery-release.jks"
 
       - name: Build signed release APK
+        if: steps.meta.outputs.skip != 'true'
         shell: bash
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/gpxbattery-release.jks
@@ -78,25 +86,23 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          gradle :app:assembleRelease --stacktrace -PupdateRepo="${{ steps.meta.outputs.repo }}"
-          cp app/build/outputs/apk/release/app-release.apk "GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk"
-          sha256sum "GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk" > "GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk.sha256"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-signed
-          path: |
-            GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk
-            GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk.sha256
-          if-no-files-found: error
+          gradle :app:assembleRelease --stacktrace -PupdateRepo="${GITHUB_REPOSITORY}"
+          APK="GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          sha256sum "$APK" > "$APK.sha256"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          prerelease: ${{ steps.meta.outputs.prerelease }}
-          generate_release_notes: true
-          files: |
-            GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk
-            GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk.sha256
+        if: steps.meta.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk"
+          EXTRA=""
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then EXTRA="--prerelease"; fi
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            "$APK" "$APK.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "GPX Battery Copilot ${{ steps.meta.outputs.tag }}" \
+            --generate-notes $EXTRA

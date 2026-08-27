@@ -255,7 +255,7 @@
 
                     <Switch android:id="@+id/switchPageBetaUpdates" android:layout_width="match_parent" android:layout_height="46dp" android:text="테스트판 업데이트 포함" android:textColor="@color/text_primary" android:textSize="14sp"/>
 
-                    <Button android:id="@+id/btnPageCheckUpdate" android:layout_width="match_parent" android:layout_height="46dp" android:text="최신 업데이트 확인"/>
+                    <Button android:id="@+id/btnPageCheckUpdate" android:layout_width="match_parent" android:layout_height="46dp" android:text="앱 업데이트 확인 · 바로 설치"/>
                 </LinearLayout>
 
                 <Button android:id="@+id/btnPageResetProgress" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="8dp" android:text="현재 코스 진행 위치 초기화"/>

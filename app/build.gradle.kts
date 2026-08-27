@@ -18,7 +18,7 @@ android {
         minSdk = 26
         targetSdk = 35
         val appVersionName = rootProject.file("VERSION.txt").readText().trim()
-        val versionParts = appVersionName.split(".").map { it.toInt() }
+        val versionParts = appVersionName.substringBefore("-").split(".").map { it.toInt() }
         versionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
         versionName = appVersionName
         val escapedRepo = updateRepository.replace("\\", "\\\\").replace("\"", "\\\"")
