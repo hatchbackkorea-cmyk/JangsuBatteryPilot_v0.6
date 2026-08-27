@@ -1,0 +1,25 @@
+# v0.26.8 validation
+
+- VERSION.txt = 0.26.8
+- v0.26.7 등록 충전소 직접 ETA 시간축 유지 확인
+  - `plannedCharges = basePlan.checkpoints`의 chargeToPct 체크포인트를 독립 행으로 사용
+  - GPX POI ±200m 충전소 매칭에 의존하지 않음
+- 새 `ChargeScenarioSimulatorActivity` / `activity_charge_simulator.xml` / Manifest 등록 확인
+- Main 설정 테스트 패널에 `btnPageChargeSimulator` 연결 확인
+- 시뮬레이터는 실제 주행 중 진입 차단
+- 시뮬레이터 저장 격리 확인
+  - BatteryActualStore / RideLogManager 쓰기 없음
+  - RideReplanStore는 history() 읽기 전용
+  - ChargingStationStore는 list() 읽기 전용
+  - BatteryLearningStore는 BatteryPlan 예측용 읽기 전용
+- 가상 입력: GPX km / SOC / HH:mm / 이동평균속도
+- 충전소 3개 시간축: 각 등록 충전소 도착 → 목표충전 → 출발 → 이후 ETA 누적
+- 계획충전 생략 토글 및 이후 ETA 재계산
+- 권장잔량 vs 하드 리저브 판정 (NORMAL / ECO / EMERGENCY)
+- Kakao 검색 기준 좌표가 실제 휴대폰 GPS가 아니라 `course.pointAtKm(가상 km)`인지 확인
+- 비상 우회 시뮬레이션 OUTBOUND → CHARGING → RETURN 및 동일 anchor km 복귀 확인
+- RETURN 단계에서 복귀 경로 시간 + 보수적 배터리 소비 반영
+- KAKAO_REST_API_KEY가 build / release / auto-release workflow 모두에 유지됨
+- Android resource XML + Manifest 총 30개 XML 파싱 성공
+- Kotlin R.id 참조 누락 0개
+- Gradle assemble은 실행 환경에서 services.gradle.org DNS 접근 불가로 수행하지 못함. GitHub Actions가 최종 Android compile 검증을 담당.

@@ -248,6 +248,8 @@
                     <TextView android:id="@+id/tvPageTestKm" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="테스트 위치" android:textColor="@color/text_primary" android:textSize="13sp" android:textStyle="bold"/>
                     <SeekBar android:id="@+id/seekPageTestKm" android:layout_width="match_parent" android:layout_height="36dp" android:minHeight="0dp"/>
                     <TextView android:id="@+id/tvPageSettingsHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="선택한 GPX 코스를 기준으로 테스트 위치가 적용됩니다." android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <Button android:id="@+id/btnPageChargeSimulator" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="7dp" android:text="🧪 충전 시나리오 시뮬레이터" android:textStyle="bold"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="가상 GPX 위치·SOC·시간으로 충전 생략/ECO/긴급충전/동일 이탈점 복귀를 시험합니다. 실제 주행·학습에는 저장하지 않습니다." android:textColor="@color/text_secondary" android:textSize="10sp"/>
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="13dp">
 

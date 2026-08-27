@@ -39,6 +39,11 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".ChargeScenarioSimulatorActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

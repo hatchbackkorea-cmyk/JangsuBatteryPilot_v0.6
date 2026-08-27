@@ -141,6 +141,7 @@ class MainActivity : Activity() {
     private lateinit var tvPageTestKm: TextView
     private lateinit var seekPageTestKm: SeekBar
     private lateinit var tvPageSettingsHint: TextView
+    private lateinit var btnPageChargeSimulator: Button
     private lateinit var btnPageBleDiagnostic: Button
     private lateinit var tvPageUpdateStatus: TextView
     private lateinit var switchPageBetaUpdates: Switch
@@ -393,6 +394,7 @@ class MainActivity : Activity() {
         tvPageTestKm = findViewById(R.id.tvPageTestKm)
         seekPageTestKm = findViewById(R.id.seekPageTestKm)
         tvPageSettingsHint = findViewById(R.id.tvPageSettingsHint)
+        btnPageChargeSimulator = findViewById(R.id.btnPageChargeSimulator)
         btnPageBleDiagnostic = findViewById(R.id.btnPageBleDiagnostic)
         tvPageUpdateStatus = findViewById(R.id.tvPageUpdateStatus)
         switchPageBetaUpdates = findViewById(R.id.switchPageBetaUpdates)
@@ -1477,6 +1479,13 @@ class MainActivity : Activity() {
             updateInlineSettingsLabels()
             if (testMode) renderCurrentMode()
         })
+        btnPageChargeSimulator.setOnClickListener {
+            if (logManager.isActive()) {
+                Toast.makeText(this, "실제 주행 기록 중에는 시뮬레이터를 열 수 없습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(Intent(this, ChargeScenarioSimulatorActivity::class.java))
+            }
+        }
         btnPageBleDiagnostic.setOnClickListener {
             startActivity(Intent(this, BleDiagnosticActivity::class.java))
         }
@@ -1542,6 +1551,7 @@ class MainActivity : Activity() {
             seekPageTestKm.progress = (AppSettings.testKm(this).coerceIn(0.0, course.totalKm) * 10.0).roundToInt()
             switchPageTestMode.isEnabled = !logManager.isActive()
             seekPageTestKm.isEnabled = switchPageTestMode.isChecked && !logManager.isActive()
+            btnPageChargeSimulator.isEnabled = !logManager.isActive()
             btnPageResetProgress.isEnabled = !logManager.isActive()
             tvPageSettingsHint.text = if (logManager.isActive()) {
                 "주행 중에는 테스트 모드를 변경할 수 없습니다. 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
@@ -2472,38 +2482,72 @@ class MainActivity : Activity() {
 
     /**
      * 선택 GPX의 남은 모든 waypoint/POI를 한 번에 보여준다.
-     * 보급/충전 계열 포인트는 ◆, 일반 포인트는 • 로 구분한다.
+     * 등록 충전소는 ◆, GPX 보급계열 POI는 ◇, 일반 POI는 • 로 구분한다.
+     */
+    private data class PointEtaTimelineRow(
+        val routeKm: Double,
+        val poi: RoutePoi? = null,
+        val chargingCheckpoint: Checkpoint? = null
+    )
+
+    /**
+     * v0.26.7: 등록된 충전 계획을 GPX POI에 억지로 ±200m 매칭하지 않는다.
+     * 충전 Checkpoint 자체를 ETA 시간축의 독립 이벤트로 넣고, 가까운 POI 이름은 보조 라벨로만 사용한다.
+     * 따라서 등록 충전소가 GPX 보급 waypoint와 조금 어긋나 있어도 모든 충전시간이 표시/누적된다.
      */
     private fun renderPointEtas(km: Double, speedKmh: Double, context: EtaChargeContext) {
-        val upcoming = course.pois
+        val upcomingPois = course.pois
             .asSequence()
             .filter { it.routeKm >= km - 0.05 }
             .distinctBy { "${it.name}|${String.format(Locale.US, "%.3f", it.routeKm)}" }
             .sortedBy { it.routeKm }
             .toList()
 
+        val plannedCharges = basePlan.checkpoints
+            .asSequence()
+            .filter { it.chargeToPct != null && it.km >= km - 0.18 }
+            .sortedBy { it.km }
+            .toList()
+
+        // 충전소와 거의 같은 위치의 POI만 중복 제거한다. 충전소 자체는 항상 별도 행으로 남는다.
+        val poiRows = upcomingPois
+            .filter { poi -> plannedCharges.none { cp -> abs(cp.km - poi.routeKm) <= 0.12 } }
+            .map { PointEtaTimelineRow(routeKm = it.routeKm, poi = it) }
+        val chargeRows = plannedCharges.map { PointEtaTimelineRow(routeKm = it.km, chargingCheckpoint = it) }
+        val timeline = (poiRows + chargeRows).sortedWith(
+            compareBy<PointEtaTimelineRow> { it.routeKm }
+                .thenBy { if (it.chargingCheckpoint != null) 0 else 1 }
+        )
+
         val emergencyEta = replanStore.active(courseMeta.id) != null
         tvPointEtaBasis.text = if (speedKmh >= 3.0) {
-            "이동평균 ${RideFormatter.one(speedKmh)}km/h + ${if (emergencyEta) "비상 우회/충전/복귀 + " else ""}남은 충전시간 포함 · 자동 재계산"
+            "이동평균 ${RideFormatter.one(speedKmh)}km/h + ${if (emergencyEta) "비상 우회/충전/복귀 + " else ""}남은 충전시간 포함 · 등록 충전소 ${plannedCharges.size}개 · 자동 재계산"
         } else {
-            "이동속도가 잡히면 주행시간 + 계획/비상 충전시간을 합쳐 ETA를 계산합니다."
+            "이동속도가 잡히면 주행시간 + 계획/비상 충전시간을 합쳐 ETA를 계산합니다. · 등록 충전소 ${plannedCharges.size}개"
         }
 
-        tvPointEtaList.text = if (upcoming.isEmpty()) {
+        tvPointEtaList.text = if (timeline.isEmpty()) {
             "남은 포인트 없음 · 종점 ${chargeAwareEtaClock(km, course.totalKm, speedKmh, context)}"
         } else {
-            upcoming.joinToString("\n") { p ->
-                val remain = (p.routeKm - km).coerceAtLeast(0.0)
-                val mark = if (p.isSupplyLike()) "◆" else "•"
-                val eta = chargeAwareEtaClock(km, p.routeKm, speedKmh, context)
-                val stationCp = basePlan.checkpointAt(p.routeKm, 0.20)?.takeIf { it.chargeToPct != null }
-                if (stationCp != null) {
-                    if (replanStore.isSkipped(courseMeta.id, stationCp.km)) {
-                        "$mark ${RideFormatter.one(p.routeKm)}km · $eta · ${p.name}\n   ↳ 충전 생략 확정 · 충전시간 0분 반영"
+            timeline.joinToString("\n") { row ->
+                val cp = row.chargingCheckpoint
+                if (cp != null) {
+                    val eta = chargeAwareEtaClock(km, cp.km, speedKmh, context)
+                    val nearPoi = upcomingPois
+                        .minByOrNull { abs(it.routeKm - cp.km) }
+                        ?.takeIf { abs(it.routeKm - cp.km) <= 0.50 }
+                    val nearbyName = nearPoi?.name
+                        ?.takeIf { it.isNotBlank() && !cp.name.contains(it, ignoreCase = true) && !it.contains(cp.name, ignoreCase = true) }
+                    val label = if (nearbyName != null) "${cp.name} · $nearbyName" else cp.name
+                    if (replanStore.isSkipped(courseMeta.id, cp.km)) {
+                        "◆ ${RideFormatter.one(cp.km)}km · 도착 $eta · $label\n   ↳ 충전 생략 확정 · 충전시간 0분 반영"
                     } else {
-                        "$mark ${RideFormatter.one(p.routeKm)}km · 도착 $eta · ${p.name}\n   ↳ ${stationCp.chargeToPct!!.roundToInt()}% 충전 · 예상 출발 ${chargeAwareDepartureClock(km, stationCp, speedKmh, context)}"
+                        "◆ ${RideFormatter.one(cp.km)}km · 도착 $eta · $label\n   ↳ ${cp.chargeToPct!!.roundToInt()}% 충전 · 예상 출발 ${chargeAwareDepartureClock(km, cp, speedKmh, context)}"
                     }
                 } else {
+                    val p = row.poi!!
+                    val mark = if (p.isSupplyLike()) "◇" else "•"
+                    val eta = chargeAwareEtaClock(km, p.routeKm, speedKmh, context)
                     "$mark ${RideFormatter.one(p.routeKm)}km · $eta · ${p.name}"
                 }
             }

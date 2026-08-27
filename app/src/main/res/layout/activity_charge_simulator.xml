@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <Button
+            android:id="@+id/btnSimBack"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="← 돌아가기" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="충전 시나리오 시뮬레이터"
+            android:textColor="@color/text_primary"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvSimIsolation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:background="@drawable/panel_accent_bg"
+            android:padding="11dp"
+            android:text="SIMULATION ONLY · 실제 주행·배터리·Proto·개인학습에는 저장하지 않습니다."
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="11dp">
+
+            <TextView
+                android:id="@+id/tvSimCourse"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="선택 코스"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvSimKm"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="가상 위치"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <SeekBar
+                android:id="@+id/seekSimKm"
+                android:layout_width="match_parent"
+                android:layout_height="38dp" />
+
+            <TextView
+                android:id="@+id/tvSimSoc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="가상 배터리"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <SeekBar
+                android:id="@+id/seekSimSoc"
+                android:layout_width="match_parent"
+                android:layout_height="38dp"
+                android:max="100" />
+
+            <TextView
+                android:id="@+id/tvSimSpeed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="예상 이동평균"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <SeekBar
+                android:id="@+id/seekSimSpeed"
+                android:layout_width="match_parent"
+                android:layout_height="38dp"
+                android:max="50" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="가상 현재시각 (HH:mm)"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+            <EditText
+                android:id="@+id/etSimTime"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:inputType="time"
+                android:maxLines="1"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnSimPrevStation"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="◀ 이전 충전소" />
+
+                <Button
+                    android:id="@+id/btnSimNextStation"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="5dp"
+                    android:layout_weight="1"
+                    android:text="다음 충전소 ▶" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnSimRecalc"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="6dp"
+                android:text="시나리오 다시 계산"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="실시간 재계획 판정"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvSimDecision"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:lineSpacingExtra="2dp"
+                android:text="계산 준비 중"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnSimToggleSkip"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="7dp"
+                android:text="다음 계획 충전소 생략 테스트" />
+
+            <Button
+                android:id="@+id/btnSimEmergencySearch"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="6dp"
+                android:text="Kakao 비상 충전 후보 검색" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/panelSimEmergency"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="비상충전 우회 시뮬레이션"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvSimEmergency"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:lineSpacingExtra="2dp"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnSimEmergencyStep"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="7dp"
+                android:text="충전소 도착 시뮬레이션" />
+
+            <Button
+                android:id="@+id/btnSimEmergencyCancel"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="5dp"
+                android:text="비상 우회 시뮬레이션 취소" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="충전 포함 예상 시간축"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvSimTimeline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:lineSpacingExtra="3dp"
+                android:text="시간축 준비 중"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnSimReset"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:layout_marginTop="10dp"
+            android:text="시뮬레이션 상태 초기화" />
+
+    </LinearLayout>
+</ScrollView>
