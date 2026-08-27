@@ -14,6 +14,7 @@ import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class HistoricalRideActivity : Activity() {
     companion object {

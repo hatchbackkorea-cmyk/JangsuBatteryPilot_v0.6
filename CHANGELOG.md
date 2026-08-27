@@ -1,3 +1,8 @@
+# v0.21.1
+
+- FIX: HistoricalRideActivity의 `roundToInt()` import 누락으로 인한 Kotlin 컴파일 오류 수정
+- v0.21.0의 검증 학습(FIT 기준 거리/고도 + ZIP 기준 BLE SOC/모드) 및 충전 목표 알림 기능 유지
+
 # v0.21.0 — Verified FIT+ZIP Learning + Charge Target Alert
 - 정식 개인학습 입력을 `Avinox FIT + Jangsu 앱 주행 ZIP` 검증 페어로 추가.
 - 학습 기준을 고정: 거리/GPS/고도/획득고도/속도/Rider Power/Motor Power/Cadence는 Avinox FIT, 실제 SOC와 선택 Assist Mode는 앱 ZIP BLE 로그를 사용.
