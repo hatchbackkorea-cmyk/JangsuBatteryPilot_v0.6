@@ -220,7 +220,9 @@ class StravaActivity : Activity() {
         val hr = a.telemetry.mapNotNull { it.heartRateBpm }
         val hrAvg = hr.takeIf { it.isNotEmpty() }?.average()
         val hrMax = hr.maxOrNull()
-        val assist = if ((s.avgRiderPowerW ?: 0.0) > 1.0 && s.avgMotorPowerW != null) s.avgMotorPowerW / s.avgRiderPowerW else null
+        val riderAvgW = s.avgRiderPowerW
+        val motorAvgW = s.avgMotorPowerW
+        val assist = if (riderAvgW != null && riderAvgW > 1.0 && motorAvgW != null) motorAvgW / riderAvgW else null
         val battery = batteryRange(a, overlay)
         val modes = modeShare(a, overlay)
         return buildString {

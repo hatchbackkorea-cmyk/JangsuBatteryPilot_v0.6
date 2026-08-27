@@ -303,7 +303,7 @@ class SettingsActivity : Activity() {
                     "• 앱 실행 시 하루 1회 자동 확인 · 새 버전이 있을 때만 안내\n" +
                     "• 고정 서명 APK로 기존 데이터 유지 업데이트\n" +
                     "• 업데이트 확인 시 주행/FIT/배터리/학습 데이터 외부 전송 없음\n" +
-                    "• v0.19.1 Avinox FIT + 우리 BLE 로그를 합친 Strava 클린 FIT 생성\n" +
+                    "• v0.19.2 Strava 클린 FIT 컴파일 수정 · 전체 텔레메트리 유지\n" +
                     "• Rider Power/심박/Cadence/GPS/고도/속도 + Motor/Battery/Assist Mode 기록"
             )
             .setPositiveButton("확인", null)

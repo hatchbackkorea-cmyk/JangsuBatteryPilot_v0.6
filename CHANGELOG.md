@@ -1,3 +1,8 @@
+# v0.19.2 — Strava Clean FIT Build Fix
+- `StravaActivity.kt` Assist ratio 계산에서 nullable 평균 파워를 직접 나누던 Kotlin 컴파일 오류 수정.
+- Rider/Motor 평균 파워를 로컬 non-null 값으로 확정한 뒤 Assist ratio를 계산하도록 변경.
+- v0.19.1의 Strava 클린 FIT 기능/필드 구성은 그대로 유지.
+
 # v0.19.1 — Strava Clean FIT Full Telemetry
 - Avinox 원본 FIT의 GPS/시간/거리/속도/고도/심박/케이던스/Rider Power/Motor Power를 읽어 Strava용 새 FIT으로 재구성.
 - 표준 FIT `power`에는 반드시 사람이 낸 Rider Power만 기록하고 Motor Power는 e-bike 전용 `motor_power` 필드로 분리.
