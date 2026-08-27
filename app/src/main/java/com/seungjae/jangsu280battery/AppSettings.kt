@@ -18,11 +18,13 @@ object AppSettings {
     const val KEY_BETA_UPDATES = "beta_updates"
     const val KEY_CHARGE_ALERT_ENABLED = "charge_alert_enabled"
     const val KEY_CHARGE_ALERT_TARGET = "charge_alert_target"
+    const val KEY_HARD_RESERVE = "hard_reserve_pct"
 
     const val DEFAULT_FINISH_TARGET = 15
     const val DEFAULT_DISTANCE_INTERVAL_KM = 5
     const val DEFAULT_TIME_INTERVAL_MIN = 0
     const val DEFAULT_CHARGE_ALERT_TARGET = 100
+    const val DEFAULT_HARD_RESERVE = 7
 
     fun finishTarget(context: Context): Double = prefs(context)
         .getIntCompat(KEY_FINISH_TARGET, DEFAULT_FINISH_TARGET)
@@ -44,6 +46,10 @@ object AppSettings {
     fun chargeAlertTarget(context: Context): Int = prefs(context)
         .getIntCompat(KEY_CHARGE_ALERT_TARGET, DEFAULT_CHARGE_ALERT_TARGET)
         .coerceIn(50, 100)
+
+    fun hardReserve(context: Context): Int = prefs(context)
+        .getIntCompat(KEY_HARD_RESERVE, DEFAULT_HARD_RESERVE)
+        .coerceIn(5, 15)
 
     fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

@@ -30,6 +30,8 @@ class RideService : Service(), LocationListener {
         const val ACTION_SPEAK_TEXT = "com.seungjae.jangsu280battery.SPEAK_TEXT"
 
         const val EXTRA_ROUTE_KM = "route_km"
+        const val EXTRA_LAT = "lat"
+        const val EXTRA_LON = "lon"
         const val EXTRA_OFF_COURSE_M = "off_course_m"
         const val EXTRA_ACCURACY_M = "accuracy_m"
         const val EXTRA_SPEED_KMH = "speed_kmh"
@@ -72,6 +74,7 @@ class RideService : Service(), LocationListener {
     private lateinit var chargingStore: ChargingStationStore
     private lateinit var logManager: RideLogManager
     private lateinit var chargingSessionStore: ChargingSessionStore
+    private lateinit var replanStore: RideReplanStore
     private lateinit var bleStateStore: AvinoxBleStateStore
     private lateinit var bleClient: AvinoxBleSocClient
     private lateinit var assistProfileStore: AvinoxAssistProfileStore
@@ -101,6 +104,7 @@ class RideService : Service(), LocationListener {
         chargingStore = ChargingStationStore(this)
         logManager = RideLogManager(this)
         chargingSessionStore = ChargingSessionStore(this)
+        replanStore = RideReplanStore(this)
         val prefs = AppSettings.prefs(this)
         val lastKm = prefs.getFloat(AppSettings.KEY_LAST_KM, 0f).toDouble().coerceIn(0.0, course.totalKm)
         matcher = RouteMatcher(course, lastKm)
@@ -220,7 +224,24 @@ class RideService : Service(), LocationListener {
             handleFreeLocation(location)
             return
         }
-        val match = matcher.match(location.latitude, location.longitude)
+        val rawMatch = matcher.match(location.latitude, location.longitude)
+        var emergency = replanStore.active(courseMeta.id)
+        if (emergency != null) {
+            replanStore.appendBreadcrumb(courseMeta.id, location.latitude, location.longitude, location.time.takeIf { it > 0 } ?: System.currentTimeMillis())
+            if (emergency.phase == EmergencyPhase.RETURN) {
+                val anchorDistance = Geo.distanceMeters(location.latitude, location.longitude, emergency.anchorLat, emergency.anchorLon)
+                if (anchorDistance <= 50.0) {
+                    logManager.recordEvent("EMERGENCY_RETURN_COMPLETE", "원래 이탈점 복귀 완료 · ${anchorDistance.roundToInt()}m", emergency.anchorRouteKm, actualStore.latest()?.percent)
+                    matcher.seekToKm(emergency.anchorRouteKm)
+                    // 이 GPS 틱은 저장했던 앵커 km로 유지한다. 다음 위치 업데이트부터 정상 RouteMatcher를 재개한다.
+                    replanStore.cancelEmergency(courseMeta.id)
+                }
+            }
+        }
+        val match = if (emergency != null) {
+            val anchor = course.pointAtKm(emergency.anchorRouteKm)
+            rawMatch.copy(routeKm = emergency.anchorRouteKm, courseElevationM = anchor.ele)
+        } else rawMatch
         val speedKmh = paceEstimator.update(location, match.routeKm)
         val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
         val gpsElevation = if (location.hasAltitude()) location.altitude else Double.NaN
@@ -267,6 +288,8 @@ class RideService : Service(), LocationListener {
         sendBroadcast(Intent(ACTION_UPDATE).apply {
             setPackage(packageName)
             putExtra(EXTRA_ROUTE_KM, match.routeKm)
+            putExtra(EXTRA_LAT, location.latitude)
+            putExtra(EXTRA_LON, location.longitude)
             putExtra(EXTRA_OFF_COURSE_M, match.offCourseMeters)
             putExtra(EXTRA_ACCURACY_M, accuracy)
             putExtra(EXTRA_SPEED_KMH, speedKmh)
@@ -319,6 +342,8 @@ class RideService : Service(), LocationListener {
         sendBroadcast(Intent(ACTION_UPDATE).apply {
             setPackage(packageName)
             putExtra(EXTRA_ROUTE_KM, freeDistanceKm)
+            putExtra(EXTRA_LAT, location.latitude)
+            putExtra(EXTRA_LON, location.longitude)
             putExtra(EXTRA_OFF_COURSE_M, 0.0)
             putExtra(EXTRA_ACCURACY_M, accuracy)
             putExtra(EXTRA_SPEED_KMH, speedKmh)

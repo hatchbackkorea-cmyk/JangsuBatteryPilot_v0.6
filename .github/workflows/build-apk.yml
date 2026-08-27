@@ -33,6 +33,8 @@ jobs:
           echo "App version: $VERSION"
 
       - name: Build debug APK for CI validation
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
         run: gradle :app:assembleDebug --stacktrace -PupdateRepo="${GITHUB_REPOSITORY}"
 
       - name: Upload debug APK artifact

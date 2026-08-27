@@ -180,6 +180,8 @@
 
                 <TextView android:id="@+id/tvChargeStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:gravity="center" android:text="" android:textColor="@color/accent" android:textSize="11sp" android:textStyle="bold"/>
 
+                <Button android:id="@+id/btnReplanAction" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="3dp" android:text="⚠ 긴급 충전 후보 찾기" android:textStyle="bold" android:visibility="gone"/>
+
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
                     <Button android:id="@+id/btnChargeToggle" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="⚡ 충전 시작" android:textStyle="bold"/>
                     <Button android:id="@+id/btnRideToggle" android:layout_width="0dp" android:layout_height="48dp" android:layout_marginStart="7dp" android:layout_weight="1.1" android:text="▶ 주행 시작" android:textStyle="bold"/>
@@ -217,7 +219,7 @@
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="11dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="포인트별 예상 도착시각" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold"/>
-                    <TextView android:id="@+id/tvPointEtaBasis" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="주행 시작 후 이동속도가 잡히면 자동 계산" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <TextView android:id="@+id/tvPointEtaBasis" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="주행시간 + 계획 충전시간을 포함해 자동 계산" android:textColor="@color/text_secondary" android:textSize="11sp"/>
                     <TextView android:id="@+id/tvPointEtaList" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:lineSpacingExtra="3dp" android:text="포인트 ETA 준비 중" android:textColor="@color/text_primary" android:textSize="13sp"/>
                 </LinearLayout>
             </LinearLayout>
@@ -237,6 +239,8 @@
                     <SeekBar android:id="@+id/seekPageTimeInterval" android:layout_width="match_parent" android:layout_height="22dp" android:minHeight="0dp"/>
                     <TextView android:id="@+id/tvPageFinishTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="충전권장 기준 잔량" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
                     <SeekBar android:id="@+id/seekPageFinishTarget" android:layout_width="match_parent" android:layout_height="22dp" android:minHeight="0dp"/>
+                    <TextView android:id="@+id/tvPageHardReserve" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="비상 하드 리저브 7%" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold"/>
+                    <SeekBar android:id="@+id/seekPageHardReserve" android:layout_width="match_parent" android:layout_height="22dp" android:minHeight="0dp"/>
                 </LinearLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="9dp">

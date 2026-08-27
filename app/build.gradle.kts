@@ -8,6 +8,9 @@ val updateRepository = (project.findProperty("updateRepo")?.toString()
     ?: System.getenv("GITHUB_REPOSITORY")
     ?: "").trim()
 val signingKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+val kakaoRestApiKey = (project.findProperty("kakaoRestApiKey")?.toString()
+    ?: System.getenv("KAKAO_REST_API_KEY")
+    ?: "").trim()
 
 android {
     namespace = "com.seungjae.jangsu280battery"
@@ -23,6 +26,8 @@ android {
         versionName = appVersionName
         val escapedRepo = updateRepository.replace("\\", "\\\\").replace("\"", "\\\"")
         buildConfigField("String", "UPDATE_REPOSITORY", "\"$escapedRepo\"")
+        val escapedKakao = kakaoRestApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "KAKAO_REST_API_KEY", "\"$escapedKakao\"")
     }
 
     signingConfigs {
