@@ -214,6 +214,12 @@
                     <com.seungjae.jangsu280battery.ElevationProfileView android:id="@+id/profileView" android:layout_width="match_parent" android:layout_height="176dp" android:layout_marginTop="6dp"/>
                     <TextView android:id="@+id/tvNextPoi" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="다음 포인트" android:textColor="@color/text_secondary" android:textSize="13sp"/>
                 </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="11dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="포인트별 예상 도착시각" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold"/>
+                    <TextView android:id="@+id/tvPointEtaBasis" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="주행 시작 후 이동속도가 잡히면 자동 계산" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <TextView android:id="@+id/tvPointEtaList" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:lineSpacingExtra="3dp" android:text="포인트 ETA 준비 중" android:textColor="@color/text_primary" android:textSize="13sp"/>
+                </LinearLayout>
             </LinearLayout>
         </ScrollView>
 

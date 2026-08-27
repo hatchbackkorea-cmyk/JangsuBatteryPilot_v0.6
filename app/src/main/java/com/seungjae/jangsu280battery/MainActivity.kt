@@ -114,6 +114,8 @@ class MainActivity : Activity() {
     private lateinit var tvNextClimbDetail: TextView
     private lateinit var tvCourseStatus: TextView
     private lateinit var tvNextPoi: TextView
+    private lateinit var tvPointEtaList: TextView
+    private lateinit var tvPointEtaBasis: TextView
     private lateinit var tvVersion: TextView
     private lateinit var profileView: ElevationProfileView
     private lateinit var btnRideReport: Button
@@ -353,6 +355,8 @@ class MainActivity : Activity() {
         tvNextClimbDetail = findViewById(R.id.tvNextClimbDetail)
         tvCourseStatus = findViewById(R.id.tvCourseStatus)
         tvNextPoi = findViewById(R.id.tvNextPoi)
+        tvPointEtaList = findViewById(R.id.tvPointEtaList)
+        tvPointEtaBasis = findViewById(R.id.tvPointEtaBasis)
         tvVersion = findViewById(R.id.tvVersion)
         profileView = findViewById(R.id.profileView)
         btnRideReport = findViewById(R.id.btnRideReport)
@@ -2251,7 +2255,12 @@ class MainActivity : Activity() {
             reserve.label == "주의" -> getColor(R.color.warn)
             else -> getColor(R.color.good)
         })
-        tvNextPoi.text = poi?.let { "포인트 ${it.name} · ${RideFormatter.one((it.routeKm - km).coerceAtLeast(0.0))}km" } ?: "포인트 · 종점"
+        val etaSpeed = pointEtaSpeedKmh()
+        tvNextPoi.text = poi?.let {
+            val remainPoi = (it.routeKm - km).coerceAtLeast(0.0)
+            "다음 포인트 · ${it.name} · ${RideFormatter.one(remainPoi)}km · ${RideFormatter.etaClock(remainPoi, etaSpeed)}"
+        } ?: "다음 포인트 · 종점"
+        renderPointEtas(km, etaSpeed)
 
         val accText = if (latestAccuracyM >= 0) "±${latestAccuracyM.roundToInt()}m" else "-"
         val offText = if (simulated) "테스트" else "이탈 ${latestOffCourseM.roundToInt()}m"
@@ -2270,6 +2279,45 @@ class MainActivity : Activity() {
         }
         profileView.setCurrentKm(km)
         renderRideState()
+    }
+
+    /** v0.26.4: 순간속도보다 주행 전체 이동평균을 우선해 포인트 ETA가 출렁이지 않게 한다. */
+    private fun pointEtaSpeedKmh(): Double {
+        val avg = logManager.activeAverageSpeedKmh()
+        return when {
+            avg >= 3.0 -> avg
+            latestSpeedKmh >= 3.0 -> latestSpeedKmh
+            else -> 0.0
+        }
+    }
+
+    /**
+     * 선택 GPX의 남은 모든 waypoint/POI를 한 번에 보여준다.
+     * 보급/충전 계열 포인트는 ◆, 일반 포인트는 • 로 구분한다.
+     */
+    private fun renderPointEtas(km: Double, speedKmh: Double) {
+        val upcoming = course.pois
+            .asSequence()
+            .filter { it.routeKm >= km - 0.05 }
+            .distinctBy { "${it.name}|${String.format(Locale.US, "%.3f", it.routeKm)}" }
+            .sortedBy { it.routeKm }
+            .toList()
+
+        tvPointEtaBasis.text = if (speedKmh >= 3.0) {
+            "이동평균 ${RideFormatter.one(speedKmh)}km/h 기준 · 주행 중 자동 갱신"
+        } else {
+            "주행 시작 후 이동속도가 잡히면 예상 도착시각을 자동 계산합니다."
+        }
+
+        tvPointEtaList.text = if (upcoming.isEmpty()) {
+            "남은 포인트 없음 · 종점 ${RideFormatter.etaClock((course.totalKm - km).coerceAtLeast(0.0), speedKmh)}"
+        } else {
+            upcoming.joinToString("\n") { p ->
+                val remain = (p.routeKm - km).coerceAtLeast(0.0)
+                val mark = if (p.isSupplyLike()) "◆" else "•"
+                "$mark ${RideFormatter.one(p.routeKm)}km · ${RideFormatter.etaClock(remain, speedKmh)} · ${p.name}"
+            }
+        }
     }
 
     private fun renderFreeRide() {
@@ -2312,6 +2360,8 @@ class MainActivity : Activity() {
         tvAssist.text = "임의주행 데이터 수집 중 · GPS + Avinox BLE SOC 자동 저장\n종료 후 FIT · Avinox 예상값을 붙여 3자 비교"
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
+        tvPointEtaBasis.text = "계획주행에서 GPX 포인트 ETA를 표시합니다."
+        tvPointEtaList.text = ""
         profileView.visibility = View.GONE
         tvGpsStatus.text = if (logManager.isActive()) "임의주행 GPS 기록 중 · 화면 꺼도 유지" else "임의주행 저장 완료"
     }

@@ -349,6 +349,11 @@ class RideLogManager(context: Context) {
             .appendText("$timestampMs,$mode,$profileId,$hex\n")
     }
 
+    fun activeAverageSpeedKmh(): Double {
+        val count = prefs.getInt(ACTIVE_SPEED_COUNT, 0)
+        return if (count > 0) prefs.getFloat(ACTIVE_SPEED_SUM, 0f).toDouble() / count else 0.0
+    }
+
     fun activeAssistSummaryText(): String {
         val mode = activeAssistMode() ?: return "모드 자동감지 대기 · Avinox BLE 연결 확인"
         val profile = activeAssistProfile()
