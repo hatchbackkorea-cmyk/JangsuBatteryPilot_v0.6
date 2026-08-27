@@ -32,6 +32,83 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
+        <!-- v0.26.1: 과거 라이딩 학습의 주 데이터원인 Avinox 원본 Proto를 이 페이지에서 직접 관리 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🟩 Avinox 원본 A+ 학습"
+                android:textColor="@color/text_primary"
+                android:textSize="19sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvProtoSyncStatusHistorical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Shizuku 상태 확인 중…"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvProtoLearningStatsHistorical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="A+ 학습 현황 확인 중…"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnProtoPermissionHistorical"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="9dp"
+                android:text="Shizuku 권한 허용"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnProtoSyncNewHistorical"
+                    android:layout_width="0dp"
+                    android:layout_height="52dp"
+                    android:layout_weight="1"
+                    android:text="새 Proto 동기화"
+                    android:textStyle="bold" />
+                <Space
+                    android:layout_width="7dp"
+                    android:layout_height="1dp" />
+                <Button
+                    android:id="@+id/btnProtoSyncAllHistorical"
+                    android:layout_width="0dp"
+                    android:layout_height="52dp"
+                    android:layout_weight="1"
+                    android:text="과거 Proto 전체 동기화"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="원본 .proto는 SOC·Assist·Rider/Motor Power·Torque·Cadence·Gear·고도 등을 같은 시간축에서 사용합니다. 이미 처리한 원본은 중복 학습하지 않습니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
+        </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -50,7 +127,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="정식 개인학습은 Avinox FIT + 우리 앱 주행 ZIP을 함께 넣는 검증 학습을 권장합니다. 거리·고도·파워는 FIT, 실제 SOC·모드는 ZIP을 기준으로 시간축에서 결합합니다."
+                android:text="Avinox 원본 Proto A+ 학습이 주 학습 경로입니다. 아래 FIT+ZIP 검증 학습과 FIT 단독 보조학습은 과거 자료 호환·백업용으로 유지합니다."
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
             <Button
@@ -219,7 +296,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="학습된 라이딩 · A급 / B급"
+                android:text="학습된 라이딩 · A+ / A급 / B급"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
@@ -243,7 +320,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:layout_marginBottom="24dp"
-            android:text="※ A급 검증 학습은 FIT+ZIP을 교차검사하고 SOC·모드 배터리 모델까지 학습합니다. B급 FIT 단독 보조학습은 지형/파워 특성만 보조하며 배터리 소비계수는 건드리지 않습니다. 완충 직후 100→98% SOC 구간은 A급 학습에서 자동 제외합니다."
+            android:text="※ A+ Proto 학습은 Avinox 원본의 SOC·모드·파워·토크·케이던스·기어·고도를 같은 시간축에서 사용합니다. A급 FIT+ZIP과 B급 FIT 단독은 호환/백업 경로로 유지합니다. 완충 직후 100→98% SOC 구간은 A+/A급 학습에서 자동 제외합니다."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
     </LinearLayout>

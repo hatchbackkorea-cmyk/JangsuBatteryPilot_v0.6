@@ -1,4 +1,11 @@
 
+## v0.26.1 · Proto 학습 메뉴 + 주행 UI 정리
+- `과거 라이딩 학습` 화면 최상단에 `Avinox 원본 A+ 학습` 패널을 추가했습니다.
+- Shizuku 권한, 새 Proto 동기화, 과거 Proto 전체 동기화, A+ 학습 현황을 한 화면에서 관리합니다.
+- 누적 에너지 비교의 괄호 보조값을 둘째 줄로 내려 긴 모드/총량 문구가 잘리지 않게 했습니다.
+- 메인 상단 버전 표기를 12sp bold로 확대했습니다.
+- Proto 처리 이력 보존량을 5,000개로 확대했습니다.
+
 ## v0.26.0 · Avinox 원본 A+ 자동학습
 - Shizuku를 통해 Avinox 앱의 `/Android/data/com.avinox.ride/files/ebike/data/.../cloud_ride_rec_*.proto`를 자동 수집합니다.
 - `.proto`의 실제 SOC·Assist·Rider/Motor Power·Torque·Cadence·Gear·GPS·고도를 같은 시간축으로 학습합니다.

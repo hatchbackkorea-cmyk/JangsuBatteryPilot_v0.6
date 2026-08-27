@@ -2126,7 +2126,9 @@ class MainActivity : Activity() {
     }
 
     private fun setComparisonWithProjected(view: TextView, main: String, projected: String?) {
-        val suffix = projected?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+        // v0.26.1: 긴 예상 총량 문구가 3분할 박스에서 잘리지 않도록
+        // 괄호 보조값은 항상 둘째 줄에 표시한다.
+        val suffix = projected?.takeIf { it.isNotBlank() }?.let { "\n($it)" }.orEmpty()
         val full = main + suffix
         val span = SpannableString(full)
         if (suffix.isNotEmpty()) {

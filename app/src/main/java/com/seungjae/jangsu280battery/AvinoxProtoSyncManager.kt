@@ -129,7 +129,7 @@ class AvinoxProtoSyncManager(context: Context) {
             }.isSuccess
             if (!ok) failed++
         }
-        prefs.edit().putStringSet(KEY_SEEN, seen.toList().takeLast(500).toSet()).apply()
+        prefs.edit().putStringSet(KEY_SEEN, seen.toList().takeLast(5000).toSet()).apply()
         val msg = when {
             imported>0 -> "Avinox 원본 ${imported}개 A+ 동기화 · 학습 ${learned}구간${if(failed>0) " · 실패 $failed" else ""}"
             failed>0 -> "Avinox 원본 ${failed}개 분석 실패 · 원본 형식/권한 확인 필요"

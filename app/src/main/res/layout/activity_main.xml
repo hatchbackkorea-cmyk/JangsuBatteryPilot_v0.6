@@ -9,7 +9,7 @@
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
                     <TextView android:id="@+id/tvGpsStatus" android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone"/>
-                    <TextView android:id="@+id/tvVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="v0.15.0" android:textColor="@color/text_secondary" android:textSize="9sp"/>
+                    <TextView android:id="@+id/tvVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="v0.26.1" android:textColor="@color/text_secondary" android:textSize="12sp" android:textStyle="bold"/>
                 </LinearLayout>
 
                 <TextView android:id="@+id/tvRideMode" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
@@ -135,11 +135,11 @@
                         </LinearLayout>
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="우리 예측" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-                            <TextView android:id="@+id/tvCompareModel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:maxLines="1" android:text="0%" android:textColor="@color/accent" android:textSize="19sp" android:textStyle="bold"/>
+                            <TextView android:id="@+id/tvCompareModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:maxLines="2" android:lines="2" android:text="0%" android:textColor="@color/accent" android:textSize="19sp" android:textStyle="bold"/>
                         </LinearLayout>
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Avinox" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-                            <TextView android:id="@+id/tvCompareAvinox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:maxLines="1" android:text="—" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold"/>
+                            <TextView android:id="@+id/tvCompareAvinox" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:maxLines="2" android:lines="2" android:text="—" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold"/>
                         </LinearLayout>
                     </LinearLayout>
 

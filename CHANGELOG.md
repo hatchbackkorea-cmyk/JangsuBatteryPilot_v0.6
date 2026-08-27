@@ -391,6 +391,16 @@
 - B급 FIT 단독 보조학습 및 A급 FIT+ZIP 정식학습 시 라이더 분석도 자동 누적.
 - v0.22.4의 모드별 실시간 km, 충전 계획/권장 분리, 충전 알림, A/B급 학습, Strava 기능 유지.
 
+
+## v0.26.1
+- 과거 라이딩 학습 화면 최상단에 `Avinox 원본 A+ 학습` 패널 추가
+- `Shizuku 권한 허용`, `새 Proto 동기화`, `과거 Proto 전체 동기화` 버튼 제공
+- Proto 원본 수/A+ 채택 수/총 학습거리/A+ 학습구간 현황 표시
+- 과거 전체 동기화는 이미 처리한 파일을 건너뛰고 남은 원본을 모두 수집
+- Proto 중복 처리 이력 보존량 500 → 5,000개 확대
+- 누적 에너지 비교의 예상 총량(괄호 보조값)을 항상 둘째 줄에 표시해 잘림 방지
+- 메인 상단 버전 텍스트 9sp → 12sp bold 확대
+
 ## v0.26.0
 - Shizuku UserService 기반 Avinox 원본 `cloud_ride_rec_*.proto` 자동동기화 추가
 - Android 다른 앱 `/Android/data/com.avinox.ride/...` 직접접근 제한을 Shizuku shell 권한으로 안전하게 우회
