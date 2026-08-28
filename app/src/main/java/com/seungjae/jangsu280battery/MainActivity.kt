@@ -2834,16 +2834,14 @@ class MainActivity : Activity() {
             return
         }
         val hard = AppSettings.hardReserve(this)
-        val labels = items.map { c ->
-            val safe = if (c.predictedArrivalSoc >= hard) "도달 가능" else "위험"
-            "${c.place.confidence} · $safe · ${c.place.name}\n편도 ${RideFormatter.one(c.outbound.distanceKm)}km · 도착예상 ${c.predictedArrivalSoc.roundToInt()}% · 왕복 ${RideFormatter.one(c.roundTripKm)}km\n${c.place.confidenceLabel}"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("비상 충전 후보 · 현재 ${currentSoc.roundToInt()}%")
-            .setMessage("A=등록/과거 성공 · B=충전 관련 검색 · C=편의점/카페 등 현장 확인 필요\n후보 선택 시 현재 GPX 지점을 '복귀 앵커'로 고정합니다.")
-            .setItems(labels) { _, which -> confirmEmergencyCandidate(items[which], anchor) }
-            .setNegativeButton("취소", null)
-            .show()
+        EmergencyCandidateDialog.show(
+            activity = this,
+            title = "비상 충전 후보 · 현재 ${currentSoc.roundToInt()}%",
+            intro = "A=등록/과거 성공 · B=충전 관련 검색 · C=편의점/카페 등 현장 확인 필요\n후보를 누르면 현재 GPX 지점을 '복귀 앵커'로 고정하기 전 최종 확인 화면으로 넘어갑니다.",
+            items = items,
+            hardReserve = hard,
+            onSelect = { confirmEmergencyCandidate(it, anchor) }
+        )
     }
 
     private fun confirmEmergencyCandidate(c: EvaluatedEmergencyCandidate, anchor: TrackPoint) {

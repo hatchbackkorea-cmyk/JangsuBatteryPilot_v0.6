@@ -512,6 +512,42 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="모바일 소스 배포"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="ChatGPT에서 받은 새 버전 ZIP을 휴대폰에서 바로 GitHub main에 올리고, 사인 Release APK 생성까지 확인합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnMobileRelease"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="8dp"
+                android:text="📦 새 ZIP 모바일 배포" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="GitHub token은 Android Keystore로 암호화해 이 기기에만 저장합니다. 최초 한 번만 연결하면 됩니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:text="앱 업데이트"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"

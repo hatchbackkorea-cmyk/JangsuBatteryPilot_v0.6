@@ -84,6 +84,20 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <activity
+            android:name=".ReleaseUploaderActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+        </activity>
+
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

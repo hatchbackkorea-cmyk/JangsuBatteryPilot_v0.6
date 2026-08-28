@@ -1,3 +1,15 @@
+# v0.27.0 — 모바일 원클릭 소스 배포
+
+- 설정에 `모바일 소스 배포` 메뉴 추가.
+- ChatGPT에서 받은 전체 소스 ZIP을 파일 선택 또는 Android 공유로 바로 가져옵니다.
+- `VERSION.txt`/Gradle/Manifest/소스 구조를 검사하고 전체 BatteryPilot ZIP이 아니면 배포를 차단합니다.
+- GitHub Fine-grained PAT을 Android Keystore AES/GCM으로 암호화 저장합니다.
+- GitHub Git Data API로 새 소스를 한 커밋으로 `main`에 push합니다.
+- 기존 `.github/workflows`는 기본 보존하며, 사용자가 명시적으로 켠 경우에만 workflow 파일도 갱신합니다.
+- 새 ZIP에서 삭제된 `app/`/`gradle/` 파일은 원격에서도 정리해 구버전 소스가 남는 문제를 막습니다.
+- main push 후 `auto-release-main.yml`이 만드는 signed Release를 자동 대기하고, APK가 준비되면 앱 안에서 다운로드 후 Android 설치 화면을 엽니다.
+- 같은 버전 Release 재배포, force push, keystore/JKS/APK 업로드를 차단합니다.
+
 # v0.26.7 — Registered-charge ETA timeline fix
 
 - 포인트별 ETA에서 충전 계획을 GPX POI ±200m 매칭에 의존하던 구조를 제거했습니다.
@@ -483,3 +495,11 @@
 - 후보 선택 시 시뮬레이터 내부에서만 GPX 이탈점을 고정하며 OUTBOUND → CHARGING → RETURN 3단계를 재현합니다.
 - RETURN 완료 시 왕복 소비량과 시간을 반영해 동일 이탈점에서 남은 원 코스 ETA를 다시 계산합니다.
 - 시뮬레이터는 실제 주행 로그, BatteryActualStore, RideReplanStore, Proto/FIT 학습 데이터에 쓰지 않습니다.
+
+# v0.26.9 — Emergency Candidate Selection Fix + Full Simulator Flow
+- 비상충전 후보 팝업에서 설명문과 후보 목록을 함께 넣을 때 Android AlertDialog가 후보 목록을 숨기는 문제를 수정했습니다.
+- 실제 주행과 충전 시나리오 시뮬레이터 모두 공통 후보 선택 UI를 사용하며 각 후보가 명시적인 버튼으로 표시됩니다.
+- 후보마다 A/B/C 신뢰도, 도달 가능 여부, 편도 거리/시간, 도착 예상 SOC, 왕복 거리를 표시하고 도달 가능한 최상위 후보를 추천 표시합니다.
+- 시뮬레이터는 후보 선택 후 OUTBOUND → CHARGING → RETURN → COMPLETE까지 끝까지 진행할 수 있습니다.
+- COMPLETE 상태에서 동일 GPX 이탈점 복귀 SOC/시각과 남은 원 코스 ETA 재계산 결과를 화면에 유지해 검증할 수 있습니다.
+- 시뮬레이션 데이터는 기존과 동일하게 실제 주행 로그, BatteryActualStore, RideReplanStore, Proto/FIT 학습 데이터에 기록하지 않습니다.

@@ -16,7 +16,7 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
- * v0.26.8 충전 시나리오 시뮬레이터.
+ * v0.26.9 충전 시나리오 시뮬레이터.
  * 실제 주행/실제배터리/Proto/개인학습 저장소에는 쓰지 않는다.
  * 선택 코스와 등록 충전소/학습 모델은 읽기 전용으로 사용한다.
  */
@@ -53,7 +53,7 @@ class ChargeScenarioSimulatorActivity : Activity() {
     private var simTimeMinutes = 0.0
     private var emergencyTargetPct = 70.0
 
-    private enum class SimEmergencyPhase { NONE, OUTBOUND, CHARGING, RETURN }
+    private enum class SimEmergencyPhase { NONE, OUTBOUND, CHARGING, RETURN, COMPLETE }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -320,16 +320,14 @@ class ChargeScenarioSimulatorActivity : Activity() {
             return
         }
         val hard = AppSettings.hardReserve(this)
-        val labels = items.map { c ->
-            val safe = if (c.predictedArrivalSoc >= hard) "도달 가능" else "위험"
-            "${c.place.confidence} · $safe · ${c.place.name}\n편도 ${RideFormatter.one(c.outbound.distanceKm)}km · 도착 ${c.predictedArrivalSoc.roundToInt()}% · 왕복 ${RideFormatter.one(c.roundTripKm)}km\n${c.place.confidenceLabel}"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("비상 충전 후보 · 가상 ${RideFormatter.one(anchorKm)}km")
-            .setMessage("선택해도 실제 코스 진행/주행기록에는 저장되지 않습니다. 시뮬레이터 안에서만 이탈점을 고정합니다.")
-            .setItems(labels) { _, which -> selectEmergencyCandidate(items[which], anchorKm) }
-            .setNegativeButton("취소", null)
-            .show()
+        EmergencyCandidateDialog.show(
+            activity = this,
+            title = "비상 충전 후보 · 가상 ${RideFormatter.one(anchorKm)}km",
+            intro = "A=등록/과거 성공 · B=충전 관련 검색 · C=편의점/카페 등 현장 확인 필요\n선택해도 실제 코스 진행/주행기록에는 저장되지 않습니다. 시뮬레이터 안에서만 이탈점을 고정합니다.",
+            items = items,
+            hardReserve = hard,
+            onSelect = { selectEmergencyCandidate(it, anchorKm) }
+        )
     }
 
     private fun selectEmergencyCandidate(c: EvaluatedEmergencyCandidate, anchorKm: Double) {
@@ -361,18 +359,25 @@ class ChargeScenarioSimulatorActivity : Activity() {
             SimEmergencyPhase.OUTBOUND -> "OUTBOUND · 원래 이탈점 ${RideFormatter.one(anchor)}km 고정"
             SimEmergencyPhase.CHARGING -> "CHARGING · 비상 충전 중"
             SimEmergencyPhase.RETURN -> "RETURN · 동일 이탈점 ${RideFormatter.one(anchor)}km 복귀 중"
+            SimEmergencyPhase.COMPLETE -> "COMPLETE · 동일 이탈점 복귀 + 원 코스 재계획 완료"
             else -> ""
         }
         tvEmergency.text = buildString {
             append("$phaseText\n${c.place.confidence}급 · ${c.place.name}\n")
             append("편도 ${RideFormatter.one(c.outbound.distanceKm)}km / ${c.outbound.minutes.roundToInt()}분 · 도착 예상 ${c.predictedArrivalSoc.roundToInt()}%\n")
             append("충전 목표 ${emergencyTargetPct.roundToInt()}% · 복귀 ${RideFormatter.one(c.back.distanceKm)}km / ${c.back.minutes.roundToInt()}분\n")
-            append("충전 후 반드시 ${RideFormatter.one(anchor)}km 이탈점으로 돌아온 뒤 경기코스를 재개하는 시나리오입니다.")
+            if (emergencyPhase == SimEmergencyPhase.COMPLETE) {
+                append("동일 이탈점 ${RideFormatter.one(anchor)}km 복귀 완료 · 현재 ${currentSoc().roundToInt()}% · ${formatClock(simTimeMinutes)}\n")
+                append("아래 '충전 포함 예상 시간축'은 이 SOC/시각에서 남은 원래 GPX를 다시 계산한 결과입니다.")
+            } else {
+                append("충전 후 반드시 ${RideFormatter.one(anchor)}km 이탈점으로 돌아온 뒤 경기코스를 재개하는 시나리오입니다.")
+            }
         }
         btnEmergencyStep.text = when (emergencyPhase) {
-            SimEmergencyPhase.OUTBOUND -> "1단계 · 충전소 도착 시뮬레이션"
-            SimEmergencyPhase.CHARGING -> "2단계 · 충전 완료 시뮬레이션"
-            SimEmergencyPhase.RETURN -> "3단계 · 동일 이탈점 복귀 완료"
+            SimEmergencyPhase.OUTBOUND -> "1단계 ▶ 충전소까지 이동"
+            SimEmergencyPhase.CHARGING -> "2단계 ▶ 목표 SOC까지 충전"
+            SimEmergencyPhase.RETURN -> "3단계 ▶ 원래 GPX 이탈점 복귀"
+            SimEmergencyPhase.COMPLETE -> "완료 · 비상 시뮬레이션 닫기"
             else -> "다음 단계"
         }
     }
@@ -400,11 +405,10 @@ class ChargeScenarioSimulatorActivity : Activity() {
                 seekSoc.progress = afterReturnSoc.roundToInt().coerceIn(0, 100)
                 etTime.setText(formatClock(simTimeMinutes))
                 emergencyAnchorKm?.let { seekKm.progress = (it * 10.0).roundToInt().coerceIn(0, seekKm.max) }
-                Toast.makeText(this, "동일 이탈점 복귀 완료 · 여기서 원래 GPX ETA를 다시 계산합니다.", Toast.LENGTH_LONG).show()
-                selectedEmergency = null
-                emergencyAnchorKm = null
-                emergencyPhase = SimEmergencyPhase.NONE
+                emergencyPhase = SimEmergencyPhase.COMPLETE
+                Toast.makeText(this, "동일 이탈점 복귀 완료 · 남은 원래 GPX ETA를 다시 계산했습니다.", Toast.LENGTH_LONG).show()
             }
+            SimEmergencyPhase.COMPLETE -> clearEmergency()
             else -> Unit
         }
         recalc(false)

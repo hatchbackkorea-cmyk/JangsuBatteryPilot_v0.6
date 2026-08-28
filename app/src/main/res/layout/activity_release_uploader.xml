@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="모바일 소스 배포"
+            android:textColor="@color/text_primary"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="ChatGPT에서 받은 새 버전 ZIP → GitHub main → 사인 APK → 이 앱 업데이트"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="1. GitHub 연결"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/etRepo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/release_edit_bg"
+                android:hint="owner/repository"
+                android:inputType="textUri"
+                android:singleLine="true"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary" />
+
+            <EditText
+                android:id="@+id/etBranch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/release_edit_bg"
+                android:hint="branch (기본 main)"
+                android:inputType="text"
+                android:singleLine="true"
+                android:text="main"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary" />
+
+            <EditText
+                android:id="@+id/etToken"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/release_edit_bg"
+                android:hint="Fine-grained GitHub token"
+                android:inputType="textPassword"
+                android:singleLine="true"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary" />
+
+            <CheckBox
+                android:id="@+id/cbUpdateWorkflows"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:checked="false"
+                android:text="ZIP의 .github/workflows도 업데이트"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="기본은 OFF가 안전합니다. 기존 자동 사인 Release workflow를 그대로 보존합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnTest"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="GitHub 연결 확인" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2. 새 버전 ZIP"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvZip"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="ZIP을 선택하거나 ChatGPT의 다운로드 파일을 이 앱으로 공유하세요."
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnPick"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="ZIP 선택" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3. 원클릭 배포"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnDeploy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:enabled="false"
+                android:text="GitHub main에 배포" />
+
+            <Button
+                android:id="@+id/btnCheckRelease"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:enabled="false"
+                android:text="사인 Release 상태 확인" />
+
+            <Button
+                android:id="@+id/btnInstall"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:enabled="false"
+                android:text="완성된 APK 다운로드 · 설치" />
+
+            <ProgressBar
+                android:id="@+id/progress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="10dp"
+                android:layout_marginTop="12dp"
+                android:max="100"
+                android:progress="0" />
+
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="대기 중"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/release_edit_bg"
+                android:fontFamily="monospace"
+                android:minHeight="160dp"
+                android:padding="10dp"
+                android:text=""
+                android:textColor="@color/text_secondary"
+                android:textIsSelectable="true"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="토큰은 Android Keystore로 암호화해 이 휴대폰에만 저장합니다. ZIP·토큰은 ChatGPT로 전송하지 않습니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+</ScrollView>

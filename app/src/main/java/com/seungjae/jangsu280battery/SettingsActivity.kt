@@ -224,6 +224,9 @@ class SettingsActivity : Activity() {
         findViewById<Button>(R.id.btnSramDiagnostic).setOnClickListener {
             startActivity(Intent(this, SramBleActivity::class.java))
         }
+        findViewById<Button>(R.id.btnMobileRelease).setOnClickListener {
+            startActivity(Intent(this, ReleaseUploaderActivity::class.java))
+        }
         findViewById<Button>(R.id.btnStravaSettings).setOnClickListener {
             startActivity(Intent(this, StravaActivity::class.java))
         }
