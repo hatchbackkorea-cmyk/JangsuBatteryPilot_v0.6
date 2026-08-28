@@ -35,14 +35,19 @@ class HistoricalRideActivity : Activity() {
     private lateinit var fitAuxStore: FitAuxLearningStore
     private lateinit var insightStore: RideInsightStore
     private lateinit var protoSyncManager: AvinoxProtoSyncManager
+    private lateinit var contextLearningStore: ContextualBatteryLearningStore
+    private lateinit var contextReanalysisManager: AvinoxContextReanalysisManager
 
     private lateinit var tvProtoSyncStatus: TextView
     private lateinit var tvProtoLearningStats: TextView
     private lateinit var btnProtoPermission: Button
     private lateinit var btnProtoSyncNew: Button
     private lateinit var btnProtoSyncAll: Button
+    private lateinit var tvContextLearningStats: TextView
+    private lateinit var btnContextReanalysis: Button
     private var pendingProtoSyncLimit = 8
     private var protoSyncBusy = false
+    private var contextReanalysisBusy = false
 
     private lateinit var panelAnalysis: View
     private lateinit var panelBattery: View
@@ -84,6 +89,8 @@ class HistoricalRideActivity : Activity() {
         fitAuxStore = FitAuxLearningStore(this)
         insightStore = RideInsightStore(this)
         protoSyncManager = AvinoxProtoSyncManager(this)
+        contextLearningStore = ContextualBatteryLearningStore(this)
+        contextReanalysisManager = AvinoxContextReanalysisManager(this)
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         tvProtoSyncStatus = findViewById(R.id.tvProtoSyncStatusHistorical)
@@ -91,6 +98,8 @@ class HistoricalRideActivity : Activity() {
         btnProtoPermission = findViewById(R.id.btnProtoPermissionHistorical)
         btnProtoSyncNew = findViewById(R.id.btnProtoSyncNewHistorical)
         btnProtoSyncAll = findViewById(R.id.btnProtoSyncAllHistorical)
+        tvContextLearningStats = findViewById(R.id.tvContextLearningStatsHistorical)
+        btnContextReanalysis = findViewById(R.id.btnContextReanalysisHistorical)
 
         panelAnalysis = findViewById(R.id.panelHistoricalAnalysis)
         panelBattery = findViewById(R.id.panelHistoricalBattery)
@@ -120,6 +129,7 @@ class HistoricalRideActivity : Activity() {
             pendingProtoSyncLimit = Int.MAX_VALUE
             requestOrRunProtoSync(pendingProtoSyncLimit)
         }
+        btnContextReanalysis.setOnClickListener { runContextReanalysis() }
         findViewById<Button>(R.id.btnImportVerifiedPair).setOnClickListener { pickVerifiedPair() }
         findViewById<Button>(R.id.btnImportAuxFit).setOnClickListener { pickAuxFit() }
         findViewById<Button>(R.id.btnImportFitHistory).setOnClickListener { pickFile(HistoricalSourceType.FIT) }
@@ -132,6 +142,7 @@ class HistoricalRideActivity : Activity() {
             btnProtoPermission.isEnabled = false
             btnProtoSyncNew.isEnabled = false
             btnProtoSyncAll.isEnabled = false
+            btnContextReanalysis.isEnabled = false
             findViewById<Button>(R.id.btnImportVerifiedPair).isEnabled = false
             findViewById<Button>(R.id.btnImportAuxFit).isEnabled = false
             findViewById<Button>(R.id.btnImportFitHistory).isEnabled = false
@@ -194,6 +205,26 @@ class HistoricalRideActivity : Activity() {
         }
     }
 
+    private fun runContextReanalysis() {
+        if (logManager.isActive()) {
+            Toast.makeText(this, "주행 종료 후 Avinox 원본 재해석을 실행해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (contextReanalysisBusy || protoSyncBusy) return
+        contextReanalysisBusy = true
+        refreshProtoLearningUi("저장된 Avinox 원본을 상황기반 v2로 처음부터 재해석 중…")
+        btnContextReanalysis.text = "원본 재해석 중…"
+        contextReanalysisManager.rebuildAsync { result ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                contextReanalysisBusy = false
+                btnContextReanalysis.text = "♻ 기존 Avinox 원본 전부 재해석"
+                refreshProtoLearningUi(result.message)
+                Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun refreshProtoLearningUi(extra: String? = null) {
         if (!::protoSyncManager.isInitialized) return
         val protoRecords = rideStore.records().filter { it.sourceType == HistoricalSourceType.PROTO }
@@ -210,10 +241,12 @@ class HistoricalRideActivity : Activity() {
             if (noTrainingWindow > 0) append(" · 학습구간 없음 ").append(noTrainingWindow).append("개")
             append("\n총 ").append(String.format(Locale.US, "%.1f", totalKm)).append(" km · A+ 학습 ").append(learned).append("구간")
         }
-        val idle = !logManager.isActive() && !protoSyncBusy
+        tvContextLearningStats.text = contextLearningStore.summaryText()
+        val idle = !logManager.isActive() && !protoSyncBusy && !contextReanalysisBusy
         btnProtoPermission.isEnabled = idle
         btnProtoSyncNew.isEnabled = idle && protoSyncManager.permissionGranted()
         btnProtoSyncAll.isEnabled = idle && protoSyncManager.permissionGranted()
+        btnContextReanalysis.isEnabled = idle
         btnProtoPermission.text = if (protoSyncManager.permissionGranted()) "Shizuku 권한 허용됨 ✓" else "Shizuku 권한 허용"
     }
 

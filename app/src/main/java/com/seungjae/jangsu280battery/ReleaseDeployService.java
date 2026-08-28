@@ -137,7 +137,10 @@ public class ReleaseDeployService extends Service {
                 updateState(STATE_UPLOADING, 2, "GitHub main 업로드 시작", true);
                 ReleaseGitHubApi.PushResult result = api.pushZip(repo, branch, pkg, updateWorkflows,
                         (percent, message) -> updateState(STATE_UPLOADING, percent, message, true));
-                appendLog("push 완료 · " + shortSha(result.commitSha) + " · 업로드 " + result.uploadedFiles + " · 삭제 " + result.deletedFiles);
+                appendLog("push 완료 · " + shortSha(result.commitSha)
+                        + " · 변경 업로드 " + result.uploadedFiles
+                        + " · 동일 건너뜀 " + result.skippedFiles
+                        + " · 삭제 " + result.deletedFiles);
             }
 
             if (release == null || !release.hasApk()) {

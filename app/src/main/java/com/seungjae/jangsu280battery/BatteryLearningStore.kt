@@ -47,6 +47,14 @@ data class BatteryLearningSample(
     val qualityScore: Int = 100
 )
 
+
+data class StrategyConsumptionEstimate(
+    val percent: Double,
+    val contextualBlocks: Int,
+    val fallbackBlocks: Int,
+    val averageConfidence: Int
+)
+
 class BatteryLearningStore(context: Context) {
     companion object {
         private const val PREFS = "battery_learning_v1"
@@ -69,6 +77,7 @@ class BatteryLearningStore(context: Context) {
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val assistProfiles = AvinoxAssistProfileStore(appContext)
     private val fitAuxStore = FitAuxLearningStore(appContext)
+    private val contextualV2 = ContextualBatteryLearningStore(appContext)
 
     private fun selectedMode(): AvinoxAssistMode? =
         assistProfiles.preferredMode().takeIf { assistProfiles.hasPreferredMode() }
@@ -263,6 +272,75 @@ class BatteryLearningStore(context: Context) {
         }
         return total
     }
+
+    /**
+     * v0.28.9 page-2 strategy estimator.
+     * Context-v2 is used only when the raw Avinox-derived nearest-context estimate has
+     * enough confidence. Otherwise the proven v1 terrain/mode factor is kept as fallback.
+     * Live ride prediction continues to call estimateConsumption() above.
+     */
+    fun estimateStrategyConsumption(
+        course: CourseData,
+        fromKm: Double,
+        toKm: Double,
+        mode: AvinoxAssistMode
+    ): StrategyConsumptionEstimate {
+        val start = fromKm.coerceIn(0.0, course.totalKm)
+        val end = toKm.coerceIn(start, course.totalKm)
+        if (end <= start) return StrategyConsumptionEstimate(0.0, 0, 0, 0)
+
+        val fallbackFactors = TerrainBucket.values().associateWith { learnedFactor(it, mode) }
+        var x = start
+        var total = 0.0
+        var contextualBlocks = 0
+        var fallbackBlocks = 0
+        var confidenceSum = 0
+        while (x < end - 0.0001) {
+            val nx = (x + 0.5).coerceAtMost(end)
+            val dist = nx - x
+            val elev = course.elevationBetween(x, nx)
+            val terrain = bucket(dist, elev.ascentM)
+            val grade = if (dist > 0.001) {
+                ((course.pointAtKm(nx).ele - course.pointAtKm(x).ele) / (dist * 1000.0) * 100.0).coerceIn(-30.0, 35.0)
+            } else 0.0
+            val contextEstimate = contextualV2.estimate(terrain, grade, mode)
+            if (contextEstimate != null && contextEstimate.confidence >= 35 && contextEstimate.matchCount >= 2) {
+                total += contextEstimate.pctPerKm * dist
+                contextualBlocks += 1
+                confidenceSum += contextEstimate.confidence
+            } else {
+                total += baseConsumption(dist, elev.ascentM) * (fallbackFactors[terrain] ?: 1.0)
+                fallbackBlocks += 1
+            }
+            x = nx
+        }
+        return StrategyConsumptionEstimate(
+            percent = total.coerceAtLeast(0.0),
+            contextualBlocks = contextualBlocks,
+            fallbackBlocks = fallbackBlocks,
+            averageConfidence = if (contextualBlocks > 0) confidenceSum / contextualBlocks else 0
+        )
+    }
+
+    fun strategyContextEstimate(
+        course: CourseData,
+        fromKm: Double,
+        toKm: Double,
+        mode: AvinoxAssistMode
+    ): ContextualModeEstimate? {
+        val start = fromKm.coerceIn(0.0, course.totalKm)
+        val end = toKm.coerceIn(start, course.totalKm)
+        val dist = end - start
+        if (dist <= 0.001) return null
+        val elev = course.elevationBetween(start, end)
+        val terrain = bucket(dist, elev.ascentM)
+        val grade = ((course.pointAtKm(end).ele - course.pointAtKm(start).ele) / (dist * 1000.0) * 100.0).coerceIn(-30.0, 35.0)
+        return contextualV2.estimate(terrain, grade, mode)
+    }
+
+    fun strategyContextSampleCountForMode(mode: AvinoxAssistMode): Int = contextualV2.sampleCount(mode)
+
+    fun strategyContextSummary(): String = contextualV2.summaryText()
 
     /** 앱 실주행에서 확정된 배터리 체크포인트만 학습한다. */
     fun trainFromRide(sessionId: String, course: CourseData, entries: List<ActualBatteryEntry>): Int {

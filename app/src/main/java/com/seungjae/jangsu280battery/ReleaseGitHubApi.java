@@ -17,7 +17,10 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -45,13 +48,25 @@ final class ReleaseGitHubApi {
         final String commitSha;
         final String version;
         final int uploadedFiles;
+        final int skippedFiles;
         final int deletedFiles;
 
-        PushResult(String commitSha, String version, int uploadedFiles, int deletedFiles) {
+        PushResult(String commitSha, String version, int uploadedFiles, int skippedFiles, int deletedFiles) {
             this.commitSha = commitSha;
             this.version = version;
             this.uploadedFiles = uploadedFiles;
+            this.skippedFiles = skippedFiles;
             this.deletedFiles = deletedFiles;
+        }
+    }
+
+    private static final class RemoteBlob {
+        final String sha;
+        final String mode;
+
+        RemoteBlob(String sha, String mode) {
+            this.sha = sha == null ? "" : sha;
+            this.mode = mode == null ? "" : mode;
         }
     }
 
@@ -129,6 +144,7 @@ final class ReleaseGitHubApi {
             newPaths.add(p);
         }
 
+        Map<String, RemoteBlob> remoteBlobs = new HashMap<>();
         JSONArray treeEntries = new JSONArray();
         int deletions = 0;
         if (remoteTree != null) {
@@ -136,6 +152,7 @@ final class ReleaseGitHubApi {
                 JSONObject item = remoteTree.getJSONObject(i);
                 if (!"blob".equals(item.optString("type"))) continue;
                 String path = item.optString("path");
+                remoteBlobs.put(path, new RemoteBlob(item.optString("sha"), item.optString("mode")));
                 if (shouldDeleteStale(path, newPaths, updateWorkflows)) {
                     JSONObject del = new JSONObject();
                     del.put("path", path);
@@ -148,13 +165,30 @@ final class ReleaseGitHubApi {
             }
         }
 
-        int totalUpload = newPaths.size();
-        int done = 0;
+        List<Map.Entry<String, byte[]>> changedFiles = new ArrayList<>();
+        int skipped = 0;
         for (Map.Entry<String, byte[]> e : pkg.files.entrySet()) {
             String path = e.getKey();
             if (!updateWorkflows && path.startsWith(".github/workflows/")) continue;
-            int pct = 7 + (int) Math.round((done / (double) Math.max(1, totalUpload)) * 68.0);
-            progress.onProgress(pct, String.format(Locale.KOREA, "GitHub 업로드 %d/%d · %s", done + 1, totalUpload, shorten(path)));
+            String wantedMode = executableMode(path) ? "100755" : "100644";
+            RemoteBlob remote = remoteBlobs.get(path);
+            String localSha = gitBlobSha(e.getValue());
+            if (remote != null && localSha.equalsIgnoreCase(remote.sha) && wantedMode.equals(remote.mode)) {
+                skipped++;
+            } else {
+                changedFiles.add(e);
+            }
+        }
+
+        int totalUpload = changedFiles.size();
+        progress.onProgress(7, String.format(Locale.KOREA,
+                "변경분 계산 완료 · 업로드 %d · 동일 %d · 삭제 %d", totalUpload, skipped, deletions));
+
+        int done = 0;
+        for (Map.Entry<String, byte[]> e : changedFiles) {
+            String path = e.getKey();
+            int pct = 8 + (int) Math.round((done / (double) Math.max(1, totalUpload)) * 67.0);
+            progress.onProgress(pct, String.format(Locale.KOREA, "변경 파일 업로드 %d/%d · %s", done + 1, totalUpload, shorten(path)));
 
             JSONObject blobBody = new JSONObject();
             blobBody.put("content", Base64.encodeToString(e.getValue(), Base64.NO_WRAP));
@@ -194,7 +228,7 @@ final class ReleaseGitHubApi {
         requestJson("PATCH", "/repos/" + repo + "/git/refs/heads/" + branch, patchBody, null);
 
         progress.onProgress(100, "GitHub push 완료 · Actions 사인 Release 시작");
-        return new PushResult(newCommitSha, pkg.version, done, deletions);
+        return new PushResult(newCommitSha, pkg.version, done, skipped, deletions);
     }
 
     ReleaseInfo getRelease(String repo, String version) throws Exception {
@@ -263,6 +297,21 @@ final class ReleaseGitHubApi {
                 || path.equals("VERSION.txt")
                 || path.equals("gradlew")
                 || path.equals("gradlew.bat");
+    }
+
+    private static String gitBlobSha(byte[] bytes) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-1");
+            byte[] header = ("blob " + bytes.length + "\0").getBytes(StandardCharsets.UTF_8);
+            digest.update(header);
+            digest.update(bytes);
+            byte[] hash = digest.digest();
+            StringBuilder out = new StringBuilder(hash.length * 2);
+            for (byte b : hash) out.append(String.format(Locale.US, "%02x", b & 0xff));
+            return out.toString();
+        } catch (GeneralSecurityException e) {
+            throw new IOException("Git blob 해시 계산 실패", e);
+        }
     }
 
     private static boolean executableMode(String path) {

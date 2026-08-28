@@ -353,7 +353,24 @@ class MainActivity : Activity() {
         renderRideState()
         renderAssistModeUi()
         renderCurrentMode()
+        maybeAutoReinterpretAvinoxOriginals()
         UpdateManager.maybeCheckOnLaunch(this)
+    }
+
+    private fun maybeAutoReinterpretAvinoxOriginals() {
+        if (logManager.isActive()) return
+        val manager = AvinoxContextReanalysisManager(this)
+        if (!manager.needsAutomaticRebuild()) return
+        manager.rebuildAsync { result ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                refreshLearningPage()
+                renderRideState()
+                if (result.samples > 0) {
+                    Toast.makeText(this, "기존 Avinox 원본 상황기반 v2 재해석 완료 · ${result.samples}구간", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun applySystemBarInsets() {
@@ -2011,16 +2028,22 @@ class MainActivity : Activity() {
         if (!::learningStore.isInitialized) return
         val samples = learningStore.samples()
         val rides = HistoricalRideStore(this).records()
-        tvLearningPageSummary.text = if (samples.isEmpty()) {
-            "학습 데이터 0개 · 중립 초기 모델 사용 중\n\nFIT/GPX를 학습하면 이후 선택하는 모든 GPX 코스의 거리·고도·지형을 개인 소비 특성으로 보정합니다."
+        val contextSamples = AvinoxAssistMode.values().sumOf { learningStore.strategyContextSampleCountForMode(it) }
+        tvLearningPageSummary.text = if (samples.isEmpty() && contextSamples <= 0) {
+            "학습 데이터 0개 · 중립 초기 모델 사용 중\n\nAvinox 원본 또는 FIT/GPX를 학습하면 이후 선택하는 모든 GPX 코스의 거리·고도·지형을 개인 소비 특성으로 보정합니다."
         } else {
-            "학습 라이딩 ${rides.size}개 · 학습 구간 ${samples.size}개\n${learningStore.summaryText()}\n\n현재 선택 코스: ${if (::courseMeta.isInitialized) courseMeta.name else "-"}"
+            buildString {
+                append("학습 라이딩 ${rides.size}개 · v1 구간 ${samples.size}개")
+                append("\n${learningStore.summaryText()}")
+                append("\n${learningStore.strategyContextSummary()}")
+                append("\n\n현재 선택 코스: ${if (::courseMeta.isInitialized) courseMeta.name else "-"}")
+            }
         }
         val enabled = !logManager.isActive()
         btnLearningFit.isEnabled = enabled
         btnLearningGpx.isEnabled = enabled
         btnLearningManage.isEnabled = enabled
-        btnLearningClear.isEnabled = enabled && samples.isNotEmpty()
+        btnLearningClear.isEnabled = enabled && (samples.isNotEmpty() || contextSamples > 0)
     }
 
     private fun confirmClearLearningQuick() {
@@ -2030,6 +2053,7 @@ class MainActivity : Activity() {
             .setMessage("FIT/GPX와 실제 주행에서 만든 개인 배터리 학습 데이터를 모두 삭제할까요? 코스 GPX와 주행 로그는 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
+                ContextualBatteryLearningStore(this).clear()
                 HistoricalRideStore(this).clear()
                 HistoricalRideDataStore(this).clearAll()
                 if (::course.isInitialized) {
@@ -3035,7 +3059,11 @@ class MainActivity : Activity() {
         val stopMinutes: Double,
         val finishSocPct: Double,
         val usedSpeedFallback: Boolean,
-        val batterySampleCount: Int
+        val batterySampleCount: Int,
+        val contextSampleCount: Int,
+        val contextualBlocks: Int,
+        val fallbackBatteryBlocks: Int,
+        val contextConfidence: Int
     )
 
     private fun strategyClock(totalMinutesFromNow: Double?): String {
@@ -3051,16 +3079,16 @@ class MainActivity : Activity() {
     }
 
     /**
-     * v0.28.5 모드별 전략용 이동시간.
-     * 같은 미래 GPX 블록에 대해 실제 A+/A급 모드별 속도 학습을 우선 사용한다.
-     * 해당 지형/모드 속도 표본이 없을 때만 현재 이동평균 또는 전체 학습 속도를 보조값으로 쓴다.
+     * v0.28.9 모드별 전략용 이동시간.
+     * 상황기반 v2에서 같은 경사와 가까운 Rider/Cadence 조건의 모드별 속도를 우선 사용한다.
+     * v2 표본이 부족할 때만 기존 v1 모드속도/현재 이동평균을 보조값으로 쓴다.
      */
     private fun modeStrategyTravelMinutes(
         fromKm: Double,
         toKm: Double,
         mode: AvinoxAssistMode,
         fallbackSpeedKmh: Double,
-        speedCache: MutableMap<TerrainBucket, Pair<Double?, Boolean>>
+        speedCache: MutableMap<String, Pair<Double?, Boolean>>
     ): Pair<Double?, Boolean> {
         val startKm = fromKm.coerceIn(0.0, course.totalKm)
         val endKm = toKm.coerceIn(startKm, course.totalKm)
@@ -3074,14 +3102,27 @@ class MainActivity : Activity() {
             val dist = nx - x
             val ascent = course.elevationBetween(x, nx).ascentM
             val bucket = learningStore.bucket(dist, ascent)
-            val speedInfo = speedCache.getOrPut(bucket) {
-                val exact = learningStore.learnedSpeedKphForMode(bucket, mode)?.takeIf { it >= 3.0 }
-                if (exact != null) {
-                    exact to false
+            val grade = if (dist > 0.001) {
+                ((course.pointAtKm(nx).ele - course.pointAtKm(x).ele) / (dist * 1000.0) * 100.0).coerceIn(-30.0, 35.0)
+            } else 0.0
+            val gradeBand = kotlin.math.round(grade).toInt()
+            val cacheKey = "${bucket.name}|$gradeBand"
+            val speedInfo = speedCache.getOrPut(cacheKey) {
+                val contextual = learningStore.strategyContextEstimate(course, x, nx, mode)
+                    ?.takeIf { it.confidence >= 35 && it.matchCount >= 2 }
+                    ?.speedKph
+                    ?.takeIf { it >= 3.0 }
+                if (contextual != null) {
+                    contextual to false
                 } else {
-                    val fallback = fallbackSpeedKmh.takeIf { it >= 3.0 }
-                        ?: learningStore.assistProfile(bucket, null)?.avgSpeedKph?.takeIf { it >= 3.0 }
-                    fallback to true
+                    val exact = learningStore.learnedSpeedKphForMode(bucket, mode)?.takeIf { it >= 3.0 }
+                    if (exact != null) {
+                        exact to true
+                    } else {
+                        val fallback = fallbackSpeedKmh.takeIf { it >= 3.0 }
+                            ?: learningStore.assistProfile(bucket, null)?.avgSpeedKph?.takeIf { it >= 3.0 }
+                        fallback to true
+                    }
                 }
             }
             val speed = speedInfo.first ?: return null to true
@@ -3094,7 +3135,8 @@ class MainActivity : Activity() {
 
     /**
      * 한 모드를 지금부터 고정해서 탄다고 가정한 전략 시뮬레이션.
-     * Avinox 외부 예상 소비율 숫자는 사용하지 않고 우리 모드별 학습 + GPX만 사용한다.
+     * v0.28.9부터 저장된 Avinox 원본을 재해석한 상황기반 v2를 우선 사용한다.
+     * Avinox 외부 예상 소비율 숫자는 사용하지 않는다.
      */
     private fun projectModeStrategy(
         mode: AvinoxAssistMode,
@@ -3109,16 +3151,24 @@ class MainActivity : Activity() {
         var rideMinutes: Double? = 0.0
         var stopMinutes = 0.0
         var speedFallback = false
-        val speedCache = mutableMapOf<TerrainBucket, Pair<Double?, Boolean>>()
+        val speedCache = mutableMapOf<String, Pair<Double?, Boolean>>()
         val cells = ArrayList<ModeStrategyCell>(timeline.size)
-        val modeAverageUsePerKm = if (course.totalKm > 0.1) {
-            learningStore.estimateConsumption(course, 0.0, course.totalKm, mode) / course.totalKm
-        } else 0.0
+        var contextualBlocks = 0
+        var fallbackBatteryBlocks = 0
+        var confidenceWeighted = 0
+        val fullStrategyUse = if (course.totalKm > 0.1) {
+            learningStore.estimateStrategyConsumption(course, 0.0, course.totalKm, mode)
+        } else StrategyConsumptionEstimate(0.0, 0, 0, 0)
+        val modeAverageUsePerKm = if (course.totalKm > 0.1) fullStrategyUse.percent / course.totalKm else 0.0
 
         timeline.forEach { row ->
             val targetKm = row.routeKm.coerceIn(currentKm, course.totalKm)
             if (targetKm > cursorKm + 0.001) {
-                soc -= learningStore.estimateConsumption(course, cursorKm, targetKm, mode)
+                val energy = learningStore.estimateStrategyConsumption(course, cursorKm, targetKm, mode)
+                soc -= energy.percent
+                contextualBlocks += energy.contextualBlocks
+                fallbackBatteryBlocks += energy.fallbackBlocks
+                confidenceWeighted += energy.averageConfidence * energy.contextualBlocks
                 val travel = modeStrategyTravelMinutes(cursorKm, targetKm, mode, fallbackSpeedKmh, speedCache)
                 if (rideMinutes != null && travel.first != null) rideMinutes = rideMinutes!! + travel.first!! else if (travel.first == null) rideMinutes = null
                 speedFallback = speedFallback || travel.second
@@ -3163,7 +3213,11 @@ class MainActivity : Activity() {
             stopMinutes = stopMinutes,
             finishSocPct = cells.lastOrNull()?.arrivalSocPct ?: soc,
             usedSpeedFallback = speedFallback,
-            batterySampleCount = learningStore.batterySampleCountForMode(mode)
+            batterySampleCount = learningStore.batterySampleCountForMode(mode),
+            contextSampleCount = learningStore.strategyContextSampleCountForMode(mode),
+            contextualBlocks = contextualBlocks,
+            fallbackBatteryBlocks = fallbackBatteryBlocks,
+            contextConfidence = if (contextualBlocks > 0) confidenceWeighted / contextualBlocks else 0
         )
     }
 
@@ -3226,7 +3280,7 @@ class MainActivity : Activity() {
         modes.forEach { mode ->
             val p = projections.getValue(mode)
             val selected = mode.name == selectedName
-            val sampleMark = if (p.batterySampleCount <= 0) "※" else ""
+            val sampleMark = if (p.contextSampleCount <= 0) "※" else ""
             header.addView(strategyCell(mode.name + sampleMark, 72, selected = selected, header = true, textColor = strategyModeColor(mode)))
         }
         tableModeStrategy.addView(header)
@@ -3272,16 +3326,21 @@ class MainActivity : Activity() {
         }
         tableModeStrategy.addView(summary)
 
-        val fallbackModes = modes.filter { projections.getValue(it).usedSpeedFallback || projections.getValue(it).batterySampleCount <= 0 }
+        val fallbackModes = modes.filter {
+            val p = projections.getValue(it)
+            p.usedSpeedFallback || p.contextSampleCount <= 0 || p.fallbackBatteryBlocks > 0
+        }
         val selectedText = modes.firstOrNull { it.name == selectedName }?.label?.let { " · 현재 비교 $it 열 강조" }.orEmpty()
         tvPointEtaBasis.text = buildString {
-            append("우리 GPX + 모드별 개인학습 전략")
+            append("우리 GPX + Avinox 원본 상황기반 v2 전략")
             append(selectedText)
-            append(" · 각 열은 해당 모드 고정 가정")
+            append(" · 경사/속도/Rider/Cadence를 맞춰 모드별 재해석")
             if (fallbackModes.isNotEmpty()) {
-                append("\n※ ${fallbackModes.joinToString("/") { it.label }} 일부 학습 부족: 현재 이동평균/전체 학습을 시간 보조값으로 사용")
+                append("\n※ ${fallbackModes.joinToString("/") { it.label }} 일부 구간은 v2 표본 부족으로 기존 v1/이동속도 보조값 사용")
             } else {
-                append(" · A+ 원본/검증 학습 속도·SOC 사용")
+                val avgConfidence = modes.map { projections.getValue(it).contextConfidence }.filter { it > 0 }.average().takeIf { !it.isNaN() }?.roundToInt()
+                append(" · 전 구간 v2")
+                if (avgConfidence != null) append(" 신뢰도 약 ${avgConfidence}%")
             }
         }
     }

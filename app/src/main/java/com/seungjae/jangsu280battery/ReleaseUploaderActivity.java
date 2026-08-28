@@ -235,8 +235,8 @@ public class ReleaseUploaderActivity extends Activity {
         String msg = "저장소: " + repo() + "\n"
                 + "브랜치: " + branch() + "\n"
                 + "배포 버전: v" + selectedPackage.version + "\n"
-                + "파일: " + selectedPackage.files.size() + "개\n\n"
-                + "GitHub main을 이 소스로 갱신합니다. 성공하면 기존 auto-release-main workflow가 사인 APK를 자동 생성합니다."
+                + "ZIP 파일: " + selectedPackage.files.size() + "개\n\n"
+                + "원격 main과 비교해 변경된 파일만 업로드합니다. 성공하면 기존 auto-release-main workflow가 사인 APK를 자동 생성합니다."
                 + (cbUpdateWorkflows.isChecked() ? "\n\n⚠ workflow 파일도 이번 ZIP 내용으로 업데이트합니다." : "\n\nworkflow 파일은 기존 것을 보존합니다.");
 
         new AlertDialog.Builder(this)
@@ -286,6 +286,7 @@ public class ReleaseUploaderActivity extends Activity {
             btnInstall.setEnabled(false);
             setStatus(1, "백그라운드 배포 시작 · 화면을 나가도 계속됩니다");
             appendLog("v" + selectedPackage.version + " foreground 배포 서비스 시작");
+            appendLog("원격 main과 Git blob SHA를 비교해 변경 파일만 전송합니다.");
             appendLog("앱을 닫거나 화면을 잠가도 GitHub push → Actions 대기 → APK 다운로드까지 계속됩니다.");
             setBusy(true);
         } catch (Exception e) {

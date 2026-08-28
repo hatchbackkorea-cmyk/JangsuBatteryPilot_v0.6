@@ -1,3 +1,29 @@
+# v0.28.9 — Avinox 원본 상황기반 v2 재해석
+- 저장된 Avinox 원본 `.proto`를 다시 읽어 기존 평균계수와 분리된 `상황기반 v2` 학습 모델을 새로 구축.
+- 실제 SOC 1% 경계 중 하나의 Assist 모드가 끝까지 유지된 구간만 채택하고, 100% 완충 plateau/충전/정차·센서공백/저품질 구간은 제외.
+- 각 학습구간에 경사, 속도, Rider Power, Motor Power, Cadence, 실제 ECO/AUTO/TRAIL/TURBO, SOC 소비율을 같은 시간축으로 보존.
+- 2페이지 `모드별 주행 전략`은 v2의 같은 지형·가까운 속도·공통 Rider/Cadence 조건의 유사구간을 우선 사용하고, 표본 신뢰도가 부족한 블록만 기존 v1 모드별 지형계수로 fallback.
+- 모드별 이동시간도 v2의 경사 매칭 속도를 우선 사용하고, 부족 시 기존 v1/현재 이동평균을 보조값으로 사용.
+- 기존 v1 배터리 학습은 삭제하거나 덮어쓰지 않으며 실제 주행 SOC 예측 코어도 그대로 유지. v2는 우선 2페이지 전략 시뮬레이션에만 적용.
+- 앱 업데이트 후 내부에 저장된 Avinox 원본이 있으면 v2 스키마 전환을 백그라운드에서 1회 자동 재해석(반복 실행 방지 마커 저장). `과거 라이딩 학습` 화면에서 `기존 Avinox 원본 전부 재해석`을 눌러 언제든 다시 구축 가능.
+- 이후 새 Avinox Proto 자동동기화 시 v1 A+ 학습과 동시에 상황기반 v2 학습도 추가.
+- 모바일 변경분 업로드, signed Release, FileProvider 설치 수정, BLE/충전/주행 로직은 유지.
+
+# v0.28.8 — 모바일 배포 변경분 업로드 최적화
+- 전체 ZIP 파일을 매번 GitHub blob으로 다시 올리던 오래된 비효율을 수정.
+- 원격 `main` recursive tree의 blob SHA/mode와 로컬 ZIP 각 파일의 Git blob SHA-1/mode를 비교해 동일 파일은 업로드하지 않음.
+- 실제 변경/추가된 파일만 `POST /git/blobs` 후 새 tree에 반영하고, 삭제 대상은 기존 안전 정책대로 처리.
+- `.github/workflows` 업데이트 OFF면 workflow 파일은 비교/업로드/삭제 대상에서 계속 제외해 기존 signed Release workflow를 보존.
+- 배포 진행 문구와 완료 로그에 `변경 업로드 / 동일 건너뜀 / 삭제` 개수를 표시.
+- 변경 파일이 없어도 release 트리거가 필요한 경우 새 commit/branch update 흐름은 유지.
+- 배터리 예측, 주행, BLE, 충전, FileProvider 설치 로직은 변경 없음.
+
+# v0.28.7 — 배경 배포 APK 재설치 FileProvider 수정
+- 오래된 버그 수정: 백그라운드 `ReleaseDeployService`가 `files/release_apk/`에 저장한 signed APK를 배포 페이지의 `완성된 APK 설치` 버튼으로 다시 열 때 `Failed to find configured root`가 발생하던 문제 수정.
+- `FileProvider` 경로에 내부 files 디렉터리의 `release_apk/`를 명시적으로 허용.
+- 배포 직후 cache 기반 설치, 배경 배포 완료 후 files 기반 재설치, 일반 업데이트 external-files 기반 설치 세 경로를 모두 유지.
+- GitHub 업로드/Release workflow, 서명, 배터리 예측/주행 로직에는 변경 없음.
+
 # v0.28.6 — 충전 정차시간 + 출발시각 전략표
 - 2페이지 모드별 주행 전략 테이블의 각 충전 포인트에 모드별 `정차 N분`과 `출발 HH:mm`을 추가.
 - 도착시각은 충전 시작 전 시각, 출발시각은 해당 모드의 도착 SOC에서 사용자 충전 목표 SOC까지 Avinox 충전곡선을 적용한 뒤의 시각으로 계산.

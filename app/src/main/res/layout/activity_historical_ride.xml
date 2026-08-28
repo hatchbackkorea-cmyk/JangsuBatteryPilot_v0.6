@@ -101,6 +101,32 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/tvContextLearningStatsHistorical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="9dp"
+                android:text="상황기반 v2 재해석 없음"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnContextReanalysisHistorical"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="7dp"
+                android:text="♻ 기존 Avinox 원본 전부 재해석"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="v2는 저장된 원본을 다시 읽어 경사·속도·Rider Power·Cadence·실제 Assist 모드를 SOC 소비구간과 묶습니다. 기존 v1 학습값은 보존하며 2페이지 모드별 주행전략에서 v2를 우선 사용합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
+
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
