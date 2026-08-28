@@ -261,6 +261,10 @@
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="11dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="포인트별 예상 도착시각" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold"/>
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal" android:baselineAligned="false">
+                        <TextView android:id="@+id/tvPointEtaRideTime" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="start" android:text="주행 -" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold"/>
+                        <TextView android:id="@+id/tvPointEtaStopTime" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="end" android:text="정차 0분" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold"/>
+                    </LinearLayout>
                     <TextView android:id="@+id/tvPointEtaBasis" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="주행시간 + 계획 충전시간을 포함해 자동 계산" android:textColor="@color/text_secondary" android:textSize="11sp"/>
                     <TextView android:id="@+id/tvPointEtaList" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:lineSpacingExtra="3dp" android:text="포인트 ETA 준비 중" android:textColor="@color/text_primary" android:textSize="13sp"/>
                 </LinearLayout>

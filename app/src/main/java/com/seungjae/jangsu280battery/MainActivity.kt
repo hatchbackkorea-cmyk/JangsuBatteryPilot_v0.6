@@ -133,6 +133,8 @@ class MainActivity : Activity() {
     private lateinit var tvNextPoi: TextView
     private lateinit var tvPointEtaList: TextView
     private lateinit var tvPointEtaBasis: TextView
+    private lateinit var tvPointEtaRideTime: TextView
+    private lateinit var tvPointEtaStopTime: TextView
     private lateinit var tvVersion: TextView
     private lateinit var profileView: ElevationProfileView
     private lateinit var btnRideReport: Button
@@ -402,6 +404,8 @@ class MainActivity : Activity() {
         tvNextPoi = findViewById(R.id.tvNextPoi)
         tvPointEtaList = findViewById(R.id.tvPointEtaList)
         tvPointEtaBasis = findViewById(R.id.tvPointEtaBasis)
+        tvPointEtaRideTime = findViewById(R.id.tvPointEtaRideTime)
+        tvPointEtaStopTime = findViewById(R.id.tvPointEtaStopTime)
         tvVersion = findViewById(R.id.tvVersion)
         profileView = findViewById(R.id.profileView)
         btnRideReport = findViewById(R.id.btnRideReport)
@@ -2804,6 +2808,35 @@ class MainActivity : Activity() {
         }
     }
 
+    /** v0.27.6: ETA 카드 상단의 주행/정차 요약 시간을 같은 형식으로 표시한다. */
+    private fun compactHoursMinutes(totalMinutes: Double): String {
+        val minutes = totalMinutes.coerceAtLeast(0.0).roundToInt()
+        val h = minutes / 60
+        val m = minutes % 60
+        return if (h > 0) "${h}시간 ${m}분" else "${m}분"
+    }
+
+    /**
+     * v0.27.6: 현재 위치부터 종점까지 남은 순수 주행시간과 계획상 정차시간을 분리해 보여준다.
+     * 정차시간은 완료/생략된 충전은 제외하고 현재 충전 중이면 남은 충전시간만 반영한다.
+     * 식사와 충전이 동시에 이뤄지는 지점은 현재 계획 데이터상 충전 정차시간으로 포함된다.
+     */
+    private fun renderPointEtaDurationSummary(km: Double, speedKmh: Double, context: EtaChargeContext) {
+        val remainKm = (course.totalKm - km).coerceAtLeast(0.0)
+        val rideMinutes = if (speedKmh >= 3.0) remainKm / speedKmh * 60.0 else null
+        val stopMinutes = basePlan.checkpoints
+            .asSequence()
+            .filter { it.chargeToPct != null && it.km >= km - 0.18 }
+            .sumOf { remainingChargeMinutesAt(it, km, context) }
+
+        tvPointEtaRideTime.text = if (rideMinutes != null) {
+            "주행 ${compactHoursMinutes(rideMinutes)}"
+        } else {
+            "주행 계산 중"
+        }
+        tvPointEtaStopTime.text = "정차 ${compactHoursMinutes(stopMinutes)}"
+    }
+
     /**
      * 선택 GPX의 남은 모든 waypoint/POI를 한 번에 보여준다.
      * 등록 충전소는 ◆, GPX 보급계열 POI는 ◇, 일반 POI는 • 로 구분한다.
@@ -2820,6 +2853,8 @@ class MainActivity : Activity() {
      * 따라서 등록 충전소가 GPX 보급 waypoint와 조금 어긋나 있어도 모든 충전시간이 표시/누적된다.
      */
     private fun renderPointEtas(km: Double, speedKmh: Double, context: EtaChargeContext) {
+        renderPointEtaDurationSummary(km, speedKmh, context)
+
         val upcomingPois = course.pois
             .asSequence()
             .filter { it.routeKm >= km - 0.05 }
