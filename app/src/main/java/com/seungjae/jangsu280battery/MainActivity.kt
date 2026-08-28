@@ -3,6 +3,9 @@ package com.seungjae.jangsu280battery
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
+import android.graphics.Color
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,11 +14,15 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.provider.OpenableColumns
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
@@ -100,6 +107,13 @@ class MainActivity : Activity() {
     private lateinit var switchRideTestMode: Switch
     private lateinit var rideMiniProfileView: ElevationProfileView
     private lateinit var seekRideRoute: ChargeDistanceSeekBar
+    private lateinit var pageRideRoot: LinearLayout
+    private lateinit var layoutRideWarningBanner: LinearLayout
+    private lateinit var tvRideWarningTitle: TextView
+    private lateinit var tvRideWarningReason: TextView
+    private lateinit var layoutRideReachMargins: LinearLayout
+    private lateinit var tvSafeReachMargin: TextView
+    private lateinit var tvHardReachMargin: TextView
     private lateinit var tvRiskStatus: TextView
     private lateinit var tvRiskDetail: TextView
     private lateinit var tvActualBattery: TextView
@@ -203,6 +217,9 @@ class MainActivity : Activity() {
     private var refreshingSettingsUi = false
     private var refreshingRideControls = false
     private var emergencySearchRunning = false
+
+    private enum class RideWarningStage { NONE, CHARGE_IMMINENT, ECO_CONNECT, EMERGENCY, HARD_RESERVE }
+    private var lastRideWarningKey: String = ""
 
     private val rideReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -359,6 +376,13 @@ class MainActivity : Activity() {
         switchRideTestMode = findViewById(R.id.switchRideTestMode)
         rideMiniProfileView = findViewById(R.id.rideMiniProfileView)
         seekRideRoute = findViewById(R.id.seekRideRoute)
+        pageRideRoot = findViewById(R.id.pageRideRoot)
+        layoutRideWarningBanner = findViewById(R.id.layoutRideWarningBanner)
+        tvRideWarningTitle = findViewById(R.id.tvRideWarningTitle)
+        tvRideWarningReason = findViewById(R.id.tvRideWarningReason)
+        layoutRideReachMargins = findViewById(R.id.layoutRideReachMargins)
+        tvSafeReachMargin = findViewById(R.id.tvSafeReachMargin)
+        tvHardReachMargin = findViewById(R.id.tvHardReachMargin)
         tvRiskStatus = findViewById(R.id.tvRiskStatus)
         tvRiskDetail = findViewById(R.id.tvRiskDetail)
         tvActualBattery = findViewById(R.id.tvActualBattery)
@@ -1498,9 +1522,7 @@ class MainActivity : Activity() {
         seekRideRoute.setRouteKm(km)
         seekRideRoute.setUserSeekingEnabled(testMode)
 
-        val nextCharge = basePlan.checkpoints.firstOrNull { cp ->
-            cp.chargeToPct != null && cp.km > km + 0.08 && !replanStore.isSkipped(courseMeta.id, cp.km)
-        }
+        val nextCharge = activePlannedChargeCheckpoints().firstOrNull { it.km > km + 0.08 }
         val targetKm = nextCharge?.km ?: course.totalKm
         val remain = (targetKm - km).coerceAtLeast(0.0)
         val prefix = if (simulated) "테스트" else "거리"
@@ -1508,6 +1530,225 @@ class MainActivity : Activity() {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 다음충전 ${RideFormatter.one(nextCharge.km)} · ${RideFormatter.one(remain)}km 남음"
         } else {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 종점 ${RideFormatter.one(course.totalKm)} · ${RideFormatter.one(remain)}km 남음"
+        }
+    }
+
+    /** v0.27.4: skipped stations are not segment boundaries on the live mini profile. */
+    private fun activePlannedChargeCheckpoints(): List<Checkpoint> = basePlan.checkpoints
+        .filter { it.chargeToPct != null && !replanStore.isSkipped(courseMeta.id, it.km) }
+        .sortedBy { it.km }
+
+    /**
+     * v0.27.5
+     * - Test mode keeps the whole GPX.
+     * - Real riding zooms to the current charge-to-charge leg + a small look-ahead after the next station.
+     * - The blue line is ALWAYS the reach limit at the normal reserve target (default 15%).
+     * - The red line is the last-resort hard-reserve reach (default 7%) and appears only when
+     *   a planned charge is imminent or the replan logic is already in ECO/emergency territory.
+     */
+    private fun renderRideMiniProfileContext(km: Double, simulated: Boolean, context: EtaChargeContext) {
+        if (!::course.isInitialized) return
+        rideMiniProfileView.setCurrentKm(km)
+
+        val charges = activePlannedChargeCheckpoints()
+        val next = charges.firstOrNull { it.km > km + 0.08 }
+        val targetKm = next?.km ?: course.totalKm
+
+        if (simulated || !logManager.isActive()) {
+            rideMiniProfileView.setWindow(null, null)
+        } else {
+            val previousKm = charges.lastOrNull { it.km <= km + 0.12 }?.km ?: 0.0
+            val followingKm = charges.firstOrNull { it.km > targetKm + 0.08 }?.km ?: course.totalKm
+            val availableAfterTarget = (followingKm - targetKm).coerceAtLeast(0.0)
+            val extraAfterTarget = if (next != null && availableAfterTarget > 0.05) {
+                (availableAfterTarget * 0.20).coerceIn(2.0, 5.0).coerceAtMost(availableAfterTarget)
+            } else 0.0
+            val windowEnd = (targetKm + extraAfterTarget).coerceAtMost(course.totalKm)
+            rideMiniProfileView.setWindow(previousKm, windowEnd)
+        }
+
+        layoutRideReachMargins.visibility = View.VISIBLE
+        val visualSoc = if (simulated) plan.estimate(km).percent else currentSocForReplan(km)
+        val hard = AppSettings.hardReserve(this)
+        val decision = computeReplanDecision(km, context, visualSoc)
+        val nextChargeRemainKm = next?.let { (it.km - km).coerceAtLeast(0.0) }
+        val chargeImminent = nextChargeRemainKm != null && nextChargeRemainKm <= 5.0
+        val emergencyActive = replanStore.active(courseMeta.id) != null
+
+        val recommendedReachKm = operationalReachLimitKm(km, visualSoc, finishTargetPct)
+        val showHard = chargeImminent ||
+            decision.kind == ReplanDecisionKind.ECO_CONNECT ||
+            decision.kind == ReplanDecisionKind.EMERGENCY ||
+            emergencyActive ||
+            visualSoc <= hard + 0.5
+        val hardReachKm = if (showHard) operationalReachLimitKm(km, visualSoc, hard.toDouble()) else null
+        rideMiniProfileView.setReachLimits(recommendedReachKm, hardReachKm)
+        renderReachMarginText(next, recommendedReachKm, hardReachKm, hard)
+    }
+
+    private fun renderReachMarginText(next: Checkpoint?, recommendedReachKm: Double, hardReachKm: Double?, hardReserve: Int) {
+        fun signed(delta: Double): String = "${if (delta >= 0.0) "+" else ""}${RideFormatter.one(delta)}km"
+        if (next != null) {
+            tvSafeReachMargin.text = "안전 ${finishTargetPct.roundToInt()}% · 다음충전 ${signed(recommendedReachKm - next.km)}"
+            if (hardReachKm != null) {
+                tvHardReachMargin.visibility = View.VISIBLE
+                tvHardReachMargin.text = "하드 ${hardReserve}% · ${signed(hardReachKm - next.km)}"
+            } else {
+                tvHardReachMargin.visibility = View.GONE
+            }
+        } else {
+            val remainToFinish = course.totalKm - recommendedReachKm
+            tvSafeReachMargin.text = if (remainToFinish <= 0.05) {
+                "안전 ${finishTargetPct.roundToInt()}% · 종점 도달"
+            } else {
+                "안전 ${finishTargetPct.roundToInt()}% · 종점 -${RideFormatter.one(remainToFinish)}km"
+            }
+            if (hardReachKm != null) {
+                val hardRemain = course.totalKm - hardReachKm
+                tvHardReachMargin.visibility = View.VISIBLE
+                tvHardReachMargin.text = if (hardRemain <= 0.05) "하드 ${hardReserve}% · 종점 도달" else "하드 ${hardReserve}% · -${RideFormatter.one(hardRemain)}km"
+            } else {
+                tvHardReachMargin.visibility = View.GONE
+            }
+        }
+    }
+
+    /**
+     * Farthest GPX km reachable from current SOC while preserving the requested reserve.
+     * Intermediate planned charging is deliberately ignored: this answers "with the battery I have now, how far?".
+     */
+    private fun operationalReachLimitKm(currentKm: Double, currentSoc: Double, reservePct: Double): Double {
+        val start = currentKm.coerceIn(0.0, course.totalKm)
+        val usablePct = (currentSoc - reservePct).coerceAtLeast(0.0)
+        if (usablePct <= 0.01) return start
+        val factor = (plan.calibration(start)?.factor ?: 1.0).coerceIn(0.65, 1.65)
+        fun useTo(km: Double): Double = basePlan.internalConsumption(start, km.coerceIn(start, course.totalKm)) * factor
+        if (useTo(course.totalKm) <= usablePct) return course.totalKm
+
+        var lo = start
+        var hi = course.totalKm
+        repeat(28) {
+            val mid = (lo + hi) / 2.0
+            if (useTo(mid) <= usablePct) lo = mid else hi = mid
+        }
+        return lo.coerceIn(start, course.totalKm)
+    }
+
+    private fun renderRideVisualWarning(km: Double, simulated: Boolean, context: EtaChargeContext) {
+        if ((!simulated && !logManager.isActive()) || context.activeCharge != null) {
+            hideRideVisualWarning()
+            return
+        }
+
+        val visualSoc = if (simulated) plan.estimate(km).percent else currentSocForReplan(km)
+        val hard = AppSettings.hardReserve(this)
+        val decision = computeReplanDecision(km, context, visualSoc)
+        val charges = activePlannedChargeCheckpoints()
+        val nextCharge = charges.firstOrNull { it.km > km + 0.08 }
+        val remain = nextCharge?.let { (it.km - km).coerceAtLeast(0.0) }
+        val emergencySession = replanStore.active(courseMeta.id)
+
+        val stage = when {
+            visualSoc <= hard + 0.5 -> RideWarningStage.HARD_RESERVE
+            emergencySession != null || decision.kind == ReplanDecisionKind.EMERGENCY -> RideWarningStage.EMERGENCY
+            decision.kind == ReplanDecisionKind.ECO_CONNECT -> RideWarningStage.ECO_CONNECT
+            remain != null && remain <= 5.0 -> RideWarningStage.CHARGE_IMMINENT
+            else -> RideWarningStage.NONE
+        }
+        if (stage == RideWarningStage.NONE) {
+            hideRideVisualWarning()
+            return
+        }
+
+        val target = decision.target ?: nextCharge
+        val prefix = if (simulated) "테스트 · " else ""
+        when (stage) {
+            RideWarningStage.CHARGE_IMMINENT -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_orange_bg)
+                tvRideWarningTitle.text = "${prefix}⚠ 충전 임박"
+                tvRideWarningReason.text = if (decision.kind == ReplanDecisionKind.SKIP_AVAILABLE && decision.skipNextTarget != null) {
+                    "${nextCharge?.name ?: "충전소"} ${RideFormatter.one(remain ?: 0.0)}km · 현재 계산상 충전 생략 가능"
+                } else {
+                    "${nextCharge?.name ?: "다음 충전소"} ${RideFormatter.one(remain ?: 0.0)}km · 파란 안전선과 충전소 위치를 확인하세요."
+                }
+            }
+            RideWarningStage.ECO_CONNECT -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_orange_bg)
+                tvRideWarningTitle.text = "${prefix}⚠ 충전 권장 · ECO 연결"
+                tvRideWarningReason.text = "${target?.name ?: "다음 지점"} 도착예상 ${decision.predictedPct.roundToInt()}% · 안전 기준 ${finishTargetPct.roundToInt()}% 아래"
+            }
+            RideWarningStage.EMERGENCY -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_red_bg)
+                tvRideWarningTitle.text = "${prefix}🚨 긴급 충전"
+                tvRideWarningReason.text = emergencySession?.let {
+                    "${it.candidateName} 비상 절차 진행 중 · 하드 리저브 ${hard}% 빨간선을 넘기지 마세요."
+                } ?: "${target?.name ?: "다음 지점"} 도착예상 ${decision.predictedPct.roundToInt()}% · 하드 리저브 ${hard}% 미만"
+            }
+            RideWarningStage.HARD_RESERVE -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_hard_bg)
+                tvRideWarningTitle.text = "${prefix}🚨 하드 리저브 진입"
+                tvRideWarningReason.text = "현재 ${visualSoc.roundToInt()}% · 하드 리저브 ${hard}% · 주행 연장보다 즉시 충전을 우선하세요."
+            }
+            else -> Unit
+        }
+        layoutRideWarningBanner.visibility = View.VISIBLE
+
+        val warningKey = "${stage.name}:${target?.km?.let { (it * 10).roundToInt() } ?: -1}"
+        if (warningKey != lastRideWarningKey) {
+            lastRideWarningKey = warningKey
+            when (stage) {
+                RideWarningStage.CHARGE_IMMINENT, RideWarningStage.ECO_CONNECT -> pulseWarningBanner(strong = false)
+                RideWarningStage.EMERGENCY -> {
+                    pulseWarningBanner(strong = true)
+                    flashRidePage(getColor(R.color.danger), strong = false)
+                    if (!simulated) vibrateRideWarning(260L, 170)
+                }
+                RideWarningStage.HARD_RESERVE -> {
+                    pulseWarningBanner(strong = true)
+                    flashRidePage(getColor(R.color.danger), strong = true)
+                    if (!simulated) vibrateRideWarning(500L, 230)
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun hideRideVisualWarning() {
+        layoutRideWarningBanner.visibility = View.GONE
+        layoutRideWarningBanner.clearAnimation()
+        pageRideRoot.setBackgroundColor(Color.TRANSPARENT)
+        lastRideWarningKey = ""
+    }
+
+    private fun pulseWarningBanner(strong: Boolean) {
+        layoutRideWarningBanner.clearAnimation()
+        val pulse = AlphaAnimation(if (strong) 0.28f else 0.55f, 1f).apply {
+            duration = if (strong) 280L else 360L
+            repeatMode = Animation.REVERSE
+            repeatCount = if (strong) 3 else 2
+        }
+        layoutRideWarningBanner.startAnimation(pulse)
+    }
+
+    private fun flashRidePage(color: Int, strong: Boolean) {
+        val alpha = if (strong) 105 else 55
+        val flash = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+        ValueAnimator.ofObject(ArgbEvaluator(), Color.TRANSPARENT, flash, Color.TRANSPARENT).apply {
+            duration = if (strong) 900L else 700L
+            repeatCount = if (strong) 1 else 0
+            addUpdateListener { pageRideRoot.setBackgroundColor(it.animatedValue as Int) }
+            start()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun vibrateRideWarning(durationMs: Long, amplitude: Int) {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+        if (!vibrator.hasVibrator()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(durationMs, amplitude.coerceIn(1, 255)))
+        } else {
+            vibrator.vibrate(durationMs)
         }
     }
 
@@ -2365,6 +2606,8 @@ class MainActivity : Activity() {
         // 한 화면 갱신 동안 실제배터리/충전상태를 한 번만 읽어 ETA 다중 포인트 계산이 UI를 무겁게 하지 않게 한다.
         val etaContext = etaChargeContext()
         renderReplanDecision(km, etaContext)
+        renderRideMiniProfileContext(km, simulated, etaContext)
+        renderRideVisualWarning(km, simulated, etaContext)
         val remainFinish = (course.totalKm - km).coerceAtLeast(0.0)
         tvSpeed.text = if (latestSpeedKmh >= 2.0) "속도 ${RideFormatter.one(latestSpeedKmh)}km/h" else "속도 -"
         tvFinishEta.text = "종점 ${RideFormatter.one(remainFinish)}km · ${chargeAwareEtaClock(km, course.totalKm, etaSpeed, etaContext)}"
@@ -2696,9 +2939,9 @@ class MainActivity : Activity() {
         return soc.coerceIn(0.0, 100.0)
     }
 
-    private fun computeReplanDecision(km: Double, context: EtaChargeContext): ReplanDecision {
+    private fun computeReplanDecision(km: Double, context: EtaChargeContext, currentSocOverride: Double? = null): ReplanDecision {
         val hard = AppSettings.hardReserve(this)
-        val soc = currentSocForReplan(km)
+        val soc = (currentSocOverride ?: currentSocForReplan(km)).coerceIn(0.0, 100.0)
         val target = nextReplanTarget(km)
             ?: return ReplanDecision(ReplanDecisionKind.NORMAL, null, soc, hard)
         val predicted = replannedProjectedSoc(km, target.km, soc, context)
@@ -3038,6 +3281,8 @@ class MainActivity : Activity() {
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
         rideMiniProfileView.visibility = View.GONE
+        layoutRideReachMargins.visibility = View.GONE
+        hideRideVisualWarning()
         seekRideRoute.visibility = View.GONE
         tvRideRouteScale.text = "임의주행 · GPX/충전소 거리축 없음"
         switchRideTestMode.visibility = View.GONE
