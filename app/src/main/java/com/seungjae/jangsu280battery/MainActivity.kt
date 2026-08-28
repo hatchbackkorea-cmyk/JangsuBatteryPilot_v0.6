@@ -14,17 +14,21 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.provider.OpenableColumns
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.view.WindowManager
 import android.widget.Button
+import android.media.AudioManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -177,6 +181,22 @@ class MainActivity : Activity() {
     private lateinit var tvPagerIndicator: TextView
     private lateinit var pagerGesture: GestureDetector
 
+    // v0.28.1 rain / touch-lock controller.
+    // Unlocked: volume buttons keep their normal media-volume role.
+    // Locked: VOL+ short = next page, VOL- short = previous page.
+    // VOL- long (1.5s) toggles touch lock in either state.
+    private var touchLocked = false
+    private val volumeKeyHandler = Handler(Looper.getMainLooper())
+    private var volumeDownPressedAtMs = 0L
+    private var volumeDownLongHandled = false
+    private val touchLockPrefs by lazy { getSharedPreferences("rain_touch_lock", Context.MODE_PRIVATE) }
+    private val touchLockLongPress = Runnable {
+        if (volumeDownPressedAtMs > 0L && !volumeDownLongHandled) {
+            volumeDownLongHandled = true
+            setTouchLocked(!touchLocked, announce = true)
+        }
+    }
+
     private var latestRouteKm = 0.0
     private var latestOffCourseM = 0.0
     private var latestAccuracyM = -1f
@@ -317,6 +337,8 @@ class MainActivity : Activity() {
         setupLearningPage()
         setupMobileReleasePage()
         setupSwipePager()
+        touchLocked = touchLockPrefs.getBoolean("locked", false)
+        updatePagerIndicator()
 
         renderCourseQuick()
         refreshRidePositionControls()
@@ -2349,6 +2371,9 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Rain mode: consume every app touch while locked. GPS/BLE/ride services keep running.
+        if (touchLocked) return true
+
         val settingsSliderTouch = ::pagerFlipper.isInitialized && pagerFlipper.displayedChild == 2 && listOf(
             seekPageDistanceInterval, seekPageTimeInterval, seekPageFinishTarget, seekPageHardReserve
         ).any { isTouchInside(ev, it) }
@@ -2356,6 +2381,71 @@ class MainActivity : Activity() {
             ::seekRideRoute.isInitialized && isTouchInside(ev, seekRideRoute)
         if (::pagerGesture.isInitialized && !settingsSliderTouch && !rideTestSliderTouch) pagerGesture.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        if (event.repeatCount == 0) {
+                            volumeDownPressedAtMs = System.currentTimeMillis()
+                            volumeDownLongHandled = false
+                            volumeKeyHandler.removeCallbacks(touchLockLongPress)
+                            volumeKeyHandler.postDelayed(touchLockLongPress, 1500L)
+                        }
+                        // Consume VOL- so long press can be distinguished from a short press.
+                        return true
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        volumeKeyHandler.removeCallbacks(touchLockLongPress)
+                        val wasLong = volumeDownLongHandled
+                        volumeDownPressedAtMs = 0L
+                        volumeDownLongHandled = false
+                        if (!wasLong) {
+                            if (touchLocked) {
+                                showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
+                                vibrateRideWarning(45L, 85)
+                            } else {
+                                adjustMediaVolume(AudioManager.ADJUST_LOWER)
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                if (touchLocked) {
+                    if (event.action == KeyEvent.ACTION_UP && event.repeatCount == 0) {
+                        showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
+                        vibrateRideWarning(45L, 85)
+                    }
+                    return true
+                }
+                // Unlocked VOL+ stays a normal Android volume key.
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun adjustMediaVolume(direction: Int) {
+        val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+    }
+
+    private fun setTouchLocked(locked: Boolean, announce: Boolean) {
+        touchLocked = locked
+        touchLockPrefs.edit().putBoolean("locked", locked).apply()
+        updatePagerIndicator()
+        if (announce) {
+            vibrateRideWarning(if (locked) 140L else 90L, if (locked) 180 else 120)
+            Toast.makeText(
+                this,
+                if (locked) "🔒 터치 잠금 · VOL+ 다음 / VOL- 이전 · VOL- 길게 해제"
+                else "🔓 터치 사용 · 볼륨 버튼 정상",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     private fun isTouchInside(ev: MotionEvent, view: View): Boolean {
@@ -2376,7 +2466,12 @@ class MainActivity : Activity() {
     private fun updatePagerIndicator() {
         val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배포")
         val dots = (0..5).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
-        tvPagerIndicator.text = "$dots   ${labels[pagerFlipper.displayedChild]}"
+        tvPagerIndicator.text = if (touchLocked) {
+            "🔒 터치잠금   $dots   ${labels[pagerFlipper.displayedChild]}"
+        } else {
+            "$dots   ${labels[pagerFlipper.displayedChild]}"
+        }
+        tvPagerIndicator.setTextColor(getColor(if (touchLocked) R.color.warn else R.color.text_secondary))
     }
 
     private fun addCurrentSupplyPoint() {
@@ -2722,9 +2817,11 @@ class MainActivity : Activity() {
     }
 
     /**
-     * v0.27.7 AI 주행 어시스트.
-     * Avinox 라이더/모터파워·케이던스의 실시간 값은 아직 riding BLE에서 검증되지 않았으므로
-     * 현재값처럼 표시하지 않고 A+ 과거 학습에서 얻은 '목표 범위'만 제시한다.
+     * v0.28.0 AI 주행 어시스트.
+     * 라이더/모터파워·케이던스는 A+ 학습 기반 목표 범위다.
+     * 기어는 PL Carbon 순정 34T / 10-52T와 29x2.4 유효 둘레를 이용해
+     * 현재 속도에서 목표 케이던스에 가장 가까운 '권장 단수'를 계산한다.
+     * 실제 SRAM 현재 단수를 읽었다고 표현하지 않는다.
      */
     private fun renderRideAssistCoach(pacing: PacingAdvice, reserve: ReserveStatus) {
         val action = when {
@@ -2735,18 +2832,19 @@ class MainActivity : Activity() {
             pacing.terrain == PacingTerrain.CLIMB -> "업힐 리듬"
             else -> "현재 페이스 유지"
         }
-        tvAssist.text = action
+        val recommendedSpeed = pacing.speedKph?.let { " · 권장속도 ${it.text("km/h")}" }.orEmpty()
+        tvAssist.text = action + recommendedSpeed
         tvAssist.setTextColor(when {
             reserve.label == "위험" -> getColor(R.color.danger)
             reserve.label == "주의" -> getColor(R.color.warn)
             else -> getColor(R.color.good)
         })
 
-        val rider = pacing.riderPowerW?.let { "라이더파워 ${it.text("W")}" } ?: "라이더파워 학습중"
+        val rider = pacing.riderPowerW?.let { "라이더 ${it.text("W")}" } ?: "라이더 학습중"
         val motor = pacing.motorPowerW?.let { "모터 ${it.high}W 이하" } ?: "모터 학습중"
         val cadence = pacing.cadenceRpm?.let { "케이던스 ${it.text("rpm")}" } ?: "케이던스 학습중"
-        val gear = pacing.gearAdvice ?: "현재 기어 유지"
-        tvAssistTargets.text = "$rider · $motor\n$cadence · 기어변속 $gear"
+        val gear = pacing.gearAdvice ?: "권장기어 —"
+        tvAssistTargets.text = "$rider · $motor\n$cadence · $gear"
         tvAssistTargets.setTextColor(getColor(R.color.text_primary))
     }
 
@@ -3386,7 +3484,7 @@ class MainActivity : Activity() {
         tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
         tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "BLE 배터리 연결 대기"
         tvAssist.text = "임의주행 · 데이터 수집 우선"
-        tvAssistTargets.text = "라이더파워·모터·케이던스 목표는 GPX 계획주행에서 계산\n현재 모드·SOC·GPS는 계속 기록"
+        tvAssistTargets.text = "라이더·모터·케이던스·권장기어는 계획주행에서 계산\n현재 모드·SOC·GPS는 계속 기록"
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
         tvPointEtaBasis.text = "계획주행에서 GPX 포인트 ETA를 표시합니다."
@@ -3511,6 +3609,11 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION")
         packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.2"
     } catch (_: Exception) { "0.18.2" }
+
+    override fun onDestroy() {
+        volumeKeyHandler.removeCallbacks(touchLockLongPress)
+        super.onDestroy()
+    }
 
     override fun onResume() {
         super.onResume()

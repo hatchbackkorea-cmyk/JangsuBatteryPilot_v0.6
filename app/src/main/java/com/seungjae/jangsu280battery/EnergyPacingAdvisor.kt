@@ -101,7 +101,7 @@ class EnergyPacingAdvisor(
         if (profile == null || profile.sampleCount < 1) {
             val fallback = when (terrain) {
                 PacingTerrain.STEEP_CLIMB -> "급경사 · 초반 과출력 주의"
-                PacingTerrain.CLIMB -> "업힐 · 일정한 페이스 유지"
+                PacingTerrain.CLIMB -> "업힐 · 일정한 페이스"
                 PacingTerrain.ROLLING -> "구릉 · 가속/감속 반복 줄이기"
                 else -> "완만한 구간 · 불필요한 가속 줄이기"
             }
@@ -165,7 +165,7 @@ class EnergyPacingAdvisor(
             rangeAround(adjusted, baseHalf * uncertainty, 5, 45, 1)
         }
 
-        val gearAdvice = gearAdviceFor(terrain, grade)
+        val gearAdvice = PlCarbonGearAdvisor.compactAdvice(currentSpeedKph, cadence, gearAdviceFor(terrain, grade))
 
         val speedAction = when {
             speed != null && currentSpeedKph > speed.high + 2.0 && reserve.differencePct < 2.0 -> {
@@ -231,16 +231,17 @@ class EnergyPacingAdvisor(
     }
 
     /**
-     * Live gear position is not yet decoded from the riding BLE stream.
-     * Therefore this is deliberately a shift strategy, not a claimed current gear number.
+     * SRAM 실제 현재 단수는 아직 riding BLE에서 해독하지 못했다.
+     * 학습 케이던스가 없을 때만 쓰는 짧은 fallback 문구다.
+     * 학습 케이던스가 있으면 PlCarbonGearAdvisor가 실제 단수 형태의 권장값을 계산한다.
      */
     private fun gearAdviceFor(terrain: PacingTerrain, gradePct: Double): String = when {
         terrain == PacingTerrain.DOWNHILL -> "페달 최소"
-        terrain == PacingTerrain.STEEP_CLIMB || gradePct >= 9.0 -> "1~2단 가볍게"
-        terrain == PacingTerrain.CLIMB || gradePct >= 4.0 -> "1단 가볍게"
-        terrain == PacingTerrain.ROLLING -> "리듬 유지 · 잦은 변속 금지"
-        gradePct <= -1.5 -> "1단 무겁게"
-        else -> "현재 기어 유지"
+        terrain == PacingTerrain.STEEP_CLIMB || gradePct >= 9.0 -> "저단 권장"
+        terrain == PacingTerrain.CLIMB || gradePct >= 4.0 -> "저단 권장"
+        terrain == PacingTerrain.ROLLING -> "권장기어 —"
+        gradePct <= -1.5 -> "고단 권장"
+        else -> "권장기어 —"
     }
 
     private fun rangeAround(center: Double, halfWidth: Double, min: Int, max: Int, step: Int): IntRangeTarget {
