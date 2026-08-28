@@ -479,6 +479,10 @@ class MainActivity : Activity() {
             courseMeta = courseRepo.activeMeta()
             course = courseRepo.loadCourse(courseMeta.id)
             loadedCourseId = courseMeta.id
+            // v0.28.4: 테스트/계획 비교에서는 Avinox에서 고른 비교 모드를
+            // 우리 자체 모드별 학습 모델의 기준 모드와 동기화한다.
+            // Avinox의 % 숫자 자체는 여전히 자체 예측에 섞지 않는다.
+            syncPlanningModeFromAvinoxReference()
             basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
@@ -608,7 +612,7 @@ class MainActivity : Activity() {
         val ref = avinoxReferenceStore.get(courseMeta.id) ?: return
         val selected = ref.selectedMode?.takeIf { ref.value(it) != null }
         val modeText = selected?.let { "실시간 비교 ${it.label} ${formatPct(ref.value(it)!!)}" } ?: "비교 표시 안 함"
-        val detail = "${ref.compactValues()} · $modeText · 자체예측/개인학습 미적용"
+        val detail = "${ref.compactValues()} · $modeText · Avinox 수치는 자체예측에 미주입 · 선택 모드만 자체 모드별 학습 기준과 동기화"
         logManager.recordEvent("AVINOX_BENCHMARK", detail, 0.0, actualStore.latest()?.percent)
     }
 
@@ -1248,11 +1252,11 @@ class MainActivity : Activity() {
         tvCourseQuickSelect.text = "${courseMeta.name}  ▼\n${RideFormatter.one(courseMeta.totalKm)} km · $elev\n$source · 개인 학습 ${learned}개 구간 적용"
         val ref = avinoxReferenceStore.get(courseMeta.id)
         tvAvinoxReferenceSummary.text = if (ref == null) {
-            "입력 없음 · 자체 예측만 사용\nAvinox 전체 코스 소비량은 외부 비교용으로만 저장하며 학습/예측에는 섞지 않습니다. 100% 초과 입력 가능."
+            "입력 없음 · 자체 예측만 사용\nAvinox 전체 코스 소비량은 외부 비교값이며 자체 예측 수치에는 섞지 않습니다. 100% 초과 입력 가능."
         } else {
             val selected = ref.selectedMode?.takeIf { ref.value(it) != null }
             val compare = selected?.let { "실시간 비교: ${it.label} ${formatPct(ref.value(it)!!)}" } ?: "실시간 비교 표시 안 함"
-            "${ref.compactValues()}\n$compare\n※ Avinox는 외부 benchmark · 자체 예측/개인 학습에 0% 반영"
+            "${ref.compactValues()}\n$compare\n※ Avinox 소비량 숫자는 미반영 · 선택 모드만 자체 ECO/AUTO/TRAIL/TURBO 학습 기준과 동기화"
         }
         val riding = logManager.isActive()
         tvCourseQuickSelect.isEnabled = !riding
@@ -1274,7 +1278,7 @@ class MainActivity : Activity() {
             setPadding(px(18), px(8), px(18), px(4))
         }
         root.addView(TextView(this).apply {
-            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n이 값은 외부 비교용입니다. 자체 예측이나 개인 학습에는 절대 섞이지 않습니다."
+            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n소비량 숫자는 외부 비교용으로만 보존합니다. 다만 비교 모드(ECO/AUTO/TRAIL/TURBO)를 고르면 테스트/계획의 자체 예측도 같은 모드의 개인 학습 기준으로 계산합니다."
             textSize = 13f
             setTextColor(getColor(R.color.text_secondary))
             setPadding(0, 0, 0, px(8))
@@ -1379,7 +1383,7 @@ class MainActivity : Activity() {
                     renderCourseQuick()
                     renderAtKm(latestRouteKm, testMode)
                     dialog.dismiss()
-                    val savedMsg = if (selected == null) "Avinox 예상값을 외부 비교 데이터로 저장했습니다." else "Avinox ${selected.label}을 실시간 비교 모드로 설정했습니다. 자체 예측에는 반영하지 않습니다."
+                    val savedMsg = if (selected == null) "Avinox 예상값을 외부 비교 데이터로 저장했습니다." else "${selected.label} 비교 선택 · 자체 예측도 ${selected.label} 모드 학습 기준으로 다시 계산했습니다."
                     Toast.makeText(this, savedMsg, Toast.LENGTH_LONG).show()
                 } catch (e: IllegalArgumentException) {
                     Toast.makeText(this, e.message ?: "입력값을 확인하세요.", Toast.LENGTH_LONG).show()
@@ -1398,9 +1402,32 @@ class MainActivity : Activity() {
     }
 
     private fun rebuildPlanFromCurrentCourse() {
+        if (!logManager.isActive()) syncPlanningModeFromAvinoxReference()
         basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
         pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+        tripPlanner = EnergyTripPlanner(basePlan, plan)
+    }
+
+    /**
+     * v0.28.4 planning/test baseline.
+     * Avinox benchmark VALUE never enters our model; only its selected mode chooses which
+     * verified mode-specific learning bucket (ECO/AUTO/TRAIL/TURBO) BatteryLearningStore uses.
+     * During a real ride, verified BLE mode detection can still supersede this baseline.
+     */
+    private fun syncPlanningModeFromAvinoxReference() {
+        if (!::courseMeta.isInitialized || !::avinoxReferenceStore.isInitialized || !::assistProfileStore.isInitialized) return
+        if (::logManager.isInitialized && logManager.isActive()) return
+        val selected = avinoxReferenceStore.get(courseMeta.id)?.selectedMode ?: return
+        val assistMode = runCatching { AvinoxAssistMode.valueOf(selected.name) }.getOrNull() ?: return
+        assistProfileStore.setPreferredMode(assistMode)
+    }
+
+    private fun predictionModeLabel(): String? = when {
+        ::logManager.isInitialized && logManager.isActive() -> logManager.activeAssistMode()?.label
+            ?: assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }?.label
+        else -> avinoxReferenceStore.get(courseMeta.id)?.selectedMode?.label
+            ?: assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }?.label
     }
 
     private fun cleanPctText(value: Double): String {
@@ -2319,13 +2346,9 @@ class MainActivity : Activity() {
         renderRideState()
         if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
         if (emergency != null && emergency.phase == EmergencyPhase.CHARGING) {
-            val updated = replanStore.active(courseMeta.id)
-            AlertDialog.Builder(this)
-                .setTitle("충전 완료 · 경기코스로 복귀")
-                .setMessage("원래 코스 이탈점 ${RideFormatter.one(emergency.anchorRouteKm)}km로 반드시 돌아간 뒤 경기를 이어가세요. 50m 이내로 복귀하면 앱이 자동으로 원래 GPX 진행을 재개합니다.")
-                .setPositiveButton("이탈점 길안내") { _, _ -> openExternalRoute(updated?.returnUrl ?: emergency.returnUrl) }
-                .setNegativeButton("잠시 후", null)
-                .show()
+            val updated = replanStore.active(courseMeta.id) ?: emergency.copy(phase = EmergencyPhase.RETURN)
+            Toast.makeText(this, "충전 완료 · 카카오맵으로 원래 코스 복귀 안내를 엽니다.", Toast.LENGTH_LONG).show()
+            openEmergencyBicycleNavigation(updated, toStation = false)
         } else {
             Toast.makeText(this, "충전 완료 · $pct%", Toast.LENGTH_SHORT).show()
         }
@@ -2634,10 +2657,11 @@ class MainActivity : Activity() {
             avinoxReference = ref
         )
         tvCompareActual.text = snapshot.actualConsumedPct?.let(::formatPct) ?: "—"
+        val modelMode = predictionModeLabel()
         setComparisonWithProjected(
             tvCompareModel,
             formatPct(snapshot.modelConsumedPct),
-            "자체 ${formatPct(snapshot.modelProjectedTotalPct)}"
+            "자체${modelMode?.let { " $it" }.orEmpty()} ${formatPct(snapshot.modelProjectedTotalPct)}"
         )
         val avinoxConsumed = snapshot.avinoxConsumedPct?.let(::formatPct) ?: "—"
         val avinoxProjected = snapshot.avinoxProjectedTotalPct?.let { total ->
@@ -3373,7 +3397,7 @@ class MainActivity : Activity() {
                 replanStore.start(session)
                 logManager.recordEvent("EMERGENCY_DETOUR_START", "${c.place.name} 비상충전 · 복귀앵커 ${RideFormatter.one(anchor.routeKm)}km · 왕복 ${RideFormatter.one(c.roundTripKm)}km", anchor.routeKm, currentSocForReplan(anchor.routeKm))
                 renderAtKm(anchor.routeKm, testMode)
-                openExternalRoute(c.outbound.landingUrl)
+                openEmergencyBicycleNavigation(session, toStation = true)
             }
             .setNegativeButton("다른 후보", null)
             .show()
@@ -3381,16 +3405,16 @@ class MainActivity : Activity() {
 
     private fun showEmergencySessionDialog(session: EmergencyDetourSession) {
         val msg = when (session.phase) {
-            EmergencyPhase.OUTBOUND -> "${session.candidateName}으로 이동 중입니다.\n원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km는 고정되어 코스 진행도가 앞으로 점프하지 않습니다.\n충전소에 도착하면 메인의 '충전 시작'을 누르세요."
+            EmergencyPhase.OUTBOUND -> "카카오맵 자전거 길찾기로 ${session.candidateName} 이동 중입니다.\nBattery Copilot GPS/BLE/SOC는 백그라운드에서 계속 동작합니다.\n원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km는 고정되며, 도착하면 메인의 '충전 시작'을 누르세요."
             EmergencyPhase.CHARGING -> "비상 충전 중입니다. 권장 목표 ${emergencyRecommendedChargeTargetPct(session)}%.\n충전 완료 후에는 반드시 ${RideFormatter.one(session.anchorRouteKm)}km 이탈점으로 돌아갑니다."
-            EmergencyPhase.RETURN -> "원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km로 복귀 중입니다.\nGPS가 이탈점 50m 이내에 들어오면 자동으로 원래 GPX 진행을 재개합니다."
+            EmergencyPhase.RETURN -> "카카오맵 자전거 길찾기로 원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km 복귀 중입니다.\nBattery Copilot은 백그라운드에서 계속 기록하며, GPS가 이탈점 50m 이내에 들어오면 원래 GPX 진행을 자동 재개합니다."
         }
         val b = AlertDialog.Builder(this).setTitle("비상 충전 / 경기코스 복귀").setMessage(msg)
         when (session.phase) {
-            EmergencyPhase.OUTBOUND -> b.setPositiveButton("충전소 길안내") { _, _ -> openExternalRoute(session.outboundUrl) }
+            EmergencyPhase.OUTBOUND -> b.setPositiveButton("카카오 자전거 안내") { _, _ -> openEmergencyBicycleNavigation(session, toStation = true) }
                 .setNeutralButton("우회 취소") { _, _ -> confirmCancelEmergency(session) }
             EmergencyPhase.CHARGING -> b.setPositiveButton("확인", null)
-            EmergencyPhase.RETURN -> b.setPositiveButton("이탈점 길안내") { _, _ -> openExternalRoute(session.returnUrl) }
+            EmergencyPhase.RETURN -> b.setPositiveButton("카카오 복귀 안내") { _, _ -> openEmergencyBicycleNavigation(session, toStation = false) }
         }
         b.setNegativeButton("닫기", null).show()
     }
@@ -3407,13 +3431,48 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun openExternalRoute(url: String) {
-        if (url.isBlank()) {
-            Toast.makeText(this, "카카오 자전거 길안내 URL을 받지 못했습니다.", Toast.LENGTH_LONG).show()
-            return
+    private fun openEmergencyBicycleNavigation(session: EmergencyDetourSession, toStation: Boolean) {
+        // RideService is a foreground location service, so opening Kakao Map only moves this
+        // Activity to the background; GPS/BLE/SOC/logging continue in Battery Copilot.
+        val startLat = when {
+            latestLat.isFinite() -> latestLat
+            toStation -> session.anchorLat
+            else -> session.candidateLat
         }
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
-            .onFailure { Toast.makeText(this, "길안내를 열 수 없습니다: ${it.message}", Toast.LENGTH_LONG).show() }
+        val startLon = when {
+            latestLon.isFinite() -> latestLon
+            toStation -> session.anchorLon
+            else -> session.candidateLon
+        }
+        val endLat = if (toStation) session.candidateLat else session.anchorLat
+        val endLon = if (toStation) session.candidateLon else session.anchorLon
+        val fallback = if (toStation) session.outboundUrl else session.returnUrl
+        val label = if (toStation) "충전소" else "원래 코스 이탈점"
+
+        val appUri = KakaoBicycleNavigator.appRouteUri(startLat, startLon, endLat, endLon)
+        val launchedApp = try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(appUri)))
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: Exception) {
+            false
+        }
+
+        if (!launchedApp) {
+            val webUrl = fallback.ifBlank { KakaoBicycleNavigator.mobileWebRouteUri(startLat, startLon, endLat, endLon) }
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(webUrl))) }
+                .onFailure { Toast.makeText(this, "카카오 자전거 길찾기를 열 수 없습니다: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
+
+        if (logManager.isActive()) {
+            logManager.recordEvent(
+                if (toStation) "EMERGENCY_KAKAO_BICYCLE_OUTBOUND" else "EMERGENCY_KAKAO_BICYCLE_RETURN",
+                "카카오맵 자전거 길찾기 · $label · Battery Copilot 백그라운드 유지",
+                session.anchorRouteKm,
+                actualStore.latest()?.percent
+            )
+        }
     }
 
     /** 비상 우회가 진행 중이면 해당 왕복/충전의 아직 남은 시간을 이후 모든 ETA에 더한다. */

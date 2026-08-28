@@ -1,3 +1,10 @@
+# v0.28.4 — Avinox 비교 모드 ↔ 자체 예측 모드 동기화
+- 버그 수정: Avinox 비교 모드를 ECO/AUTO/TRAIL/TURBO로 바꿔도 첫 페이지의 자체 예상 SOC가 고정되던 문제 수정.
+- Avinox에서 선택한 비교 모드를 테스트/계획주행의 자체 BatteryLearningStore 모드 기준과 동기화.
+- Avinox가 제공한 예상 소비량 숫자는 여전히 자체 예측/개인 학습에 직접 주입하지 않음. 비교 모드 이름만 선택 기준으로 사용.
+- 실제 주행에서는 검증된 BLE 모드 감지가 들어오면 현재 실제 모드가 계획 기준을 계속 갱신.
+- 첫 페이지 누적 에너지 자체 예측 보조 라벨에 `자체 ECO/AUTO/TRAIL/TURBO`를 표시해 어떤 모드 기준인지 바로 검증 가능.
+
 ## v0.27.9 · 주행 HUD 공간 압축 + 어시스트 가독성 확대
 - 첫 페이지 고도 그래프 아래 속도/종점/10km 고도/10km 후 배터리 4개 칸의 높이를 30dp에서 18dp로 줄였습니다.
 - 위험/주행 어시스트 통합 패널에서 `AI 주행 어시스트` 제목 행을 제거했습니다.
@@ -599,3 +606,11 @@
 - 급경사 또는 SOC 부족 시 저회전 고토크 운용을 피하도록 A+ 학습 케이던스 목표를 소폭 상향.
 - 권장기어는 현재 속도를 그대로 쓰지 않고 권장속도 범위 안으로 보정한 속도 + 권장 케이던스로 계산해 속도/기어 조언의 충돌을 완화.
 - v0.28.1 Rain Touch Lock 및 VOL 물리버튼 조작은 그대로 유지.
+# v0.28.3 — Emergency Kakao Bicycle Navigation Handoff
+- 비상 충전 후보 확정 직후 카카오맵 공식 URL scheme `kakaomap://route?...&by=bicycle`로 자전거 길찾기를 직접 엽니다.
+- 카카오맵 전환 중에도 Battery Copilot RideService는 foreground location service로 계속 살아 있어 GPS/BLE/SOC/로그/복귀 앵커 추적을 유지합니다.
+- 카카오맵 앱 스킴 실패 시 REST bicycle `landingUrl` → 모바일웹 bicycle route 순서로 폴백합니다.
+- 충전 완료 시 RETURN 단계로 바꾸고 후보지 → 원래 GPX 이탈점 자전거 길찾기를 자동 실행합니다.
+- 비상 세션 대화상자에서 OUTBOUND/RETURN 경로를 언제든 다시 열 수 있습니다.
+- Kakao URL scheme은 길찾기 화면을 여는 공식 인터페이스이며, 음성 안내 시작 자체는 Kakao Map UI에서 추가 탭이 필요할 수 있습니다.
+
