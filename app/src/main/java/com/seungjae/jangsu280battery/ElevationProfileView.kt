@@ -15,6 +15,8 @@ class ElevationProfileView @JvmOverloads constructor(
 ) : View(context, attrs) {
     private var course: CourseData? = null
     private var currentKm: Double = 0.0
+    private var compactMode: Boolean = false
+    private var checkpointKmsOverride: List<Double>? = null
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -55,20 +57,30 @@ class ElevationProfileView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun setCompactMode(value: Boolean) {
+        compactMode = value
+        invalidate()
+    }
+
+    fun setCheckpointKms(value: List<Double>?) {
+        checkpointKmsOverride = value?.distinct()?.sorted()
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val c = course ?: return
         if (c.track.size < 2 || width <= 0 || height <= 0) return
 
-        val left = dp(8f)
-        val right = width - dp(8f)
-        val top = dp(10f)
-        val bottom = height - dp(20f)
+        val left = if (compactMode) dp(2f) else dp(8f)
+        val right = width - if (compactMode) dp(2f) else dp(8f)
+        val top = if (compactMode) dp(3f) else dp(10f)
+        val bottom = height - if (compactMode) dp(3f) else dp(20f)
         val plotW = max(1f, right - left)
         val plotH = max(1f, bottom - top)
 
         if (!c.hasElevation) {
-            canvas.drawText("GPX 고도 데이터 없음 · 거리 기반 모드", left, height / 2f, textPaint)
+            if (!compactMode) canvas.drawText("GPX 고도 데이터 없음 · 거리 기반 모드", left, height / 2f, textPaint)
             val cx = left + (currentKm.coerceIn(0.0, c.totalKm) / c.totalKm * plotW).toFloat()
             canvas.drawLine(cx, top, cx, bottom, currentPaint)
             return
@@ -112,15 +124,17 @@ class ElevationProfileView @JvmOverloads constructor(
         canvas.drawPath(path, linePaint)
 
         val markerKms = buildList {
-            addAll(c.supplyPois.map { it.routeKm })
+            addAll(checkpointKmsOverride ?: c.supplyPois.map { it.routeKm })
             add(c.totalKm)
         }.distinct().sorted()
         markerKms.forEach { km ->
             if (km in 0.0..(c.totalKm + 0.5)) {
                 val px = x(km)
                 canvas.drawLine(px, top, px, bottom, checkpointPaint)
-                val label = if (kotlin.math.abs(km - c.totalKm) < 0.2) "FIN" else km.toInt().toString()
-                canvas.drawText(label, px + dp(2f), height - dp(5f), textPaint)
+                if (!compactMode) {
+                    val label = if (kotlin.math.abs(km - c.totalKm) < 0.2) "FIN" else km.toInt().toString()
+                    canvas.drawText(label, px + dp(2f), height - dp(5f), textPaint)
+                }
             }
         }
 

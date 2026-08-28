@@ -23,7 +23,6 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.text.InputType
-import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.Switch
@@ -97,7 +96,10 @@ class MainActivity : Activity() {
     private lateinit var tvCompareModel: TextView
     private lateinit var tvCompareAvinox: TextView
     private lateinit var tvCompareDetail: TextView
-    private lateinit var progressBattery: ProgressBar
+    private lateinit var tvRideRouteScale: TextView
+    private lateinit var switchRideTestMode: Switch
+    private lateinit var rideMiniProfileView: ElevationProfileView
+    private lateinit var seekRideRoute: ChargeDistanceSeekBar
     private lateinit var tvRiskStatus: TextView
     private lateinit var tvRiskDetail: TextView
     private lateinit var tvActualBattery: TextView
@@ -137,9 +139,6 @@ class MainActivity : Activity() {
     private lateinit var seekPageFinishTarget: SeekBar
     private lateinit var tvPageHardReserve: TextView
     private lateinit var seekPageHardReserve: SeekBar
-    private lateinit var switchPageTestMode: Switch
-    private lateinit var tvPageTestKm: TextView
-    private lateinit var seekPageTestKm: SeekBar
     private lateinit var tvPageSettingsHint: TextView
     private lateinit var btnPageChargeSimulator: Button
     private lateinit var btnPageBleDiagnostic: Button
@@ -202,6 +201,7 @@ class MainActivity : Activity() {
     private var voiceInputStartedMs: Long = 0L
     private var voiceInputRouteKm: Double = 0.0
     private var refreshingSettingsUi = false
+    private var refreshingRideControls = false
     private var emergencySearchRunning = false
 
     private val rideReceiver = object : BroadcastReceiver() {
@@ -289,12 +289,14 @@ class MainActivity : Activity() {
         btnPostRideAvinox.setOnClickListener { showPostRideAvinoxDialog() }
         btnPostRideCompare.setOnClickListener { showPostRideComparison() }
         btnPostRideLearn.setOnClickListener { learnLastFreeRide() }
+        setupRidePositionControls()
         setupInlineSettings()
         setupLearningPage()
         setupMobileReleasePage()
         setupSwipePager()
 
         renderCourseQuick()
+        refreshRidePositionControls()
         refreshInlineSettings()
         refreshLearningPage()
         renderRideState()
@@ -353,7 +355,10 @@ class MainActivity : Activity() {
         tvCompareModel = findViewById(R.id.tvCompareModel)
         tvCompareAvinox = findViewById(R.id.tvCompareAvinox)
         tvCompareDetail = findViewById(R.id.tvCompareDetail)
-        progressBattery = findViewById(R.id.progressBattery)
+        tvRideRouteScale = findViewById(R.id.tvRideRouteScale)
+        switchRideTestMode = findViewById(R.id.switchRideTestMode)
+        rideMiniProfileView = findViewById(R.id.rideMiniProfileView)
+        seekRideRoute = findViewById(R.id.seekRideRoute)
         tvRiskStatus = findViewById(R.id.tvRiskStatus)
         tvRiskDetail = findViewById(R.id.tvRiskDetail)
         tvActualBattery = findViewById(R.id.tvActualBattery)
@@ -393,9 +398,6 @@ class MainActivity : Activity() {
         seekPageFinishTarget = findViewById(R.id.seekPageFinishTarget)
         tvPageHardReserve = findViewById(R.id.tvPageHardReserve)
         seekPageHardReserve = findViewById(R.id.seekPageHardReserve)
-        switchPageTestMode = findViewById(R.id.switchPageTestMode)
-        tvPageTestKm = findViewById(R.id.tvPageTestKm)
-        seekPageTestKm = findViewById(R.id.seekPageTestKm)
         tvPageSettingsHint = findViewById(R.id.tvPageSettingsHint)
         btnPageChargeSimulator = findViewById(R.id.btnPageChargeSimulator)
         btnPageBleDiagnostic = findViewById(R.id.btnPageBleDiagnostic)
@@ -423,7 +425,7 @@ class MainActivity : Activity() {
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             tripPlanner = EnergyTripPlanner(basePlan, plan)
-            profileView.setCourse(course)
+            configureRideRouteVisuals()
             val prefs = AppSettings.prefs(this)
             if (resetProgress) {
                 prefs.edit().putFloat(AppSettings.KEY_LAST_KM, 0f).putFloat(AppSettings.KEY_TEST_KM, 0f).apply()
@@ -1423,6 +1425,92 @@ class MainActivity : Activity() {
         }.getOrNull()
     }
 
+    private fun plannedChargeKms(): List<Double> = if (::basePlan.isInitialized) {
+        basePlan.checkpoints.filter { it.chargeToPct != null }.map { it.km }
+    } else emptyList()
+
+    /** v0.27.3: first-page route axis is distance/charging based, never battery based. */
+    private fun configureRideRouteVisuals() {
+        if (!::course.isInitialized) return
+        val chargeKms = plannedChargeKms()
+        profileView.setCourse(course)
+        rideMiniProfileView.setCourse(course)
+        rideMiniProfileView.setCompactMode(true)
+        rideMiniProfileView.setCheckpointKms(chargeKms)
+        seekRideRoute.setCourse(course.totalKm, chargeKms)
+    }
+
+    /**
+     * The test-mode switch and virtual GPX location moved from Settings to the ride HUD.
+     * In normal riding the same control becomes a read-only live course-distance axis.
+     */
+    private fun setupRidePositionControls() {
+        switchRideTestMode.setOnCheckedChangeListener { _, checked ->
+            if (refreshingRideControls) return@setOnCheckedChangeListener
+            if (logManager.isActive()) {
+                refreshRidePositionControls()
+                Toast.makeText(this, "주행 중에는 테스트 모드를 바꿀 수 없습니다. 테스트 주행에서는 위치 슬라이더만 계속 움직일 수 있습니다.", Toast.LENGTH_SHORT).show()
+                return@setOnCheckedChangeListener
+            }
+            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
+            testMode = checked
+            refreshRidePositionControls()
+            renderCurrentMode()
+        }
+        seekRideRoute.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser || refreshingRideControls || !testMode || !::course.isInitialized) return
+                val km = seekRideRoute.routeKmForProgress(progress).coerceIn(0.0, course.totalKm)
+                AppSettings.prefs(this@MainActivity).edit().putFloat(AppSettings.KEY_TEST_KM, km.toFloat()).apply()
+                latestRouteKm = km
+                renderCurrentMode()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+    }
+
+    private fun refreshRidePositionControls() {
+        if (!::course.isInitialized) return
+        refreshingRideControls = true
+        try {
+            switchRideTestMode.visibility = View.VISIBLE
+            switchRideTestMode.isChecked = AppSettings.testMode(this)
+            switchRideTestMode.isEnabled = !logManager.isActive()
+            seekRideRoute.visibility = View.VISIBLE
+            seekRideRoute.setUserSeekingEnabled(testMode)
+            val km = if (testMode) AppSettings.testKm(this).coerceIn(0.0, course.totalKm) else latestRouteKm.coerceIn(0.0, course.totalKm)
+            seekRideRoute.setRouteKm(km)
+            rideMiniProfileView.visibility = View.VISIBLE
+            rideMiniProfileView.setCurrentKm(km)
+        } finally {
+            refreshingRideControls = false
+        }
+    }
+
+    private fun renderRideRouteVisual(km: Double, simulated: Boolean) {
+        if (!::course.isInitialized) return
+        rideMiniProfileView.visibility = View.VISIBLE
+        seekRideRoute.visibility = View.VISIBLE
+        switchRideTestMode.visibility = View.VISIBLE
+        switchRideTestMode.isEnabled = !logManager.isActive()
+        rideMiniProfileView.setCurrentKm(km)
+        seekRideRoute.setRouteKm(km)
+        seekRideRoute.setUserSeekingEnabled(testMode)
+
+        val nextCharge = basePlan.checkpoints.firstOrNull { cp ->
+            cp.chargeToPct != null && cp.km > km + 0.08 && !replanStore.isSkipped(courseMeta.id, cp.km)
+        }
+        val targetKm = nextCharge?.km ?: course.totalKm
+        val remain = (targetKm - km).coerceAtLeast(0.0)
+        val prefix = if (simulated) "테스트" else "거리"
+        tvRideRouteScale.text = if (nextCharge != null) {
+            "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 다음충전 ${RideFormatter.one(nextCharge.km)} · ${RideFormatter.one(remain)}km 남음"
+        } else {
+            "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 종점 ${RideFormatter.one(course.totalKm)} · ${RideFormatter.one(remain)}km 남음"
+        }
+    }
+
     private fun setupInlineSettings() {
         seekPageDistanceInterval.max = 50
         seekPageTimeInterval.max = 120
@@ -1465,24 +1553,6 @@ class MainActivity : Activity() {
             AppSettings.prefs(this).edit().putInt(AppSettings.KEY_HARD_RESERVE, pct).apply()
             updateInlineSettingsLabels()
             if (::plan.isInitialized) renderAtKm(latestRouteKm, testMode)
-        })
-        switchPageTestMode.setOnCheckedChangeListener { _, checked ->
-            if (refreshingSettingsUi) return@setOnCheckedChangeListener
-            if (logManager.isActive()) {
-                refreshInlineSettings()
-                return@setOnCheckedChangeListener
-            }
-            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
-            testMode = checked
-            refreshInlineSettings()
-            renderCurrentMode()
-        }
-        seekPageTestKm.setOnSeekBarChangeListener(simpleSeekListener { value ->
-            if (refreshingSettingsUi || !switchPageTestMode.isChecked || !::course.isInitialized) return@simpleSeekListener
-            val km = (value / 10.0).coerceIn(0.0, course.totalKm)
-            AppSettings.prefs(this).edit().putFloat(AppSettings.KEY_TEST_KM, km.toFloat()).apply()
-            updateInlineSettingsLabels()
-            if (testMode) renderCurrentMode()
         })
         btnPageChargeSimulator.setOnClickListener {
             if (logManager.isActive()) {
@@ -1551,17 +1621,12 @@ class MainActivity : Activity() {
             seekPageTimeInterval.progress = AppSettings.timeIntervalMin(this)
             seekPageFinishTarget.progress = AppSettings.finishTarget(this).roundToInt().coerceIn(1, 99) - 1
             seekPageHardReserve.progress = AppSettings.hardReserve(this).coerceIn(5, 15) - 5
-            switchPageTestMode.isChecked = AppSettings.testMode(this)
-            seekPageTestKm.max = (course.totalKm * 10.0).roundToInt().coerceAtLeast(1)
-            seekPageTestKm.progress = (AppSettings.testKm(this).coerceIn(0.0, course.totalKm) * 10.0).roundToInt()
-            switchPageTestMode.isEnabled = !logManager.isActive()
-            seekPageTestKm.isEnabled = switchPageTestMode.isChecked && !logManager.isActive()
             btnPageChargeSimulator.isEnabled = !logManager.isActive()
             btnPageResetProgress.isEnabled = !logManager.isActive()
             tvPageSettingsHint.text = if (logManager.isActive()) {
-                "주행 중에는 테스트 모드를 변경할 수 없습니다. 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
+                "주행 중입니다. 테스트 위치 조작은 첫 페이지 거리축에서만 가능하며, 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
             } else {
-                "선택 코스 · ${courseMeta.name} · 테스트 위치와 모든 예측은 이 GPX 기준으로 계산됩니다."
+                "테스트 모드와 GPX 위치 슬라이더는 첫 페이지로 이동했습니다. 선택 코스 · ${courseMeta.name}"
             }
             updateInlineSettingsLabels()
         } finally {
@@ -1576,8 +1641,6 @@ class MainActivity : Activity() {
         tvPageTimeInterval.text = if (t == 0) "시간 기준 안내 · 사용 안 함" else "시간 기준 안내 · ${t}분마다"
         tvPageFinishTarget.text = "충전권장 기준 잔량 ${seekPageFinishTarget.progress + 1}%"
         tvPageHardReserve.text = "비상 하드 리저브 ${seekPageHardReserve.progress + 5}% · 이 아래면 긴급 충전 탐색"
-        val km = (seekPageTestKm.progress / 10.0).coerceIn(0.0, if (::course.isInitialized) course.totalKm else 0.0)
-        tvPageTestKm.text = if (::course.isInitialized) "테스트 위치 ${RideFormatter.one(km)} / ${RideFormatter.one(course.totalKm)} km" else "테스트 위치"
     }
 
 
@@ -2022,9 +2085,11 @@ class MainActivity : Activity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val settingsSliderTouch = ::pagerFlipper.isInitialized && pagerFlipper.displayedChild == 2 && listOf(
-            seekPageDistanceInterval, seekPageTimeInterval, seekPageFinishTarget, seekPageHardReserve, seekPageTestKm
+            seekPageDistanceInterval, seekPageTimeInterval, seekPageFinishTarget, seekPageHardReserve
         ).any { isTouchInside(ev, it) }
-        if (::pagerGesture.isInitialized && !settingsSliderTouch) pagerGesture.onTouchEvent(ev)
+        val rideTestSliderTouch = ::pagerFlipper.isInitialized && pagerFlipper.displayedChild == 0 && testMode &&
+            ::seekRideRoute.isInitialized && isTouchInside(ev, seekRideRoute)
+        if (::pagerGesture.isInitialized && !settingsSliderTouch && !rideTestSliderTouch) pagerGesture.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
     }
 
@@ -2269,8 +2334,7 @@ class MainActivity : Activity() {
         }
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
-        progressBattery.progress = displaySoc ?: 0
-        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        renderRideRouteVisual(km, simulated)
         tvBatteryRange.text = when {
             simulated -> "테스트 · 계획 $planPct% · 예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
             freshSoc != null -> {
@@ -2973,8 +3037,10 @@ class MainActivity : Activity() {
         val displaySoc = freshSoc ?: storedSoc
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
-        progressBattery.progress = displaySoc ?: 0
-        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        rideMiniProfileView.visibility = View.GONE
+        seekRideRoute.visibility = View.GONE
+        tvRideRouteScale.text = "임의주행 · GPX/충전소 거리축 없음"
+        switchRideTestMode.visibility = View.GONE
         tvBatteryRange.text = when {
             freshSoc != null -> "● BLE 실제 · 임의주행 · GPS + 배터리 자동 기록"
             storedSoc != null -> "최근 실측 $storedSoc% · BLE 재연결 중 · 임의주행"
@@ -3140,10 +3206,12 @@ class MainActivity : Activity() {
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             tripPlanner = EnergyTripPlanner(basePlan, plan)
+            configureRideRouteVisuals()
         }
         loadBleSnapshot()
         applySettings()
         renderCourseQuick()
+        refreshRidePositionControls()
         refreshInlineSettings()
         refreshLearningPage()
         renderCurrentMode()
