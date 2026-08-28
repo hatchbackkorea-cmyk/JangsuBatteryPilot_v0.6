@@ -3024,7 +3024,9 @@ class MainActivity : Activity() {
     private data class ModeStrategyCell(
         val arrivalClock: String,
         val arrivalSocPct: Double,
-        val chargeTargetPct: Double?
+        val chargeTargetPct: Double?,
+        val stopMinutes: Double? = null,
+        val departureClock: String? = null
     )
 
     private data class ModeStrategyProjection(
@@ -3132,20 +3134,25 @@ class MainActivity : Activity() {
             val chargeTarget = cp?.chargeToPct?.takeIf {
                 !replanStore.isSkipped(courseMeta.id, cp.km) && !chargeCompletedAt(cp.km, context)
             }
-            cells += ModeStrategyCell(
-                arrivalClock = strategyClock(rideMinutes?.plus(stopMinutes)),
-                arrivalSocPct = soc,
-                chargeTargetPct = chargeTarget
-            )
-
-            if (chargeTarget != null) {
+            val arrivalTotalMinutes = rideMinutes?.plus(stopMinutes)
+            val chargeMinutes = if (chargeTarget != null) {
                 val activeHere = context.activeCharge?.takeIf { abs(it.routeKm - cp.km) <= 0.35 && abs(cp.km - currentKm) <= 0.20 }
-                val chargeMinutes = if (activeHere != null) {
+                if (activeHere != null) {
                     remainingChargeMinutesAt(cp, currentKm, context)
                 } else {
                     AvinoxChargeCurve.minutesBetween(soc, chargeTarget)
-                }
-                stopMinutes += chargeMinutes.coerceAtLeast(0.0)
+                }.coerceAtLeast(0.0)
+            } else null
+            cells += ModeStrategyCell(
+                arrivalClock = strategyClock(arrivalTotalMinutes),
+                arrivalSocPct = soc,
+                chargeTargetPct = chargeTarget,
+                stopMinutes = chargeMinutes,
+                departureClock = if (chargeMinutes != null) strategyClock(arrivalTotalMinutes?.plus(chargeMinutes)) else null
+            )
+
+            if (chargeTarget != null && chargeMinutes != null) {
+                stopMinutes += chargeMinutes
                 if (chargeTarget > soc) soc = chargeTarget.coerceIn(0.0, 100.0)
             }
         }
@@ -3244,7 +3251,12 @@ class MainActivity : Activity() {
                     soc <= finishTargetPct -> getColor(R.color.warn)
                     else -> getColor(R.color.text_primary)
                 }
-                tr.addView(strategyCell("${cell.arrivalClock}\n$socText", 72, selected = selected, textColor = color))
+                val cellText = if (cell.chargeTargetPct != null && cell.stopMinutes != null && cell.departureClock != null) {
+                    "${cell.arrivalClock}\n$socText\n정차 ${cell.stopMinutes.roundToInt()}분\n출발 ${cell.departureClock}"
+                } else {
+                    "${cell.arrivalClock}\n$socText"
+                }
+                tr.addView(strategyCell(cellText, 72, selected = selected, textColor = color))
             }
             tableModeStrategy.addView(tr)
         }
@@ -3275,7 +3287,7 @@ class MainActivity : Activity() {
     }
 
     /**
-     * v0.28.5: 기존 세로 ETA 문자열 대신 ECO/AUTO/TRAIL/TURBO를 같은 표에서 비교한다.
+     * v0.28.6: ECO/AUTO/TRAIL/TURBO 전략표에서 충전 포인트의 정차시간과 출발시각까지 함께 보여준다.
      * Avinox 외부 소비량 값은 표 계산에 절대 넣지 않고, 선택 모드는 강조 열에만 사용한다.
      */
     private fun renderPointEtas(km: Double, speedKmh: Double, context: EtaChargeContext) {
