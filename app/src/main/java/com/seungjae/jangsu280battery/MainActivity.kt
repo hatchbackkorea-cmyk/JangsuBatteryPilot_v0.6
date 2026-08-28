@@ -2817,10 +2817,10 @@ class MainActivity : Activity() {
     }
 
     /**
-     * v0.28.0 AI 주행 어시스트.
+     * v0.28.2 SOC 연동 AI 주행 어시스트.
      * 라이더/모터파워·케이던스는 A+ 학습 기반 목표 범위다.
      * 기어는 PL Carbon 순정 34T / 10-52T와 29x2.4 유효 둘레를 이용해
-     * 현재 속도에서 목표 케이던스에 가장 가까운 '권장 단수'를 계산한다.
+     * SOC 기반 권장 속도에서 목표 케이던스에 가장 가까운 '권장 단수'를 계산한다.
      * 실제 SRAM 현재 단수를 읽었다고 표현하지 않는다.
      */
     private fun renderRideAssistCoach(pacing: PacingAdvice, reserve: ReserveStatus) {
