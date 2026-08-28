@@ -1,3 +1,11 @@
+## v0.27.8 · 백그라운드 모바일 배포 + 위험/주행 어시스트 통합
+- 모바일 소스 배포를 `ReleaseDeployService` foreground dataSync 서비스로 분리했습니다. 화면을 나가거나 잠가도 GitHub push → Actions signed Release 대기 → APK 다운로드가 계속됩니다.
+- 같은 버전 Release가 이미 있으면 오류로 끝내지 않고 기존 Release를 이어받아 APK 준비 상태로 복구합니다.
+- 배포 상태/진행률/로그/APK 경로를 SharedPreferences에 저장해 배포 페이지 재진입 시 현재 상태를 복구합니다.
+- signed APK가 준비되면 알림을 남기고 앱의 `완성된 APK 설치` 버튼에서 바로 Android 설치 화면으로 연결합니다.
+- 첫 페이지의 `위험/여유` 박스와 `AI 주행 어시스트` 박스를 하나의 대형 패널로 통합했습니다.
+- 위험 상태 25sp, 핵심 어시스트 20sp, RIDER/MOTOR/CAD/GEAR 목표 15sp로 확대하고 한 화면에서 읽기 쉬운 계층으로 재배치했습니다.
+
 # v0.27.7 — 통합 모드 카드 + AI 주행 어시스트 확대
 - 주행 첫 화면의 독립 Avinox 모드 배너를 제거하고 현재 거리·모드·배터리·고도 프로필 카드로 통합했습니다.
 - 통합 카드는 ECO/AUTO/TRAIL/TURBO 색상으로 전체 배경이 바뀌며 AUTO 추정 등급도 카드 안에 유지합니다.

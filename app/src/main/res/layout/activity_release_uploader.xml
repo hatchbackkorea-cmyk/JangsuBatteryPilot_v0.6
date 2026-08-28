@@ -156,7 +156,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:enabled="false"
-                android:text="GitHub main에 배포" />
+                android:text="GitHub main에 백그라운드 배포" />
 
             <Button
                 android:id="@+id/btnCheckRelease"
@@ -172,7 +172,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:enabled="false"
-                android:text="완성된 APK 다운로드 · 설치" />
+                android:text="완성된 APK 설치" />
 
             <ProgressBar
                 android:id="@+id/progress"
