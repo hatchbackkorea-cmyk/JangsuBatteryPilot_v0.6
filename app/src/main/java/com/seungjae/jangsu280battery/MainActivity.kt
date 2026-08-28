@@ -152,6 +152,8 @@ class MainActivity : Activity() {
     private lateinit var btnLearningGpx: Button
     private lateinit var btnLearningManage: Button
     private lateinit var btnLearningClear: Button
+    private lateinit var btnPageMobileRelease: Button
+    private lateinit var tvPageMobileReleaseStatus: TextView
     private lateinit var pagerFlipper: ViewFlipper
     private lateinit var tvPagerIndicator: TextView
     private lateinit var pagerGesture: GestureDetector
@@ -289,6 +291,7 @@ class MainActivity : Activity() {
         btnPostRideLearn.setOnClickListener { learnLastFreeRide() }
         setupInlineSettings()
         setupLearningPage()
+        setupMobileReleasePage()
         setupSwipePager()
 
         renderCourseQuick()
@@ -405,6 +408,8 @@ class MainActivity : Activity() {
         btnLearningGpx = findViewById(R.id.btnLearningGpx)
         btnLearningManage = findViewById(R.id.btnLearningManage)
         btnLearningClear = findViewById(R.id.btnLearningClear)
+        btnPageMobileRelease = findViewById(R.id.btnPageMobileRelease)
+        tvPageMobileReleaseStatus = findViewById(R.id.tvPageMobileReleaseStatus)
         pagerFlipper = findViewById(R.id.pagerFlipper)
         tvPagerIndicator = findViewById(R.id.tvPagerIndicator)
     }
@@ -1986,6 +1991,18 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun setupMobileReleasePage() {
+        val repo = UpdateManager.repository().ifBlank { BuildConfig.UPDATE_REPOSITORY.orEmpty() }
+        tvPageMobileReleaseStatus.text = buildString {
+            append("현재 v${appVersionName()}")
+            if (repo.isNotBlank()) append(" · $repo")
+            append("\n새 소스 ZIP을 휴대폰에서 바로 GitHub main으로 배포할 수 있습니다.")
+        }
+        btnPageMobileRelease.setOnClickListener {
+            startActivity(Intent(this, ReleaseUploaderActivity::class.java))
+        }
+    }
+
     private fun setupSwipePager() {
         pagerFlipper.displayedChild = 0
         updatePagerIndicator()
@@ -1996,7 +2013,7 @@ class MainActivity : Activity() {
                 val dx = e2.x - start.x
                 val dy = e2.y - start.y
                 if (abs(dx) < 90f || abs(dx) < abs(dy) * 1.25f || abs(velocityX) < 250f) return false
-                if (dx < 0) showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(4))
+                if (dx < 0) showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
                 else showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
                 return true
             }
@@ -2020,15 +2037,15 @@ class MainActivity : Activity() {
     }
 
     private fun showPagerChild(index: Int) {
-        val target = index.coerceIn(0, 4)
+        val target = index.coerceIn(0, 5)
         if (target == pagerFlipper.displayedChild) return
         pagerFlipper.displayedChild = target
         updatePagerIndicator()
     }
 
     private fun updatePagerIndicator() {
-        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백")
-        val dots = (0..4).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
+        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배포")
+        val dots = (0..5).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
         tvPagerIndicator.text = "$dots   ${labels[pagerFlipper.displayedChild]}"
     }
 
