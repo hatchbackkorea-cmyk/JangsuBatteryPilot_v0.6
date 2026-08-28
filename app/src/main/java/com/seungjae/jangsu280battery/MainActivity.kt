@@ -84,6 +84,9 @@ class MainActivity : Activity() {
     private lateinit var tvRideMode: TextView
     private lateinit var tvAssistModeCurrent: TextView
     private lateinit var layoutAssistModeBanner: LinearLayout
+    private lateinit var layoutRideHero: LinearLayout
+    private lateinit var tvCurrentKmLabel: TextView
+    private lateinit var tvBatteryLabel: TextView
     private lateinit var layoutAutoEstimate: LinearLayout
     private lateinit var tvAutoEstimateLabel: TextView
     private lateinit var tvAutoEstimateGrade: TextView
@@ -127,6 +130,7 @@ class MainActivity : Activity() {
     private lateinit var tvElevationAhead: TextView
     private lateinit var tvTenKmBattery: TextView
     private lateinit var tvAssist: TextView
+    private lateinit var tvAssistTargets: TextView
     private lateinit var tvNextClimb: TextView
     private lateinit var tvNextClimbDetail: TextView
     private lateinit var tvCourseStatus: TextView
@@ -355,6 +359,9 @@ class MainActivity : Activity() {
         tvRideMode = findViewById(R.id.tvRideMode)
         tvAssistModeCurrent = findViewById(R.id.tvAssistModeCurrent)
         layoutAssistModeBanner = findViewById(R.id.layoutAssistModeBanner)
+        layoutRideHero = findViewById(R.id.layoutRideHero)
+        tvCurrentKmLabel = findViewById(R.id.tvCurrentKmLabel)
+        tvBatteryLabel = findViewById(R.id.tvBatteryLabel)
         layoutAutoEstimate = findViewById(R.id.layoutAutoEstimate)
         tvAutoEstimateLabel = findViewById(R.id.tvAutoEstimateLabel)
         tvAutoEstimateGrade = findViewById(R.id.tvAutoEstimateGrade)
@@ -398,6 +405,7 @@ class MainActivity : Activity() {
         tvElevationAhead = findViewById(R.id.tvElevationAhead)
         tvTenKmBattery = findViewById(R.id.tvTenKmBattery)
         tvAssist = findViewById(R.id.tvAssist)
+        tvAssistTargets = findViewById(R.id.tvAssistTargets)
         tvNextClimb = findViewById(R.id.tvNextClimb)
         tvNextClimbDetail = findViewById(R.id.tvNextClimbDetail)
         tvCourseStatus = findViewById(R.id.tvCourseStatus)
@@ -816,40 +824,55 @@ class MainActivity : Activity() {
     private fun renderAssistIdle(text: String) {
         layoutAutoEstimate.visibility = View.GONE
         tvAssistModeCurrent.text = text
-        tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-        tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_idle_bg)
+        tvAssistModeCurrent.setBackgroundColor(Color.TRANSPARENT)
         lastRenderedAssistMode = null
         lastRenderedAutoEstimate = null
+        applyRideHeroModeStyle(null)
     }
 
     private fun renderAssistModeBanner(mode: AvinoxAssistMode, tentative: Boolean) {
         val changed = lastRenderedAssistMode != mode
         renderAssistModeAndRange(mode, tentative)
+        tvAssistModeCurrent.setBackgroundColor(Color.TRANSPARENT)
         when (mode) {
-            AvinoxAssistMode.ECO -> {
-                layoutAutoEstimate.visibility = View.GONE
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_eco_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-            }
+            AvinoxAssistMode.ECO -> layoutAutoEstimate.visibility = View.GONE
             AvinoxAssistMode.AUTO -> {
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_auto_left_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
                 layoutAutoEstimate.visibility = View.VISIBLE
                 renderAutoEstimateSegment()
             }
-            AvinoxAssistMode.TRAIL -> {
-                layoutAutoEstimate.visibility = View.GONE
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_trail_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.assist_dark_text))
-            }
-            AvinoxAssistMode.TURBO -> {
-                layoutAutoEstimate.visibility = View.GONE
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_turbo_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-            }
+            AvinoxAssistMode.TRAIL -> layoutAutoEstimate.visibility = View.GONE
+            AvinoxAssistMode.TURBO -> layoutAutoEstimate.visibility = View.GONE
         }
+        applyRideHeroModeStyle(mode)
         if (changed) popModeBanner()
         lastRenderedAssistMode = mode
+    }
+
+    /** v0.27.7: 거리·모드·SOC·고도 프로필을 하나의 모드 색상 카드로 통합한다. */
+    private fun applyRideHeroModeStyle(mode: AvinoxAssistMode?) {
+        if (!::layoutRideHero.isInitialized) return
+        val darkText = mode == AvinoxAssistMode.TRAIL
+        val fg = getColor(if (darkText) R.color.assist_dark_text else R.color.text_primary)
+        val secondary = if (darkText) Color.argb(190, Color.red(fg), Color.green(fg), Color.blue(fg)) else getColor(R.color.text_primary)
+        val bg = when (mode) {
+            AvinoxAssistMode.ECO -> R.drawable.assist_mode_eco_bg
+            AvinoxAssistMode.AUTO -> R.drawable.assist_mode_auto_bg
+            AvinoxAssistMode.TRAIL -> R.drawable.assist_mode_trail_bg
+            AvinoxAssistMode.TURBO -> R.drawable.assist_mode_turbo_bg
+            null -> R.drawable.assist_mode_idle_bg
+        }
+        layoutRideHero.setBackgroundResource(bg)
+        tvAssistModeCurrent.setBackgroundColor(Color.TRANSPARENT)
+        tvAssistModeCurrent.setTextColor(fg)
+        tvCurrentKm.setTextColor(fg)
+        tvCurrentKmLabel.setTextColor(secondary)
+        tvBatteryLabel.setTextColor(secondary)
+        tvRideRouteScale.setTextColor(secondary)
+        tvSafeReachMargin.setTextColor(fg)
+        tvHardReachMargin.setTextColor(fg)
+        switchRideTestMode.setTextColor(fg)
+        // 모드가 잡힌 주행 중에는 카드 자체가 상태색이므로 SOC 숫자는 가독성 우선.
+        if (mode != null) tvBattery.setTextColor(fg)
     }
 
     /**
@@ -891,12 +914,9 @@ class MainActivity : Activity() {
     }
 
     private fun renderAssistModeAndRange(mode: AvinoxAssistMode, tentative: Boolean) {
-        val modeText = mode.name + if (tentative) " ?" else ""
-        val rangeText = assistModeRangeText(mode)
-        val full = "$modeText   $rangeText"
-        val span = SpannableString(full)
-        span.setSpan(RelativeSizeSpan(0.50f), modeText.length, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        tvAssistModeCurrent.text = span
+        // v0.27.7: 도달거리는 바로 아래 프로필의 파란/빨간 선이 담당한다.
+        // 통합 카드 중앙에는 주행 중 한눈에 읽히도록 모드명만 크게 표시한다.
+        tvAssistModeCurrent.text = mode.name + if (tentative) " ?" else ""
     }
 
     private fun renderAutoEstimateSegment() {
@@ -940,11 +960,11 @@ class MainActivity : Activity() {
     }
 
     private fun popModeBanner() {
-        layoutAssistModeBanner.animate().cancel()
-        layoutAssistModeBanner.scaleX = 1f
-        layoutAssistModeBanner.scaleY = 1f
-        layoutAssistModeBanner.animate().scaleX(1.055f).scaleY(1.055f).setDuration(90L).withEndAction {
-            layoutAssistModeBanner.animate().scaleX(1f).scaleY(1f).setDuration(150L).start()
+        layoutRideHero.animate().cancel()
+        layoutRideHero.scaleX = 1f
+        layoutRideHero.scaleY = 1f
+        layoutRideHero.animate().scaleX(1.025f).scaleY(1.025f).setDuration(90L).withEndAction {
+            layoutRideHero.animate().scaleX(1f).scaleY(1f).setDuration(150L).start()
         }.start()
     }
 
@@ -2579,6 +2599,7 @@ class MainActivity : Activity() {
         }
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        applyRideHeroModeStyle(if (logManager.isActive()) lastRenderedAssistMode else null)
         renderRideRouteVisual(km, simulated)
         tvBatteryRange.text = when {
             simulated -> "테스트 · 계획 $planPct% · 예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
@@ -2674,17 +2695,7 @@ class MainActivity : Activity() {
         val battery10Pct = replannedProjectedSoc(km, battery10TargetKm, currentSocForReplan(km), etaContext)
         tvTenKmBattery.text = "10km 후 ${battery10Pct.roundToInt()}% · 실시간 재계획"
         val pacing = pacingAdvisor.advice(km, latestSpeedKmh, reserve)
-        val reservePrefix = when (reserve.label) {
-            "위험" -> "⚠ 목표보다 ${(-reserve.differencePct).coerceAtLeast(0.0).roundToInt()}% 부족 · 절약 페이스\n"
-            "주의" -> "목표선 근처 · 절약 우선\n"
-            else -> ""
-        }
-        tvAssist.text = "${pacing.title}\n$reservePrefix${pacing.displayText}"
-        tvAssist.setTextColor(when {
-            reserve.label == "위험" -> getColor(R.color.danger)
-            reserve.label == "주의" -> getColor(R.color.warn)
-            else -> getColor(R.color.good)
-        })
+        renderRideAssistCoach(pacing, reserve)
         tvNextPoi.text = poi?.let {
             val remainPoi = (it.routeKm - km).coerceAtLeast(0.0)
             "다음 포인트 · ${it.name} · ${RideFormatter.one(remainPoi)}km · ${chargeAwareEtaClock(km, it.routeKm, etaSpeed, etaContext)}"
@@ -2708,6 +2719,37 @@ class MainActivity : Activity() {
         }
         profileView.setCurrentKm(km)
         renderRideState()
+    }
+
+    /**
+     * v0.27.7 AI 주행 어시스트.
+     * Avinox 라이더/모터파워·케이던스의 실시간 값은 아직 riding BLE에서 검증되지 않았으므로
+     * 현재값처럼 표시하지 않고 A+ 과거 학습에서 얻은 '목표 범위'만 제시한다.
+     */
+    private fun renderRideAssistCoach(pacing: PacingAdvice, reserve: ReserveStatus) {
+        val action = when {
+            reserve.label == "위험" -> "배터리 절약 · RIDER 상단 / MOTOR 하단"
+            reserve.label == "주의" -> "절약 페이스 · ${pacing.gearAdvice ?: "리듬 유지"}"
+            pacing.speedAction != null -> pacing.speedAction
+            pacing.terrain == PacingTerrain.STEEP_CLIMB -> "급경사 대비 · ${pacing.gearAdvice ?: "가볍게 변속"}"
+            pacing.terrain == PacingTerrain.CLIMB -> "업힐 리듬 · ${pacing.gearAdvice ?: "가볍게 변속"}"
+            else -> "현재 페이스 유지 · ${pacing.gearAdvice ?: "기어 유지"}"
+        }
+        tvAssist.text = action
+        tvAssist.setTextColor(when {
+            reserve.label == "위험" -> getColor(R.color.danger)
+            reserve.label == "주의" -> getColor(R.color.warn)
+            else -> getColor(R.color.good)
+        })
+
+        val rider = pacing.riderPowerW?.let { "RIDER ${it.text("W")}" } ?: "RIDER 학습중"
+        val motor = pacing.motorPowerW?.let { "MOTOR ≤${it.high}W" } ?: "MOTOR 학습중"
+        val cadence = pacing.cadenceRpm?.let { "CAD ${it.text("rpm")}" } ?: "CAD 학습중"
+        val gear = pacing.gearAdvice ?: "현재 기어 유지"
+        val diff = reserve.differencePct.roundToInt()
+        val margin = if (diff >= 0) "+$diff%" else "$diff%"
+        tvAssistTargets.text = "$rider · $motor\n$cadence · GEAR $gear\n도착 ${reserve.predictedPct.roundToInt()}% · 기준 ${reserve.targetPct.roundToInt()}% · $margin"
+        tvAssistTargets.setTextColor(getColor(R.color.text_primary))
     }
 
     private data class EtaChargeContext(
@@ -3315,6 +3357,7 @@ class MainActivity : Activity() {
         val displaySoc = freshSoc ?: storedSoc
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        applyRideHeroModeStyle(if (logManager.isActive()) lastRenderedAssistMode else null)
         rideMiniProfileView.visibility = View.GONE
         layoutRideReachMargins.visibility = View.GONE
         hideRideVisualWarning()
@@ -3344,7 +3387,8 @@ class MainActivity : Activity() {
         tvFinishEta.text = "종점 없음"
         tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
         tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "BLE 배터리 연결 대기"
-        tvAssist.text = "임의주행 데이터 수집 중 · GPS + Avinox BLE SOC 자동 저장\n종료 후 FIT · Avinox 예상값을 붙여 3자 비교"
+        tvAssist.text = "임의주행 · 데이터 수집 우선"
+        tvAssistTargets.text = "RIDER/MOTOR/CAD 목표는 GPX 계획주행에서 계산\n현재 모드·SOC·GPS는 계속 기록"
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
         tvPointEtaBasis.text = "계획주행에서 GPX 포인트 ETA를 표시합니다."

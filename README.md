@@ -1,4 +1,4 @@
-# GPX Battery Copilot v0.27.6
+# GPX Battery Copilot v0.27.7
 
 ## v0.27.6 포인트 ETA 주행/정차 시간 요약
 - 코스 페이지 포인트 ETA 상단에 `주행 n시간 n분 · 정차 n시간 n분`을 분리 표시합니다.

@@ -22,8 +22,10 @@ data class PacingAdvice(
     val displayText: String,
     val voiceText: String,
     val speedKph: IntRangeTarget?,
+    val riderPowerW: IntRangeTarget?,
     val motorPowerW: IntRangeTarget?,
     val cadenceRpm: IntRangeTarget?,
+    val gearAdvice: String?,
     val learnedSampleCount: Int,
     val confidence: Int,
     val learned: Boolean,
@@ -51,8 +53,10 @@ class EnergyPacingAdvisor(
                 displayText = "GPX 고도 데이터가 없어 지형별 목표 제한\n배터리·거리 어시스트만 사용",
                 voiceText = "이 GPX에는 고도 데이터가 없어 지형별 모터 출력과 케이던스 목표는 제시하지 않습니다.",
                 speedKph = null,
+                riderPowerW = null,
                 motorPowerW = null,
                 cadenceRpm = null,
+                gearAdvice = null,
                 learnedSampleCount = 0,
                 confidence = 0,
                 learned = false
@@ -77,8 +81,10 @@ class EnergyPacingAdvisor(
                 displayText = display,
                 voiceText = "다운힐 구간입니다. 모터 보조를 최소화하고 안전 속도를 우선하세요.",
                 speedKph = null,
+                riderPowerW = null,
                 motorPowerW = IntRangeTarget(0, 0),
                 cadenceRpm = null,
+                gearAdvice = "페달 최소 · 안전 우선",
                 learnedSampleCount = 0,
                 confidence = 100,
                 learned = false
@@ -99,15 +105,18 @@ class EnergyPacingAdvisor(
                 PacingTerrain.ROLLING -> "구릉 · 가속/감속 반복 줄이기"
                 else -> "완만한 구간 · 불필요한 가속 줄이기"
             }
+            val gear = gearAdviceFor(terrain, grade)
             return PacingAdvice(
                 terrain = terrain,
                 terrainGradePct = grade,
                 title = "에너지 페이스 · ${terrain.label}",
-                displayText = "$fallback\nFIT 학습 후 모터·rpm·속도 목표 생성",
-                voiceText = "$fallback. 아직 이 지형의 FIT 학습 데이터가 부족합니다.",
+                displayText = "$fallback\nRIDER·MOTOR·CAD 학습중 · GEAR $gear",
+                voiceText = "$fallback. 기어는 $gear. 라이더 파워와 모터 파워, 케이던스 목표는 학습 데이터가 더 필요합니다.",
                 speedKph = null,
+                riderPowerW = null,
                 motorPowerW = null,
                 cadenceRpm = null,
+                gearAdvice = gear,
                 learnedSampleCount = 0,
                 confidence = 0,
                 learned = false
@@ -130,6 +139,18 @@ class EnergyPacingAdvisor(
             profile.quality < 70 -> 1.25
             else -> 1.0
         }
+        val riderReserveFactor = when {
+            reserve.differencePct <= -6.0 -> 1.10
+            reserve.differencePct < -2.0 -> 1.06
+            reserve.differencePct < 2.0 -> 1.03
+            reserve.differencePct >= 9.0 -> 0.98
+            else -> 1.0
+        }
+        val riderTerrainFactor = if (terrain == PacingTerrain.STEEP_CLIMB) 1.05 else 1.0
+        val rider = profile.avgRiderPowerW?.let { center ->
+            val adjusted = center * riderReserveFactor * riderTerrainFactor
+            rangeAround(adjusted, max(12.0, adjusted * 0.12) * uncertainty, 50, 500, 5)
+        }
         val motor = profile.avgMotorPowerW?.let { center ->
             val adjusted = center * reserveFactor * steepMotorFactor
             rangeAround(adjusted, max(25.0, adjusted * 0.18) * uncertainty, 0, 1000, 10)
@@ -144,6 +165,8 @@ class EnergyPacingAdvisor(
             rangeAround(adjusted, baseHalf * uncertainty, 5, 45, 1)
         }
 
+        val gearAdvice = gearAdviceFor(terrain, grade)
+
         val speedAction = when {
             speed != null && currentSpeedKph > speed.high + 2.0 && reserve.differencePct < 2.0 -> {
                 val drop = (currentSpeedKph - speed.high).roundToInt().coerceIn(1, 8)
@@ -154,9 +177,11 @@ class EnergyPacingAdvisor(
 
         val lines = mutableListOf<String>()
         val targets = mutableListOf<String>()
-        motor?.let { targets += "목표 모터 ${it.text("W")}" }
-        cadence?.let { targets += "목표 ${it.text("rpm")}" }
+        rider?.let { targets += "RIDER ${it.text("W")}" }
+        motor?.let { targets += "MOTOR ${it.text("W")}" }
+        cadence?.let { targets += "CAD ${it.text("rpm")}" }
         if (targets.isNotEmpty()) lines += targets.joinToString(" · ")
+        lines += "GEAR $gearAdvice"
         val confidenceLabel = when {
             profile.sampleCount >= 5 && profile.quality >= 80 -> "높음"
             profile.sampleCount >= 2 && profile.quality >= 60 -> "보통"
@@ -169,8 +194,10 @@ class EnergyPacingAdvisor(
 
         val voiceParts = mutableListOf<String>()
         voiceParts += "${terrain.label} 구간입니다."
+        rider?.let { voiceParts += "라이더 파워 ${it.low}에서 ${it.high}와트." }
         motor?.let { voiceParts += "목표 모터 출력 ${it.low}에서 ${it.high}와트." }
         cadence?.let { voiceParts += "케이던스 ${it.low}에서 ${it.high}알피엠." }
+        voiceParts += "기어는 $gearAdvice."
         speed?.let { voiceParts += "속도 ${it.low}에서 ${it.high}킬로미터를 참고하세요." }
         speedAction?.let { voiceParts += it + "." }
 
@@ -181,8 +208,10 @@ class EnergyPacingAdvisor(
             displayText = lines.joinToString("\n"),
             voiceText = voiceParts.joinToString(" "),
             speedKph = speed,
+            riderPowerW = rider,
             motorPowerW = motor,
             cadenceRpm = cadence,
+            gearAdvice = gearAdvice,
             learnedSampleCount = profile.sampleCount,
             confidence = profile.quality,
             learned = true,
@@ -199,6 +228,19 @@ class EnergyPacingAdvisor(
         gradePct >= 4.0 || ascentPerKm >= 45.0 -> PacingTerrain.CLIMB
         ascentPerKm >= 15.0 -> PacingTerrain.ROLLING
         else -> PacingTerrain.FLAT
+    }
+
+    /**
+     * Live gear position is not yet decoded from the riding BLE stream.
+     * Therefore this is deliberately a shift strategy, not a claimed current gear number.
+     */
+    private fun gearAdviceFor(terrain: PacingTerrain, gradePct: Double): String = when {
+        terrain == PacingTerrain.DOWNHILL -> "페달 최소"
+        terrain == PacingTerrain.STEEP_CLIMB || gradePct >= 9.0 -> "1~2단 가볍게"
+        terrain == PacingTerrain.CLIMB || gradePct >= 4.0 -> "1단 가볍게"
+        terrain == PacingTerrain.ROLLING -> "리듬 유지 · 잦은 변속 금지"
+        gradePct <= -1.5 -> "1단 무겁게"
+        else -> "현재 기어 유지"
     }
 
     private fun rangeAround(center: Double, halfWidth: Double, min: Int, max: Int, step: Int): IntRangeTarget {
