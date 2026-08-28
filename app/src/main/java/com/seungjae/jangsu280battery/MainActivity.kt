@@ -2728,12 +2728,12 @@ class MainActivity : Activity() {
      */
     private fun renderRideAssistCoach(pacing: PacingAdvice, reserve: ReserveStatus) {
         val action = when {
-            reserve.label == "위험" -> "배터리 절약 · RIDER 상단 / MOTOR 하단"
-            reserve.label == "주의" -> "절약 페이스 · ${pacing.gearAdvice ?: "리듬 유지"}"
+            reserve.label == "위험" -> "배터리 절약"
+            reserve.label == "주의" -> "절약 페이스"
             pacing.speedAction != null -> pacing.speedAction
-            pacing.terrain == PacingTerrain.STEEP_CLIMB -> "급경사 대비 · ${pacing.gearAdvice ?: "가볍게 변속"}"
-            pacing.terrain == PacingTerrain.CLIMB -> "업힐 리듬 · ${pacing.gearAdvice ?: "가볍게 변속"}"
-            else -> "현재 페이스 유지 · ${pacing.gearAdvice ?: "기어 유지"}"
+            pacing.terrain == PacingTerrain.STEEP_CLIMB -> "급경사 대비"
+            pacing.terrain == PacingTerrain.CLIMB -> "업힐 리듬"
+            else -> "현재 페이스 유지"
         }
         tvAssist.text = action
         tvAssist.setTextColor(when {
@@ -2742,13 +2742,11 @@ class MainActivity : Activity() {
             else -> getColor(R.color.good)
         })
 
-        val rider = pacing.riderPowerW?.let { "RIDER ${it.text("W")}" } ?: "RIDER 학습중"
-        val motor = pacing.motorPowerW?.let { "MOTOR ≤${it.high}W" } ?: "MOTOR 학습중"
-        val cadence = pacing.cadenceRpm?.let { "CAD ${it.text("rpm")}" } ?: "CAD 학습중"
+        val rider = pacing.riderPowerW?.let { "라이더파워 ${it.text("W")}" } ?: "라이더파워 학습중"
+        val motor = pacing.motorPowerW?.let { "모터 ${it.high}W 이하" } ?: "모터 학습중"
+        val cadence = pacing.cadenceRpm?.let { "케이던스 ${it.text("rpm")}" } ?: "케이던스 학습중"
         val gear = pacing.gearAdvice ?: "현재 기어 유지"
-        val diff = reserve.differencePct.roundToInt()
-        val margin = if (diff >= 0) "+$diff%" else "$diff%"
-        tvAssistTargets.text = "$rider · $motor\n$cadence · GEAR $gear\n도착 ${reserve.predictedPct.roundToInt()}% · 기준 ${reserve.targetPct.roundToInt()}% · $margin"
+        tvAssistTargets.text = "$rider · $motor\n$cadence · 기어변속 $gear"
         tvAssistTargets.setTextColor(getColor(R.color.text_primary))
     }
 
@@ -3388,7 +3386,7 @@ class MainActivity : Activity() {
         tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
         tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "BLE 배터리 연결 대기"
         tvAssist.text = "임의주행 · 데이터 수집 우선"
-        tvAssistTargets.text = "RIDER/MOTOR/CAD 목표는 GPX 계획주행에서 계산\n현재 모드·SOC·GPS는 계속 기록"
+        tvAssistTargets.text = "라이더파워·모터·케이던스 목표는 GPX 계획주행에서 계산\n현재 모드·SOC·GPS는 계속 기록"
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
         tvPointEtaBasis.text = "계획주행에서 GPX 포인트 ETA를 표시합니다."
