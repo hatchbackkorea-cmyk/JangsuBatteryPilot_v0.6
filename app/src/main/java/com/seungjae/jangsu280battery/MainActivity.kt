@@ -24,6 +24,7 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.Gravity
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.view.WindowManager
@@ -37,6 +38,8 @@ import android.text.InputType
 import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.Switch
+import android.widget.TableLayout
+import android.widget.TableRow
 import android.widget.TextView
 import android.text.SpannableString
 import android.text.Spanned
@@ -45,6 +48,8 @@ import android.widget.Toast
 import android.widget.ViewFlipper
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -143,6 +148,7 @@ class MainActivity : Activity() {
     private lateinit var tvPointEtaBasis: TextView
     private lateinit var tvPointEtaRideTime: TextView
     private lateinit var tvPointEtaStopTime: TextView
+    private lateinit var tableModeStrategy: TableLayout
     private lateinit var tvVersion: TextView
     private lateinit var profileView: ElevationProfileView
     private lateinit var btnRideReport: Button
@@ -436,6 +442,7 @@ class MainActivity : Activity() {
         tvPointEtaBasis = findViewById(R.id.tvPointEtaBasis)
         tvPointEtaRideTime = findViewById(R.id.tvPointEtaRideTime)
         tvPointEtaStopTime = findViewById(R.id.tvPointEtaStopTime)
+        tableModeStrategy = findViewById(R.id.tableModeStrategy)
         tvVersion = findViewById(R.id.tvVersion)
         profileView = findViewById(R.id.profileView)
         btnRideReport = findViewById(R.id.btnRideReport)
@@ -3014,9 +3021,264 @@ class MainActivity : Activity() {
      * 충전 Checkpoint 자체를 ETA 시간축의 독립 이벤트로 넣고, 가까운 POI 이름은 보조 라벨로만 사용한다.
      * 따라서 등록 충전소가 GPX 보급 waypoint와 조금 어긋나 있어도 모든 충전시간이 표시/누적된다.
      */
-    private fun renderPointEtas(km: Double, speedKmh: Double, context: EtaChargeContext) {
-        renderPointEtaDurationSummary(km, speedKmh, context)
+    private data class ModeStrategyCell(
+        val arrivalClock: String,
+        val arrivalSocPct: Double,
+        val chargeTargetPct: Double?
+    )
 
+    private data class ModeStrategyProjection(
+        val cells: List<ModeStrategyCell>,
+        val rideMinutes: Double?,
+        val stopMinutes: Double,
+        val finishSocPct: Double,
+        val usedSpeedFallback: Boolean,
+        val batterySampleCount: Int
+    )
+
+    private fun strategyClock(totalMinutesFromNow: Double?): String {
+        if (totalMinutesFromNow == null || !totalMinutesFromNow.isFinite()) return "--:--"
+        val at = System.currentTimeMillis() + (totalMinutesFromNow.coerceAtLeast(0.0) * 60_000.0).toLong()
+        return SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(at))
+    }
+
+    private fun strategyDuration(totalMinutes: Double?): String {
+        if (totalMinutes == null || !totalMinutes.isFinite()) return "--"
+        val m = totalMinutes.coerceAtLeast(0.0).roundToInt()
+        return "%d:%02d".format(Locale.US, m / 60, m % 60)
+    }
+
+    /**
+     * v0.28.5 모드별 전략용 이동시간.
+     * 같은 미래 GPX 블록에 대해 실제 A+/A급 모드별 속도 학습을 우선 사용한다.
+     * 해당 지형/모드 속도 표본이 없을 때만 현재 이동평균 또는 전체 학습 속도를 보조값으로 쓴다.
+     */
+    private fun modeStrategyTravelMinutes(
+        fromKm: Double,
+        toKm: Double,
+        mode: AvinoxAssistMode,
+        fallbackSpeedKmh: Double,
+        speedCache: MutableMap<TerrainBucket, Pair<Double?, Boolean>>
+    ): Pair<Double?, Boolean> {
+        val startKm = fromKm.coerceIn(0.0, course.totalKm)
+        val endKm = toKm.coerceIn(startKm, course.totalKm)
+        if (endKm <= startKm + 0.001) return 0.0 to false
+
+        var x = startKm
+        var totalMinutes = 0.0
+        var usedFallback = false
+        while (x < endKm - 0.0001) {
+            val nx = (x + 0.5).coerceAtMost(endKm)
+            val dist = nx - x
+            val ascent = course.elevationBetween(x, nx).ascentM
+            val bucket = learningStore.bucket(dist, ascent)
+            val speedInfo = speedCache.getOrPut(bucket) {
+                val exact = learningStore.learnedSpeedKphForMode(bucket, mode)?.takeIf { it >= 3.0 }
+                if (exact != null) {
+                    exact to false
+                } else {
+                    val fallback = fallbackSpeedKmh.takeIf { it >= 3.0 }
+                        ?: learningStore.assistProfile(bucket, null)?.avgSpeedKph?.takeIf { it >= 3.0 }
+                    fallback to true
+                }
+            }
+            val speed = speedInfo.first ?: return null to true
+            usedFallback = usedFallback || speedInfo.second
+            totalMinutes += dist / speed * 60.0
+            x = nx
+        }
+        return totalMinutes to usedFallback
+    }
+
+    /**
+     * 한 모드를 지금부터 고정해서 탄다고 가정한 전략 시뮬레이션.
+     * Avinox 외부 예상 소비율 숫자는 사용하지 않고 우리 모드별 학습 + GPX만 사용한다.
+     */
+    private fun projectModeStrategy(
+        mode: AvinoxAssistMode,
+        currentKm: Double,
+        currentSoc: Double,
+        timeline: List<PointEtaTimelineRow>,
+        fallbackSpeedKmh: Double,
+        context: EtaChargeContext
+    ): ModeStrategyProjection {
+        var cursorKm = currentKm.coerceIn(0.0, course.totalKm)
+        var soc = currentSoc.coerceIn(0.0, 100.0)
+        var rideMinutes: Double? = 0.0
+        var stopMinutes = 0.0
+        var speedFallback = false
+        val speedCache = mutableMapOf<TerrainBucket, Pair<Double?, Boolean>>()
+        val cells = ArrayList<ModeStrategyCell>(timeline.size)
+        val modeAverageUsePerKm = if (course.totalKm > 0.1) {
+            learningStore.estimateConsumption(course, 0.0, course.totalKm, mode) / course.totalKm
+        } else 0.0
+
+        timeline.forEach { row ->
+            val targetKm = row.routeKm.coerceIn(currentKm, course.totalKm)
+            if (targetKm > cursorKm + 0.001) {
+                soc -= learningStore.estimateConsumption(course, cursorKm, targetKm, mode)
+                val travel = modeStrategyTravelMinutes(cursorKm, targetKm, mode, fallbackSpeedKmh, speedCache)
+                if (rideMinutes != null && travel.first != null) rideMinutes = rideMinutes!! + travel.first!! else if (travel.first == null) rideMinutes = null
+                speedFallback = speedFallback || travel.second
+                cursorKm = targetKm
+            }
+
+            val cp = row.chargingCheckpoint
+            if (cp != null && cp.detourKm > 0.0) {
+                soc -= cp.detourKm * modeAverageUsePerKm
+            }
+            soc = soc.coerceIn(0.0, 100.0)
+
+            val chargeTarget = cp?.chargeToPct?.takeIf {
+                !replanStore.isSkipped(courseMeta.id, cp.km) && !chargeCompletedAt(cp.km, context)
+            }
+            cells += ModeStrategyCell(
+                arrivalClock = strategyClock(rideMinutes?.plus(stopMinutes)),
+                arrivalSocPct = soc,
+                chargeTargetPct = chargeTarget
+            )
+
+            if (chargeTarget != null) {
+                val activeHere = context.activeCharge?.takeIf { abs(it.routeKm - cp.km) <= 0.35 && abs(cp.km - currentKm) <= 0.20 }
+                val chargeMinutes = if (activeHere != null) {
+                    remainingChargeMinutesAt(cp, currentKm, context)
+                } else {
+                    AvinoxChargeCurve.minutesBetween(soc, chargeTarget)
+                }
+                stopMinutes += chargeMinutes.coerceAtLeast(0.0)
+                if (chargeTarget > soc) soc = chargeTarget.coerceIn(0.0, 100.0)
+            }
+        }
+
+        return ModeStrategyProjection(
+            cells = cells,
+            rideMinutes = rideMinutes,
+            stopMinutes = stopMinutes,
+            finishSocPct = cells.lastOrNull()?.arrivalSocPct ?: soc,
+            usedSpeedFallback = speedFallback,
+            batterySampleCount = learningStore.batterySampleCountForMode(mode)
+        )
+    }
+
+    private fun strategyModeColor(mode: AvinoxAssistMode): Int = when (mode) {
+        AvinoxAssistMode.ECO -> getColor(R.color.assist_eco)
+        AvinoxAssistMode.AUTO -> getColor(R.color.assist_auto)
+        AvinoxAssistMode.TRAIL -> getColor(R.color.assist_trail)
+        AvinoxAssistMode.TURBO -> getColor(R.color.assist_turbo)
+    }
+
+    private fun strategyCell(
+        text: String,
+        widthDp: Int,
+        selected: Boolean = false,
+        header: Boolean = false,
+        textColor: Int = getColor(R.color.text_primary),
+        gravity: Int = Gravity.CENTER
+    ): TextView {
+        val density = resources.displayMetrics.density
+        val widthPx = (widthDp * density).roundToInt()
+        val padH = (4 * density).roundToInt()
+        val padV = (6 * density).roundToInt()
+        return TextView(this).apply {
+            layoutParams = TableRow.LayoutParams(widthPx, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                val gap = (1 * density).roundToInt()
+                setMargins(gap, gap, gap, gap)
+            }
+            this.text = text
+            this.gravity = gravity
+            setPadding(padH, padV, padH, padV)
+            setTextColor(textColor)
+            textSize = if (header) 12f else 11f
+            if (header || selected) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setBackgroundColor(when {
+                selected -> getColor(R.color.accent_dark)
+                header -> getColor(R.color.panel2)
+                else -> getColor(R.color.panel)
+            })
+            minHeight = (42 * density).roundToInt()
+        }
+    }
+
+    private fun renderModeStrategyTable(
+        km: Double,
+        speedKmh: Double,
+        context: EtaChargeContext,
+        timeline: List<PointEtaTimelineRow>
+    ) {
+        tableModeStrategy.removeAllViews()
+        val modes = listOf(AvinoxAssistMode.ECO, AvinoxAssistMode.AUTO, AvinoxAssistMode.TRAIL, AvinoxAssistMode.TURBO)
+        val selectedName = avinoxReferenceStore.get(courseMeta.id)?.selectedMode?.name
+            ?: assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }?.name
+        val currentSoc = currentSocForReplan(km)
+        val projections = modes.associateWith { mode ->
+            projectModeStrategy(mode, km, currentSoc, timeline, speedKmh, context)
+        }
+
+        val header = TableRow(this)
+        header.addView(strategyCell("포인트", 94, header = true, gravity = Gravity.START or Gravity.CENTER_VERTICAL))
+        modes.forEach { mode ->
+            val p = projections.getValue(mode)
+            val selected = mode.name == selectedName
+            val sampleMark = if (p.batterySampleCount <= 0) "※" else ""
+            header.addView(strategyCell(mode.name + sampleMark, 72, selected = selected, header = true, textColor = strategyModeColor(mode)))
+        }
+        tableModeStrategy.addView(header)
+
+        timeline.forEachIndexed { index, row ->
+            val tr = TableRow(this)
+            val label = row.chargingCheckpoint?.name ?: row.poi?.name ?: "종점"
+            val mark = when {
+                row.chargingCheckpoint != null -> "◆"
+                row.poi?.isSupplyLike() == true -> "◇"
+                row.routeKm >= course.totalKm - 0.05 -> "◎"
+                else -> "•"
+            }
+            tr.addView(strategyCell("$mark $label\n${RideFormatter.one(row.routeKm)}km", 94, gravity = Gravity.START or Gravity.CENTER_VERTICAL))
+            modes.forEach { mode ->
+                val cell = projections.getValue(mode).cells[index]
+                val soc = cell.arrivalSocPct.roundToInt().coerceIn(0, 100)
+                val socText = cell.chargeTargetPct?.let { target -> "$soc→${target.roundToInt()}%" } ?: "$soc%"
+                val selected = mode.name == selectedName
+                val color = when {
+                    soc <= AppSettings.hardReserve(this) -> getColor(R.color.danger)
+                    soc <= finishTargetPct -> getColor(R.color.warn)
+                    else -> getColor(R.color.text_primary)
+                }
+                tr.addView(strategyCell("${cell.arrivalClock}\n$socText", 72, selected = selected, textColor = color))
+            }
+            tableModeStrategy.addView(tr)
+        }
+
+        val summary = TableRow(this)
+        summary.addView(strategyCell("전체\n남은 전략", 94, header = true, gravity = Gravity.START or Gravity.CENTER_VERTICAL))
+        modes.forEach { mode ->
+            val p = projections.getValue(mode)
+            val total = p.rideMinutes?.plus(p.stopMinutes)
+            val selected = mode.name == selectedName
+            val text = "총 ${strategyDuration(total)}\n정차 ${p.stopMinutes.roundToInt()}분\n종점 ${p.finishSocPct.roundToInt().coerceIn(0, 100)}%"
+            summary.addView(strategyCell(text, 72, selected = selected, header = true, textColor = strategyModeColor(mode)))
+        }
+        tableModeStrategy.addView(summary)
+
+        val fallbackModes = modes.filter { projections.getValue(it).usedSpeedFallback || projections.getValue(it).batterySampleCount <= 0 }
+        val selectedText = modes.firstOrNull { it.name == selectedName }?.label?.let { " · 현재 비교 $it 열 강조" }.orEmpty()
+        tvPointEtaBasis.text = buildString {
+            append("우리 GPX + 모드별 개인학습 전략")
+            append(selectedText)
+            append(" · 각 열은 해당 모드 고정 가정")
+            if (fallbackModes.isNotEmpty()) {
+                append("\n※ ${fallbackModes.joinToString("/") { it.label }} 일부 학습 부족: 현재 이동평균/전체 학습을 시간 보조값으로 사용")
+            } else {
+                append(" · A+ 원본/검증 학습 속도·SOC 사용")
+            }
+        }
+    }
+
+    /**
+     * v0.28.5: 기존 세로 ETA 문자열 대신 ECO/AUTO/TRAIL/TURBO를 같은 표에서 비교한다.
+     * Avinox 외부 소비량 값은 표 계산에 절대 넣지 않고, 선택 모드는 강조 열에만 사용한다.
+     */
+    private fun renderPointEtas(km: Double, speedKmh: Double, context: EtaChargeContext) {
         val upcomingPois = course.pois
             .asSequence()
             .filter { it.routeKm >= km - 0.05 }
@@ -3030,49 +3292,24 @@ class MainActivity : Activity() {
             .sortedBy { it.km }
             .toList()
 
-        // 충전소와 거의 같은 위치의 POI만 중복 제거한다. 충전소 자체는 항상 별도 행으로 남는다.
         val poiRows = upcomingPois
             .filter { poi -> plannedCharges.none { cp -> abs(cp.km - poi.routeKm) <= 0.12 } }
             .map { PointEtaTimelineRow(routeKm = it.routeKm, poi = it) }
         val chargeRows = plannedCharges.map { PointEtaTimelineRow(routeKm = it.km, chargingCheckpoint = it) }
-        val timeline = (poiRows + chargeRows).sortedWith(
+        val finishAlreadyPresent = (poiRows + chargeRows).any { abs(it.routeKm - course.totalKm) <= 0.05 }
+        val finishRow = if (finishAlreadyPresent || course.totalKm < km - 0.05) emptyList()
+            else listOf(PointEtaTimelineRow(routeKm = course.totalKm))
+        val timeline = (poiRows + chargeRows + finishRow).sortedWith(
             compareBy<PointEtaTimelineRow> { it.routeKm }
                 .thenBy { if (it.chargingCheckpoint != null) 0 else 1 }
         )
 
-        val emergencyEta = replanStore.active(courseMeta.id) != null
-        tvPointEtaBasis.text = if (speedKmh >= 3.0) {
-            "이동평균 ${RideFormatter.one(speedKmh)}km/h + ${if (emergencyEta) "비상 우회/충전/복귀 + " else ""}남은 충전시간 포함 · 등록 충전소 ${plannedCharges.size}개 · 자동 재계산"
-        } else {
-            "이동속도가 잡히면 주행시간 + 계획/비상 충전시간을 합쳐 ETA를 계산합니다. · 등록 충전소 ${plannedCharges.size}개"
+        if (timeline.isEmpty()) {
+            tableModeStrategy.removeAllViews()
+            tvPointEtaBasis.text = "남은 포인트 없음 · 코스 완료"
+            return
         }
-
-        tvPointEtaList.text = if (timeline.isEmpty()) {
-            "남은 포인트 없음 · 종점 ${chargeAwareEtaClock(km, course.totalKm, speedKmh, context)}"
-        } else {
-            timeline.joinToString("\n") { row ->
-                val cp = row.chargingCheckpoint
-                if (cp != null) {
-                    val eta = chargeAwareEtaClock(km, cp.km, speedKmh, context)
-                    val nearPoi = upcomingPois
-                        .minByOrNull { abs(it.routeKm - cp.km) }
-                        ?.takeIf { abs(it.routeKm - cp.km) <= 0.50 }
-                    val nearbyName = nearPoi?.name
-                        ?.takeIf { it.isNotBlank() && !cp.name.contains(it, ignoreCase = true) && !it.contains(cp.name, ignoreCase = true) }
-                    val label = if (nearbyName != null) "${cp.name} · $nearbyName" else cp.name
-                    if (replanStore.isSkipped(courseMeta.id, cp.km)) {
-                        "◆ ${RideFormatter.one(cp.km)}km · 도착 $eta · $label\n   ↳ 충전 생략 확정 · 충전시간 0분 반영"
-                    } else {
-                        "◆ ${RideFormatter.one(cp.km)}km · 도착 $eta · $label\n   ↳ ${cp.chargeToPct!!.roundToInt()}% 충전 · 예상 출발 ${chargeAwareDepartureClock(km, cp, speedKmh, context)}"
-                    }
-                } else {
-                    val p = row.poi!!
-                    val mark = if (p.isSupplyLike()) "◇" else "•"
-                    val eta = chargeAwareEtaClock(km, p.routeKm, speedKmh, context)
-                    "$mark ${RideFormatter.one(p.routeKm)}km · $eta · ${p.name}"
-                }
-            }
-        }
+        renderModeStrategyTable(km, speedKmh, context, timeline)
     }
 
 

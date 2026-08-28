@@ -1,3 +1,13 @@
+# v0.28.5 — ECO/AUTO/TRAIL/TURBO 주행 전략 테이블
+- 2페이지 `포인트별 예상 도착시각`을 4모드 비교 테이블로 교체.
+- 모든 포인트에 모드별 도착시각과 우리 모델 예상 SOC를 동시에 표시.
+- 계획 충전소는 모드별 도착 SOC와 공통 사용자 충전 목표를 `도착→충전` 형태로 표시.
+- 하단 전체 행에 모드별 총 소요시간 / 충전 정차시간 / 종점 SOC를 표시.
+- 각 모드 SOC는 `BatteryLearningStore.estimateConsumption(..., mode)`로 명시적 모드 추론하여 현재 선택 모드 전역값에 섞이지 않음.
+- 모드별 ETA는 같은 GPX의 지형 bucket별 실제 모드 속도 학습을 사용하며, 표본 부족 시에만 현재 이동평균/전체 속도 학습을 보조값으로 사용하고 `※` 표기.
+- Avinox 외부 benchmark 소비량 숫자는 전략표 계산에 0% 반영. 선택된 benchmark 모드는 강조 열에만 사용.
+- Avinox 원본 Proto A+ 학습을 주 경로로 유지하고 FIT 단독은 B급 백업으로 유지.
+
 # v0.28.4 — Avinox 비교 모드 ↔ 자체 예측 모드 동기화
 - 버그 수정: Avinox 비교 모드를 ECO/AUTO/TRAIL/TURBO로 바꿔도 첫 페이지의 자체 예상 SOC가 고정되던 문제 수정.
 - Avinox에서 선택한 비교 모드를 테스트/계획주행의 자체 BatteryLearningStore 모드 기준과 동기화.
