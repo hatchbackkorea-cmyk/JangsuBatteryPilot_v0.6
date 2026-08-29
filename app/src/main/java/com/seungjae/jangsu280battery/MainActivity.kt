@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -29,6 +30,7 @@ import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
 import android.media.AudioManager
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -49,6 +51,9 @@ import android.widget.ViewFlipper
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.text.SimpleDateFormat
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -139,7 +144,8 @@ class MainActivity : Activity() {
     private lateinit var tvElevationAhead: TextView
     private lateinit var tvTenKmBattery: TextView
     private lateinit var tvAssist: TextView
-    private lateinit var tvAssistTargets: TextView
+    private lateinit var rideMapPreview: ImageView
+    private lateinit var tvRideMapPreviewStatus: TextView
     private lateinit var tvNextClimb: TextView
     private lateinit var tvNextClimbDetail: TextView
     private lateinit var tvCourseStatus: TextView
@@ -190,15 +196,15 @@ class MainActivity : Activity() {
     // v0.28.1 rain / touch-lock controller.
     // Unlocked: volume buttons keep their normal media-volume role.
     // Locked: VOL+ short = next page, VOL- short = previous page.
-    // VOL- long (1.5s) toggles touch lock in either state.
+    // VOL+ long (1.5s) toggles touch lock in either state.
     private var touchLocked = false
     private val volumeKeyHandler = Handler(Looper.getMainLooper())
-    private var volumeDownPressedAtMs = 0L
-    private var volumeDownLongHandled = false
+    private var volumeUpPressedAtMs = 0L
+    private var volumeUpLongHandled = false
     private val touchLockPrefs by lazy { getSharedPreferences("rain_touch_lock", Context.MODE_PRIVATE) }
     private val touchLockLongPress = Runnable {
-        if (volumeDownPressedAtMs > 0L && !volumeDownLongHandled) {
-            volumeDownLongHandled = true
+        if (volumeUpPressedAtMs > 0L && !volumeUpLongHandled) {
+            volumeUpLongHandled = true
             setTouchLocked(!touchLocked, announce = true)
         }
     }
@@ -210,6 +216,9 @@ class MainActivity : Activity() {
     private var latestCourseElevation = 0.0
     private var latestLat = Double.NaN
     private var latestLon = Double.NaN
+    @Volatile private var rideMapRequestSeq = 0
+    private var lastRideMapUpdateMs = 0L
+    private var lastRideMapKm = Double.NaN
     private var latestFreeAscentM = 0.0
     private var latestBleSoc: Int? = null
     private var latestBleState: String = "BLE 대기"
@@ -291,6 +300,8 @@ class MainActivity : Activity() {
         applySystemBarInsets()
         LearningMigration.ensureV0110FreshStart(this)
         bindViews()
+        rideMapPreview.setOnClickListener { openNextPointBicycleNavigation() }
+        tvRideMapPreviewStatus.setOnClickListener { openNextPointBicycleNavigation() }
 
         courseRepo = CourseRepository(this)
         learningStore = BatteryLearningStore(this)
@@ -429,6 +440,8 @@ class MainActivity : Activity() {
         tvRideRouteScale = findViewById(R.id.tvRideRouteScale)
         switchRideTestMode = findViewById(R.id.switchRideTestMode)
         rideMiniProfileView = findViewById(R.id.rideMiniProfileView)
+        rideMapPreview = findViewById(R.id.rideMapPreview)
+        tvRideMapPreviewStatus = findViewById(R.id.tvRideMapPreviewStatus)
         seekRideRoute = findViewById(R.id.seekRideRoute)
         pageRideRoot = findViewById(R.id.pageRideRoot)
         layoutRideWarningBanner = findViewById(R.id.layoutRideWarningBanner)
@@ -450,7 +463,6 @@ class MainActivity : Activity() {
         tvElevationAhead = findViewById(R.id.tvElevationAhead)
         tvTenKmBattery = findViewById(R.id.tvTenKmBattery)
         tvAssist = findViewById(R.id.tvAssist)
-        tvAssistTargets = findViewById(R.id.tvAssistTargets)
         tvNextClimb = findViewById(R.id.tvNextClimb)
         tvNextClimbDetail = findViewById(R.id.tvNextClimbDetail)
         tvCourseStatus = findViewById(R.id.tvCourseStatus)
@@ -1626,7 +1638,8 @@ class MainActivity : Activity() {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 다음충전 ${RideFormatter.one(nextCharge.km)} · ${RideFormatter.one(remain)}km 남음"
         } else {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 종점 ${RideFormatter.one(course.totalKm)} · ${RideFormatter.one(remain)}km 남음"
-        }
+            updateRideMapPreview(km, simulated)
+    }
     }
 
     /** v0.27.4: skipped stations are not segment boundaries on the live mini profile. */
@@ -2438,44 +2451,44 @@ class MainActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         when (event.keyCode) {
-            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
                 when (event.action) {
                     KeyEvent.ACTION_DOWN -> {
                         if (event.repeatCount == 0) {
-                            volumeDownPressedAtMs = System.currentTimeMillis()
-                            volumeDownLongHandled = false
+                            volumeUpPressedAtMs = System.currentTimeMillis()
+                            volumeUpLongHandled = false
                             volumeKeyHandler.removeCallbacks(touchLockLongPress)
                             volumeKeyHandler.postDelayed(touchLockLongPress, 1500L)
                         }
-                        // Consume VOL- so long press can be distinguished from a short press.
+                        // Consume VOL+ so long press can be distinguished from a short press.
                         return true
                     }
                     KeyEvent.ACTION_UP -> {
                         volumeKeyHandler.removeCallbacks(touchLockLongPress)
-                        val wasLong = volumeDownLongHandled
-                        volumeDownPressedAtMs = 0L
-                        volumeDownLongHandled = false
+                        val wasLong = volumeUpLongHandled
+                        volumeUpPressedAtMs = 0L
+                        volumeUpLongHandled = false
                         if (!wasLong) {
                             if (touchLocked) {
-                                showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
+                                showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
                                 vibrateRideWarning(45L, 85)
                             } else {
-                                adjustMediaVolume(AudioManager.ADJUST_LOWER)
+                                adjustMediaVolume(AudioManager.ADJUST_RAISE)
                             }
                         }
                         return true
                     }
                 }
             }
-            KeyEvent.KEYCODE_VOLUME_UP -> {
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
                 if (touchLocked) {
                     if (event.action == KeyEvent.ACTION_UP && event.repeatCount == 0) {
-                        showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
+                        showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
                         vibrateRideWarning(45L, 85)
                     }
                     return true
                 }
-                // Unlocked VOL+ stays a normal Android volume key.
+                // Unlocked VOL- stays a normal Android volume key.
             }
         }
         return super.dispatchKeyEvent(event)
@@ -2494,7 +2507,7 @@ class MainActivity : Activity() {
             vibrateRideWarning(if (locked) 140L else 90L, if (locked) 180 else 120)
             Toast.makeText(
                 this,
-                if (locked) "🔒 터치 잠금 · VOL+ 다음 / VOL- 이전 · VOL- 길게 해제"
+                if (locked) "🔒 터치 잠금 · VOL+ 다음 / VOL- 이전 · VOL+ 길게 해제"
                 else "🔓 터치 사용 · 볼륨 버튼 정상",
                 Toast.LENGTH_SHORT
             ).show()
@@ -2878,28 +2891,116 @@ class MainActivity : Activity() {
      * 실제 SRAM 현재 단수를 읽었다고 표현하지 않는다.
      */
     private fun renderRideAssistCoach(pacing: PacingAdvice, reserve: ReserveStatus) {
-        val action = when {
-            reserve.label == "위험" -> "배터리 절약"
-            reserve.label == "주의" -> "절약 페이스"
-            pacing.speedAction != null -> pacing.speedAction
-            pacing.terrain == PacingTerrain.STEEP_CLIMB -> "급경사 대비"
-            pacing.terrain == PacingTerrain.CLIMB -> "업힐 리듬"
-            else -> "현재 페이스 유지"
-        }
-        val recommendedSpeed = pacing.speedKph?.let { " · 권장속도 ${it.text("km/h")}" }.orEmpty()
-        tvAssist.text = action + recommendedSpeed
-        tvAssist.setTextColor(when {
-            reserve.label == "위험" -> getColor(R.color.danger)
-            reserve.label == "주의" -> getColor(R.color.warn)
-            else -> getColor(R.color.good)
-        })
+        // v0.29.2: HUD는 목표 SOC 대비 여유/부족만 크게 표시한다.
+        // 상세 속도·파워·케이던스·기어 계산은 전략/음성 엔진용으로 유지한다.
+        @Suppress("UNUSED_VARIABLE") val keepAdvisor = pacing
+        val diff = abs(reserve.differencePct).roundToInt()
+        val enough = reserve.differencePct >= 0.0
+        tvAssist.text = if (enough) "${diff}% 여유" else "${diff}% 부족"
+        tvAssist.setTextColor(
+            when {
+                !enough -> getColor(R.color.danger)
+                diff <= 2 -> getColor(R.color.warn)
+                else -> getColor(R.color.good)
+            }
+        )
+    }
 
-        val rider = pacing.riderPowerW?.let { "라이더 ${it.text("W")}" } ?: "라이더 학습중"
-        val motor = pacing.motorPowerW?.let { "모터 ${it.high}W 이하" } ?: "모터 학습중"
-        val cadence = pacing.cadenceRpm?.let { "케이던스 ${it.text("rpm")}" } ?: "케이던스 학습중"
-        val gear = pacing.gearAdvice ?: "권장기어 —"
-        tvAssistTargets.text = "$rider · $motor\n$cadence · $gear"
-        tvAssistTargets.setTextColor(getColor(R.color.text_primary))
+    /**
+     * v0.29.2: 기존 KAKAO_REST_API_KEY만 이용하는 가벼운 정적 지도 미리보기.
+     * 현재 위치와 약 2.5km 앞을 한 화면에 표시하고, 탭하면 다음 지점까지 카카오맵 자전거 길찾기를 연다.
+     */
+    private fun updateRideMapPreview(km: Double, simulated: Boolean, force: Boolean = false) {
+        if (!::rideMapPreview.isInitialized || !::course.isInitialized) return
+        val key = BuildConfig.KAKAO_REST_API_KEY.trim()
+        if (key.isBlank()) {
+            tvRideMapPreviewStatus.text = "카카오맵 키 없음 · 탭하면 자전거 길찾기"
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (!force && lastRideMapKm.isFinite() && abs(km - lastRideMapKm) < 0.25 && now - lastRideMapUpdateMs < 30_000L) return
+        lastRideMapKm = km
+        lastRideMapUpdateMs = now
+
+        val coursePoint = course.pointAtKm(km.coerceIn(0.0, course.totalKm))
+        val useGps = !simulated && latestLat.isFinite() && latestLon.isFinite()
+        val lat = if (useGps) latestLat else coursePoint.lat
+        val lon = if (useGps) latestLon else coursePoint.lon
+        if (!lat.isFinite() || !lon.isFinite()) {
+            tvRideMapPreviewStatus.text = "현재 위치 확인 중 · 탭하면 카카오맵"
+            return
+        }
+
+        val target = nextReplanTarget(km)
+        val targetKm = target?.km ?: course.totalKm
+        val aheadKm = (km + 2.5).coerceAtMost(targetKm).coerceAtMost(course.totalKm)
+        val ahead = course.pointAtKm(aheadKm)
+        val marker1 = "location:${String.format(Locale.US, "%.6f,%.6f", lon, lat)}|option:false"
+        val marker2 = "location:${String.format(Locale.US, "%.6f,%.6f", ahead.lon, ahead.lat)}|option:false"
+        val url = buildString {
+            append("https://dapi.kakao.com/v2/maps/staticmap?size=720x300&format=jpg&scale=1")
+            append("&markers=").append(URLEncoder.encode(marker1, "UTF-8"))
+            if (Geo.distanceMeters(lat, lon, ahead.lat, ahead.lon) > 120.0) {
+                append("&markers=").append(URLEncoder.encode(marker2, "UTF-8"))
+            }
+        }
+        val seq = ++rideMapRequestSeq
+        tvRideMapPreviewStatus.text = "카카오맵 갱신 중 · 탭하면 자전거 길찾기"
+
+        Thread {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 6_000
+                    readTimeout = 8_000
+                    setRequestProperty("Authorization", "KakaoAK $key")
+                }
+                val code = conn.responseCode
+                if (code !in 200..299) throw IllegalStateException("HTTP $code")
+                val bitmap = conn.inputStream.use { BitmapFactory.decodeStream(it) }
+                    ?: throw IllegalStateException("지도 이미지 해석 실패")
+                runOnUiThread {
+                    if (seq != rideMapRequestSeq || isFinishing || isDestroyed) return@runOnUiThread
+                    rideMapPreview.setImageBitmap(bitmap)
+                    val label = target?.name ?: "종점"
+                    tvRideMapPreviewStatus.text = "카카오맵 · 현재 위치 · 다음 $label · 탭하면 자전거 길찾기"
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (seq != rideMapRequestSeq || isFinishing || isDestroyed) return@runOnUiThread
+                    tvRideMapPreviewStatus.text = "카카오맵 갱신 실패 · 탭하면 자전거 길찾기"
+                }
+            } finally {
+                conn?.disconnect()
+            }
+        }.start()
+    }
+
+    private fun openNextPointBicycleNavigation() {
+        if (!::course.isInitialized) return
+        val km = latestRouteKm.coerceIn(0.0, course.totalKm)
+        val startPoint = course.pointAtKm(km)
+        val startLat = if (latestLat.isFinite()) latestLat else startPoint.lat
+        val startLon = if (latestLon.isFinite()) latestLon else startPoint.lon
+        val target = nextReplanTarget(km)
+        val targetKm = target?.km ?: course.totalKm
+        val end = course.pointAtKm(targetKm)
+        val label = target?.name ?: "종점"
+        val appUri = KakaoBicycleNavigator.appRouteUri(startLat, startLon, end.lat, end.lon)
+        val launched = try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(appUri)))
+            true
+        } catch (_: Exception) { false }
+        if (!launched) {
+            val web = KakaoBicycleNavigator.mobileWebRouteUri(startLat, startLon, end.lat, end.lon)
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(web))) }
+                .onFailure { Toast.makeText(this, "카카오 자전거 길찾기를 열 수 없습니다.", Toast.LENGTH_LONG).show() }
+        }
+        if (logManager.isActive()) {
+            logManager.recordEvent("KAKAO_BICYCLE_NEXT_POINT", "주행 지도 탭 · 다음 $label", km, actualStore.latest()?.percent)
+        }
     }
 
     private data class EtaChargeContext(
@@ -3849,8 +3950,8 @@ class MainActivity : Activity() {
         tvFinishEta.text = "종점 없음"
         tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
         tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "BLE 배터리 연결 대기"
-        tvAssist.text = "임의주행 · 데이터 수집 우선"
-        tvAssistTargets.text = "라이더·모터·케이던스·권장기어는 계획주행에서 계산\n현재 모드·SOC·GPS는 계속 기록"
+        tvAssist.text = consumed?.let { "${formatPct(it)} 사용" } ?: "데이터 수집 중"
+        tvAssist.setTextColor(getColor(R.color.accent))
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
         tvPointEtaBasis.text = "계획주행에서 GPX 포인트 ETA를 표시합니다."
