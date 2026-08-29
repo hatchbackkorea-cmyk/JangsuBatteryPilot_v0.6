@@ -920,7 +920,6 @@ class MainActivity : Activity() {
         tvRideRouteScale.setTextColor(secondary)
         tvSafeReachMargin.setTextColor(fg)
         tvHardReachMargin.setTextColor(fg)
-        switchRideTestMode.setTextColor(fg)
         // 모드가 잡힌 주행 중에는 카드 자체가 상태색이므로 SOC 숫자는 가독성 우선.
         if (mode != null) tvBattery.setTextColor(fg)
     }
@@ -1556,14 +1555,14 @@ class MainActivity : Activity() {
         val chargeKms = plannedChargeKms()
         profileView.setCourse(course)
         rideMiniProfileView.setCourse(course)
-        rideMiniProfileView.setCompactMode(true)
+        rideMiniProfileView.setCompactMode(false)
         rideMiniProfileView.setCheckpointKms(chargeKms)
         seekRideRoute.setCourse(course.totalKm, chargeKms)
     }
 
     /**
-     * The test-mode switch and virtual GPX location moved from Settings to the ride HUD.
-     * In normal riding the same control becomes a read-only live course-distance axis.
+     * v0.29.1: test-mode switch and virtual GPX position live on the Settings page.
+     * The ride HUD keeps only the enlarged live elevation profile and route status.
      */
     private fun setupRidePositionControls() {
         switchRideTestMode.setOnCheckedChangeListener { _, checked ->
@@ -1962,9 +1961,9 @@ class MainActivity : Activity() {
             btnPageChargeSimulator.isEnabled = !logManager.isActive()
             btnPageResetProgress.isEnabled = !logManager.isActive()
             tvPageSettingsHint.text = if (logManager.isActive()) {
-                "주행 중입니다. 테스트 위치 조작은 첫 페이지 거리축에서만 가능하며, 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
+                "주행 중입니다. 테스트 주행이면 아래 GPX 위치 슬라이더를 사용할 수 있고, 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
             } else {
-                "테스트 모드와 GPX 위치 슬라이더는 첫 페이지로 이동했습니다. 선택 코스 · ${courseMeta.name}"
+                "테스트 모드와 GPX 가상 위치는 이 페이지에서 조작합니다. 선택 코스 · ${courseMeta.name}"
             }
             updateInlineSettingsLabels()
         } finally {
