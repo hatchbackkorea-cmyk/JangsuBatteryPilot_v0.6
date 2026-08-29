@@ -63,10 +63,12 @@ final class ReleaseGitHubApi {
     private static final class RemoteBlob {
         final String sha;
         final String mode;
+        final String type;
 
-        RemoteBlob(String sha, String mode) {
+        RemoteBlob(String sha, String mode, String type) {
             this.sha = sha == null ? "" : sha;
             this.mode = mode == null ? "" : mode;
+            this.type = type == null ? "" : type;
         }
     }
 
@@ -144,24 +146,22 @@ final class ReleaseGitHubApi {
             newPaths.add(p);
         }
 
+        // v0.29.4: 원격의 'leaf' 엔트리를 보존해 최종 트리를 통째로 재구성한다.
+        // 기존 방식은 삭제 파일을 sha:null 엔트리로 base_tree에 얹었는데, 일부 저장소 상태에서
+        // GitHub가 422 "Invalid tree info"를 반환할 수 있었다. 최종 leaf 집합을 명시하면
+        // 변경 blob만 업로드하는 속도 이점은 유지하면서 삭제 null 엔트리를 피할 수 있다.
+        Map<String, RemoteBlob> remoteLeaves = new HashMap<>();
         Map<String, RemoteBlob> remoteBlobs = new HashMap<>();
-        JSONArray treeEntries = new JSONArray();
-        int deletions = 0;
         if (remoteTree != null) {
             for (int i = 0; i < remoteTree.length(); i++) {
                 JSONObject item = remoteTree.getJSONObject(i);
-                if (!"blob".equals(item.optString("type"))) continue;
+                String type = item.optString("type");
+                if ("tree".equals(type)) continue;
                 String path = item.optString("path");
-                remoteBlobs.put(path, new RemoteBlob(item.optString("sha"), item.optString("mode")));
-                if (shouldDeleteStale(path, newPaths, updateWorkflows)) {
-                    JSONObject del = new JSONObject();
-                    del.put("path", path);
-                    del.put("mode", "100644");
-                    del.put("type", "blob");
-                    del.put("sha", JSONObject.NULL);
-                    treeEntries.put(del);
-                    deletions++;
-                }
+                if (path == null || path.trim().isEmpty()) continue;
+                RemoteBlob leaf = new RemoteBlob(item.optString("sha"), item.optString("mode"), type);
+                remoteLeaves.put(path, leaf);
+                if ("blob".equals(type)) remoteBlobs.put(path, leaf);
             }
         }
 
@@ -180,10 +180,16 @@ final class ReleaseGitHubApi {
             }
         }
 
+        int deletions = 0;
+        for (String path : remoteLeaves.keySet()) {
+            if (shouldDeleteStale(path, newPaths, updateWorkflows)) deletions++;
+        }
+
         int totalUpload = changedFiles.size();
         progress.onProgress(7, String.format(Locale.KOREA,
                 "변경분 계산 완료 · 업로드 %d · 동일 %d · 삭제 %d", totalUpload, skipped, deletions));
 
+        Map<String, String> uploadedSha = new HashMap<>();
         int done = 0;
         for (Map.Entry<String, byte[]> e : changedFiles) {
             String path = e.getKey();
@@ -194,22 +200,63 @@ final class ReleaseGitHubApi {
             blobBody.put("content", Base64.encodeToString(e.getValue(), Base64.NO_WRAP));
             blobBody.put("encoding", "base64");
             JSONObject blob = requestJson("POST", "/repos/" + repo + "/git/blobs", blobBody, null);
-
-            JSONObject te = new JSONObject();
-            te.put("path", path);
-            te.put("mode", executableMode(path) ? "100755" : "100644");
-            te.put("type", "blob");
-            te.put("sha", blob.getString("sha"));
-            treeEntries.put(te);
+            uploadedSha.put(path, blob.getString("sha"));
             done++;
         }
 
-        progress.onProgress(78, "새 Git tree 생성");
-        JSONObject treeBody = new JSONObject();
-        treeBody.put("base_tree", baseTreeSha);
-        treeBody.put("tree", treeEntries);
-        JSONObject newTree = requestJson("POST", "/repos/" + repo + "/git/trees", treeBody, null);
-        String newTreeSha = newTree.getString("sha");
+        String newTreeSha = baseTreeSha;
+        if (totalUpload > 0 || deletions > 0) {
+            progress.onProgress(78, "안전한 최종 Git tree 생성");
+            Map<String, JSONObject> finalLeaves = new HashMap<>();
+
+            // 1) 앱이 관리하지 않는 기존 파일/워크플로는 그대로 보존한다.
+            for (Map.Entry<String, RemoteBlob> e : remoteLeaves.entrySet()) {
+                String path = e.getKey();
+                if (shouldDeleteStale(path, newPaths, updateWorkflows)) continue;
+                if (newPaths.contains(path)) continue; // 아래 로컬 소스로 덮어쓴다.
+                RemoteBlob leaf = e.getValue();
+                JSONObject te = new JSONObject();
+                te.put("path", path);
+                te.put("mode", leaf.mode);
+                te.put("type", leaf.type);
+                te.put("sha", leaf.sha);
+                finalLeaves.put(path, te);
+            }
+
+            // 2) ZIP 안의 최종 프로젝트 파일을 넣는다. 동일 파일은 기존 blob SHA를 재사용한다.
+            for (Map.Entry<String, byte[]> e : pkg.files.entrySet()) {
+                String path = e.getKey();
+                if (!updateWorkflows && path.startsWith(".github/workflows/")) continue;
+                String wantedMode = executableMode(path) ? "100755" : "100644";
+                RemoteBlob remote = remoteBlobs.get(path);
+                String sha = uploadedSha.get(path);
+                if (sha == null && remote != null && wantedMode.equals(remote.mode)
+                        && gitBlobSha(e.getValue()).equalsIgnoreCase(remote.sha)) {
+                    sha = remote.sha;
+                }
+                if (sha == null || sha.trim().isEmpty()) {
+                    throw new IOException("최종 Git tree blob SHA를 만들지 못했습니다: " + path);
+                }
+                JSONObject te = new JSONObject();
+                te.put("path", path);
+                te.put("mode", wantedMode);
+                te.put("type", "blob");
+                te.put("sha", sha);
+                finalLeaves.put(path, te);
+            }
+
+            JSONArray treeEntries = new JSONArray();
+            List<String> finalPaths = new ArrayList<>(finalLeaves.keySet());
+            java.util.Collections.sort(finalPaths);
+            for (String path : finalPaths) treeEntries.put(finalLeaves.get(path));
+
+            JSONObject treeBody = new JSONObject();
+            treeBody.put("tree", treeEntries); // base_tree 없이 최종 트리 자체를 생성
+            JSONObject newTree = requestJson("POST", "/repos/" + repo + "/git/trees", treeBody, null);
+            newTreeSha = newTree.getString("sha");
+        } else {
+            progress.onProgress(78, "변경 파일 없음 · 기존 tree 재사용");
+        }
 
         progress.onProgress(83, "릴리즈 커밋 생성");
         JSONObject commitBody = new JSONObject();
