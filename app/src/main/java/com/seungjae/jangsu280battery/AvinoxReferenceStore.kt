@@ -8,8 +8,9 @@ import org.json.JSONObject
  * 개인 학습 데이터와 분리해서 보존한다.
  *
  * 이 값은 실제 주행 정답이나 학습 샘플이 아니라 완전히 독립된 외부 기준(benchmark)이다.
- * v0.14.0부터 BatteryPlan의 예측값에는 0%도 섞지 않는다. selectedMode는
- * 실시간 대시보드에서 어떤 Avinox 모드를 비교할지 고르는 표시 설정일 뿐이다.
+ * Avinox의 소비량 숫자 자체는 BatteryPlan 예측값에 0%도 섞지 않는다.
+ * v0.28.4부터 selectedMode는 외부 비교 표시와 동시에 테스트/계획용 자체 예측의
+ * 모드별 개인 학습 bucket(ECO/AUTO/TRAIL/TURBO)을 선택하는 기준으로도 사용한다.
  * 100% 초과값은 배터리 여러 팩 분량의 전체 코스 누적 에너지 요구량을 뜻한다.
  */
 enum class AvinoxRideMode(val label: String) {

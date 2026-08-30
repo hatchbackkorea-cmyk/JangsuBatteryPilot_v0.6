@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 class RideService : Service(), LocationListener {
@@ -58,6 +59,12 @@ class RideService : Service(), LocationListener {
         private const val CHARGE_CHANNEL_ID = "charge_target_alerts"
         private const val NOTIFICATION_ID = 280
         private const val CHARGE_NOTIFICATION_ID = 281
+
+        // v0.29.0 rainy/bad GPS protection. A bad fix is safer to hold than to corrupt
+        // route progress and downstream learning data.
+        private const val MAX_PLANNED_GPS_ACCURACY_M = 60f
+        private const val MAX_REASONABLE_GPS_SPEED_MPS = 25.0 // 90 km/h
+        private const val GPS_REJECT_EVENT_INTERVAL_MS = 60_000L
     }
 
     private lateinit var locationManager: LocationManager
@@ -94,6 +101,9 @@ class RideService : Service(), LocationListener {
     private var latestAssistDetection: AvinoxAssistDetection? = null
     private var latestAssistUpdatedMs: Long = 0L
     private var lastServiceAssistMode: AvinoxAssistMode? = null
+    private var lastTrustedPlannedLocation: Location? = null
+    private var lastGpsRejectEventAt: Long = 0L
+    private var lastGpsGuardNotificationAt: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -158,6 +168,7 @@ class RideService : Service(), LocationListener {
                 paceEstimator.reset()
                 announcer.reset()
                 passedCheckpointKeys.clear()
+                lastTrustedPlannedLocation = null
             }
             ACTION_SET_VOICE -> {
                 val enabled = intent.getBooleanExtra(EXTRA_VOICE_ENABLED, true)
@@ -208,10 +219,13 @@ class RideService : Service(), LocationListener {
     private fun startLocationUpdates() {
         if (updatesStarted || !hasLocationPermission()) return
         try {
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            if (gpsEnabled) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1500L, 2f, this, Looper.getMainLooper())
             }
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            // v0.29.0: do not mix coarse NETWORK fixes into an outdoor GPS ride.
+            // NETWORK is only a fallback when GPS itself is disabled.
+            if (!gpsEnabled && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000L, 8f, this, Looper.getMainLooper())
             }
             updatesStarted = true
@@ -224,8 +238,30 @@ class RideService : Service(), LocationListener {
             handleFreeLocation(location)
             return
         }
-        val rawMatch = matcher.match(location.latitude, location.longitude)
+        val rejectReason = plannedGpsRejectReason(location)
+        if (rejectReason != null) {
+            handleRejectedPlannedLocation(location, rejectReason)
+            return
+        }
+        lastTrustedPlannedLocation = Location(location)
+        val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
+        val rawMatch = matcher.match(location.latitude, location.longitude, accuracy)
         var emergency = replanStore.active(courseMeta.id)
+
+        // RouteMatcher may intentionally hold progress while it waits for repeated confirmation
+        // of a large relocation. Do not write those uncertain points into ride/learning logs.
+        if (rawMatch.gpsHeld && emergency == null) {
+            handleHeldRouteMatch(location, rawMatch)
+            return
+        }
+        rawMatch.recoveredFromKm?.let { fromKm ->
+            logManager.recordEvent(
+                "GPS_ROUTE_RECOVERED",
+                "GPS 안정 위치 연속 확인 · ${String.format(java.util.Locale.US, "%.1f", fromKm)}km → ${String.format(java.util.Locale.US, "%.1f", rawMatch.routeKm)}km",
+                rawMatch.routeKm,
+                actualStore.latest()?.percent
+            )
+        }
         if (emergency != null) {
             replanStore.appendBreadcrumb(courseMeta.id, location.latitude, location.longitude, location.time.takeIf { it > 0 } ?: System.currentTimeMillis())
             if (emergency.phase == EmergencyPhase.RETURN) {
@@ -243,7 +279,6 @@ class RideService : Service(), LocationListener {
             rawMatch.copy(routeKm = emergency.anchorRouteKm, courseElevationM = anchor.ele)
         } else rawMatch
         val speedKmh = paceEstimator.update(location, match.routeKm)
-        val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
         val gpsElevation = if (location.hasAltitude()) location.altitude else Double.NaN
 
         val prefs = AppSettings.prefs(this)
@@ -307,6 +342,89 @@ class RideService : Service(), LocationListener {
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, buildNotification(text))
             lastNotificationAt = now
             lastNotifiedKm = kmInt
+        }
+    }
+
+    /**
+     * Reject obviously poor or physically impossible planned-ride fixes before RouteMatcher.
+     * BLE/SOC collection keeps running because only this location tick is discarded.
+     */
+    private fun plannedGpsRejectReason(location: Location): String? {
+        if (location.hasAccuracy() && location.accuracy > MAX_PLANNED_GPS_ACCURACY_M) {
+            return "정확도 ${location.accuracy.roundToInt()}m"
+        }
+
+        val fixTime = location.time
+        if (fixTime > 0L) {
+            val ageMs = System.currentTimeMillis() - fixTime
+            if (ageMs > 30_000L) return "오래된 위치 ${ageMs / 1000}s"
+        }
+
+        val previous = lastTrustedPlannedLocation ?: return null
+        val deltaM = previous.distanceTo(location).toDouble()
+        val prevTime = previous.time.takeIf { it > 0L }
+        val nowTime = fixTime.takeIf { it > 0L }
+        val dtSec = if (prevTime != null && nowTime != null && nowTime > prevTime) {
+            (nowTime - prevTime) / 1000.0
+        } else 0.0
+
+        val currentAcc = if (location.hasAccuracy()) location.accuracy.toDouble() else 30.0
+        val previousAcc = if (previous.hasAccuracy()) previous.accuracy.toDouble() else 30.0
+        if (dtSec > 0.0) {
+            val rawSpeed = deltaM / dtSec
+            val allowedDistance = max(180.0, dtSec * MAX_REASONABLE_GPS_SPEED_MPS + currentAcc + previousAcc + 60.0)
+            if (deltaM > allowedDistance && rawSpeed > MAX_REASONABLE_GPS_SPEED_MPS) {
+                return "순간이동 ${deltaM.roundToInt()}m/${String.format(java.util.Locale.US, "%.1f", dtSec)}s"
+            }
+        } else if (deltaM > 250.0) {
+            return "시간역전/순간이동 ${deltaM.roundToInt()}m"
+        }
+        return null
+    }
+
+    private fun handleRejectedPlannedLocation(location: Location, reason: String) {
+        val now = System.currentTimeMillis()
+        val km = matcher.currentKm().coerceIn(0.0, course.totalKm)
+        if (now - lastGpsRejectEventAt >= GPS_REJECT_EVENT_INTERVAL_MS) {
+            logManager.recordEvent("GPS_FIX_REJECTED", "$reason · 진행도 고정", km, actualStore.latest()?.percent)
+            lastGpsRejectEventAt = now
+        }
+        broadcastGpsGuard(location, km, course.pointAtKm(km).ele, reason)
+    }
+
+    private fun handleHeldRouteMatch(location: Location, match: MatchResult) {
+        val now = System.currentTimeMillis()
+        if (now - lastGpsRejectEventAt >= GPS_REJECT_EVENT_INTERVAL_MS) {
+            logManager.recordEvent(
+                "GPS_ROUTE_HELD",
+                "코스 위치 재확인 중 · 진행도 ${String.format(java.util.Locale.US, "%.1f", match.routeKm)}km 고정",
+                match.routeKm,
+                actualStore.latest()?.percent
+            )
+            lastGpsRejectEventAt = now
+        }
+        broadcastGpsGuard(location, match.routeKm, match.courseElevationM, "코스 위치 재확인")
+    }
+
+    private fun broadcastGpsGuard(location: Location, routeKm: Double, courseElevationM: Double, reason: String) {
+        val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
+        sendBroadcast(Intent(ACTION_UPDATE).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_ROUTE_KM, routeKm)
+            putExtra(EXTRA_OFF_COURSE_M, 0.0)
+            putExtra(EXTRA_ACCURACY_M, accuracy)
+            putExtra(EXTRA_SPEED_KMH, 0.0)
+            putExtra(EXTRA_COURSE_ELEVATION, courseElevationM)
+            putExtra(EXTRA_GPS_ELEVATION, if (location.hasAltitude()) location.altitude else Double.NaN)
+            putExtra(EXTRA_PROVIDER, location.provider ?: "GPS")
+            // Deliberately omit LAT/LON: UI keeps the last trusted map coordinate.
+        })
+        val now = System.currentTimeMillis()
+        if (now - lastGpsGuardNotificationAt >= 10_000L) {
+            val text = "GPS 보호 · $reason · ${String.format(java.util.Locale.US, "%.1f", routeKm)}km 고정"
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIFICATION_ID, buildNotification(text))
+            lastGpsGuardNotificationAt = now
         }
     }
 

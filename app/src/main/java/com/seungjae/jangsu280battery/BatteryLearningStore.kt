@@ -47,6 +47,14 @@ data class BatteryLearningSample(
     val qualityScore: Int = 100
 )
 
+
+data class StrategyConsumptionEstimate(
+    val percent: Double,
+    val contextualBlocks: Int,
+    val fallbackBlocks: Int,
+    val averageConfidence: Int
+)
+
 class BatteryLearningStore(context: Context) {
     companion object {
         private const val PREFS = "battery_learning_v1"
@@ -69,6 +77,7 @@ class BatteryLearningStore(context: Context) {
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val assistProfiles = AvinoxAssistProfileStore(appContext)
     private val fitAuxStore = FitAuxLearningStore(appContext)
+    private val contextualV2 = ContextualBatteryLearningStore(appContext)
 
     private fun selectedMode(): AvinoxAssistMode? =
         assistProfiles.preferredMode().takeIf { assistProfiles.hasPreferredMode() }
@@ -144,6 +153,34 @@ class BatteryLearningStore(context: Context) {
      * 자유주행 HUD용 모드별 평균 소비율(%/km).
      * FIT+ZIP으로 검증된 A급 SOC/모드 샘플만 사용하며 B급 FIT 단독 자료는 섞지 않는다.
      */
+    /**
+     * v0.28.5 전략표용 모드 고유 이동속도.
+     * 해당 ECO/AUTO/TRAIL/TURBO로 실제 기록된 A+/A급 샘플만 사용하고
+     * FIT 단독 B급/다른 모드 속도를 여기서는 섞지 않는다.
+     */
+    fun learnedSpeedKphForMode(bucket: TerrainBucket, mode: AvinoxAssistMode): Double? {
+        val all = samples().filter {
+            it.bucket == bucket && it.assistMode == mode && it.qualityScore >= 45 &&
+                it.avgSpeedKph != null && it.avgSpeedKph.isFinite() && it.avgSpeedKph in 3.0..60.0
+        }
+        val profileId = selectedProfileId(mode)
+        val exact = all.filter { it.assistProfileId == profileId }
+        val subset = (if (exact.isNotEmpty()) exact else all.filter { it.assistProfileId == null }).takeLast(24)
+        if (subset.isEmpty()) return null
+        var sum = 0.0
+        var weight = 0.0
+        subset.forEachIndexed { index, sample ->
+            val value = sample.avgSpeedKph ?: return@forEachIndexed
+            val recency = 0.8 + (index + 1).toDouble() / subset.size.coerceAtLeast(1)
+            val distanceWeight = sample.distanceKm.coerceIn(0.5, 15.0)
+            val qualityWeight = (sample.qualityScore.coerceIn(0, 100) / 100.0).coerceAtLeast(0.25)
+            val w = recency * distanceWeight * qualityWeight
+            sum += value * w
+            weight += w
+        }
+        return (sum / weight).takeIf { weight > 0.0 && it.isFinite() && it in 3.0..60.0 }
+    }
+
     fun learnedPctPerKmForMode(mode: AvinoxAssistMode): Double? {
         val all = samples().filter {
             it.assistMode == mode && it.qualityScore >= 45 &&
@@ -235,6 +272,75 @@ class BatteryLearningStore(context: Context) {
         }
         return total
     }
+
+    /**
+     * v0.28.9 page-2 strategy estimator.
+     * Context-v2 is used only when the raw Avinox-derived nearest-context estimate has
+     * enough confidence. Otherwise the proven v1 terrain/mode factor is kept as fallback.
+     * Live ride prediction continues to call estimateConsumption() above.
+     */
+    fun estimateStrategyConsumption(
+        course: CourseData,
+        fromKm: Double,
+        toKm: Double,
+        mode: AvinoxAssistMode
+    ): StrategyConsumptionEstimate {
+        val start = fromKm.coerceIn(0.0, course.totalKm)
+        val end = toKm.coerceIn(start, course.totalKm)
+        if (end <= start) return StrategyConsumptionEstimate(0.0, 0, 0, 0)
+
+        val fallbackFactors = TerrainBucket.values().associateWith { learnedFactor(it, mode) }
+        var x = start
+        var total = 0.0
+        var contextualBlocks = 0
+        var fallbackBlocks = 0
+        var confidenceSum = 0
+        while (x < end - 0.0001) {
+            val nx = (x + 0.5).coerceAtMost(end)
+            val dist = nx - x
+            val elev = course.elevationBetween(x, nx)
+            val terrain = bucket(dist, elev.ascentM)
+            val grade = if (dist > 0.001) {
+                ((course.pointAtKm(nx).ele - course.pointAtKm(x).ele) / (dist * 1000.0) * 100.0).coerceIn(-30.0, 35.0)
+            } else 0.0
+            val contextEstimate = contextualV2.estimate(terrain, grade, mode)
+            if (contextEstimate != null && contextEstimate.confidence >= 35 && contextEstimate.matchCount >= 2) {
+                total += contextEstimate.pctPerKm * dist
+                contextualBlocks += 1
+                confidenceSum += contextEstimate.confidence
+            } else {
+                total += baseConsumption(dist, elev.ascentM) * (fallbackFactors[terrain] ?: 1.0)
+                fallbackBlocks += 1
+            }
+            x = nx
+        }
+        return StrategyConsumptionEstimate(
+            percent = total.coerceAtLeast(0.0),
+            contextualBlocks = contextualBlocks,
+            fallbackBlocks = fallbackBlocks,
+            averageConfidence = if (contextualBlocks > 0) confidenceSum / contextualBlocks else 0
+        )
+    }
+
+    fun strategyContextEstimate(
+        course: CourseData,
+        fromKm: Double,
+        toKm: Double,
+        mode: AvinoxAssistMode
+    ): ContextualModeEstimate? {
+        val start = fromKm.coerceIn(0.0, course.totalKm)
+        val end = toKm.coerceIn(start, course.totalKm)
+        val dist = end - start
+        if (dist <= 0.001) return null
+        val elev = course.elevationBetween(start, end)
+        val terrain = bucket(dist, elev.ascentM)
+        val grade = ((course.pointAtKm(end).ele - course.pointAtKm(start).ele) / (dist * 1000.0) * 100.0).coerceIn(-30.0, 35.0)
+        return contextualV2.estimate(terrain, grade, mode)
+    }
+
+    fun strategyContextSampleCountForMode(mode: AvinoxAssistMode): Int = contextualV2.sampleCount(mode)
+
+    fun strategyContextSummary(): String = contextualV2.summaryText()
 
     /** 앱 실주행에서 확정된 배터리 체크포인트만 학습한다. */
     fun trainFromRide(sessionId: String, course: CourseData, entries: List<ActualBatteryEntry>): Int {

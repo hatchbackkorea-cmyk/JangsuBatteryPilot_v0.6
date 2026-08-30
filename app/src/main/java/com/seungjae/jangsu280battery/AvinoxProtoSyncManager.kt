@@ -98,8 +98,9 @@ class AvinoxProtoSyncManager(context: Context) {
 
         val dir = File(app.filesDir, "avinox_proto").apply { mkdirs() }
         val learning = BatteryLearningStore(app)
+        val contextual = ContextualBatteryLearningStore(app)
         val records = HistoricalRideStore(app)
-        var imported=0; var learned=0; var failed=0
+        var imported=0; var learned=0; var contextLearned=0; var failed=0
         for (rf in fresh) {
             val ok = runCatching {
                 val part = File(dir, rf.name + ".part")
@@ -123,6 +124,8 @@ class AvinoxProtoSyncManager(context: Context) {
                 val course = ride.course()
                 val sessionId = "proto_${ride.header.rideId}_${ride.header.startUnixSec}"
                 val count = if (learning.hasSession(sessionId)) 0 else learning.trainModeSeparatedRide(sessionId, course, entries, telemetry, windows, ride.qualityScore)
+                val contextSessionId = "context_v2_proto_${ride.header.rideId}_${ride.header.startUnixSec}_${hash.take(10)}"
+                val contextCount = if (contextual.hasSession(contextSessionId)) 0 else contextual.trainRide(contextSessionId, ride)
                 val duration = (ride.header.endUnixSec - ride.header.startUnixSec).coerceAtLeast(0)
                 val avgSpeed = duration.takeIf { it > 0 }?.let { course.totalKm / (it / 3600.0) }
                 records.add(HistoricalRideRecord(
@@ -137,13 +140,13 @@ class AvinoxProtoSyncManager(context: Context) {
                     durationSec=duration, avgSpeedKph=avgSpeed, telemetry=telemetry, dataQualityScore=ride.qualityScore,
                     warnings=ride.warnings, timestampMs=ride.header.startUnixSec * 1000L
                 ))
-                learned += count; imported += 1; seen += rf.key
+                learned += count; contextLearned += contextCount; imported += 1; seen += rf.key
             }.isSuccess
             if (!ok) failed++
         }
         prefs.edit().putStringSet(KEY_SEEN, seen.toList().takeLast(5000).toSet()).apply()
         val msg = when {
-            imported>0 -> "Avinox 원본 ${imported}개 A+ 동기화 · 학습 ${learned}구간${if(failed>0) " · 실패 $failed" else ""}"
+            imported>0 -> "Avinox 원본 ${imported}개 A+ 동기화 · v1 ${learned}구간 · 상황 v2 ${contextLearned}구간${if(failed>0) " · 실패 $failed" else ""}"
             failed>0 -> "Avinox 원본 ${failed}개 분석 실패 · 원본 형식/권한 확인 필요"
             else -> "새 Avinox 원본 없음"
         }

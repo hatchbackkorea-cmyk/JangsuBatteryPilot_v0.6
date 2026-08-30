@@ -8,6 +8,8 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.InputType;
@@ -22,6 +24,8 @@ import android.widget.Toast;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.text.DecimalFormat;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -29,7 +33,6 @@ import java.util.concurrent.Executors;
 
 public class ReleaseUploaderActivity extends Activity {
     private static final int REQ_PICK_ZIP = 1001;
-    private static final long RELEASE_WAIT_MS = 12L * 60L * 1000L;
 
     private EditText etRepo;
     private EditText etBranch;
@@ -53,6 +56,14 @@ public class ReleaseUploaderActivity extends Activity {
     private ReleaseZipPackage selectedPackage;
     private ReleaseGitHubApi.ReleaseInfo latestRelease;
     private boolean busy = false;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private SharedPreferences jobPrefs;
+    private final Runnable jobPoller = new Runnable() {
+        @Override public void run() {
+            syncBackgroundJobState();
+            uiHandler.postDelayed(this, 900L);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,6 +86,7 @@ public class ReleaseUploaderActivity extends Activity {
 
         secureTokenStore = new ReleaseSecureTokenStore(this);
         prefs = getSharedPreferences("release_settings", MODE_PRIVATE);
+        jobPrefs = getSharedPreferences(ReleaseDeployService.PREF_JOB, MODE_PRIVATE);
         etRepo.setText(prefs.getString("repo", BuildConfig.UPDATE_REPOSITORY == null ? "" : BuildConfig.UPDATE_REPOSITORY.trim()));
         etBranch.setText(prefs.getString("branch", "main"));
         etToken.setText(secureTokenStore.loadToken());
@@ -88,6 +100,20 @@ public class ReleaseUploaderActivity extends Activity {
 
         handleIncomingIntent(getIntent());
         appendLog("모바일 배포 준비됨. 저장소는 현재 앱의 업데이트 저장소를 자동 입력합니다.");
+        syncBackgroundJobState();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        uiHandler.removeCallbacks(jobPoller);
+        uiHandler.post(jobPoller);
+    }
+
+    @Override
+    protected void onPause() {
+        uiHandler.removeCallbacks(jobPoller);
+        super.onPause();
     }
 
     @Override
@@ -209,8 +235,8 @@ public class ReleaseUploaderActivity extends Activity {
         String msg = "저장소: " + repo() + "\n"
                 + "브랜치: " + branch() + "\n"
                 + "배포 버전: v" + selectedPackage.version + "\n"
-                + "파일: " + selectedPackage.files.size() + "개\n\n"
-                + "GitHub main을 이 소스로 갱신합니다. 성공하면 기존 auto-release-main workflow가 사인 APK를 자동 생성합니다."
+                + "ZIP 파일: " + selectedPackage.files.size() + "개\n\n"
+                + "원격 main과 비교해 변경된 파일만 업로드합니다. 성공하면 기존 auto-release-main workflow가 사인 APK를 자동 생성합니다."
                 + (cbUpdateWorkflows.isChecked() ? "\n\n⚠ workflow 파일도 이번 ZIP 내용으로 업데이트합니다." : "\n\nworkflow 파일은 기존 것을 보존합니다.");
 
         new AlertDialog.Builder(this)
@@ -222,66 +248,63 @@ public class ReleaseUploaderActivity extends Activity {
     }
 
     private void deploy() {
-        setBusy(true);
-        latestRelease = null;
-        btnInstall.setEnabled(false);
-        setStatus(1, "배포 시작");
-        appendLog("=== 모바일 배포 v" + selectedPackage.version + " ===");
-
-        final String repo = repo();
-        final String branch = branch();
-        final String token = token();
-        final ReleaseZipPackage pkg = selectedPackage;
-        final boolean updateWorkflows = cbUpdateWorkflows.isChecked();
-
-        io.execute(() -> {
-            try {
-                ReleaseGitHubApi api = new ReleaseGitHubApi(token);
-                api.getRepo(repo);
-                if (api.releaseExists(repo, pkg.version)) {
-                    throw new IllegalStateException("v" + pkg.version + " Release가 이미 존재합니다. VERSION.txt를 올린 새 ZIP을 사용하세요.");
-                }
-                ReleaseGitHubApi.PushResult result = api.pushZip(repo, branch, pkg, updateWorkflows, this::progressFromWorker);
-                runOnUiThread(() -> {
-                    btnCheckRelease.setEnabled(true);
-                    appendLog("push 완료: " + shortSha(result.commitSha) + " · 업로드 " + result.uploadedFiles + " · 삭제 " + result.deletedFiles);
-                    appendLog("GitHub Actions의 signed Release를 자동 대기합니다.");
-                });
-
-                ReleaseGitHubApi.ReleaseInfo release = api.waitForRelease(repo, pkg.version, RELEASE_WAIT_MS, this::progressFromWorker);
-                latestRelease = release;
-                runOnUiThread(() -> {
-                    btnInstall.setEnabled(release.hasApk());
-                    setStatus(100, "완료 · " + release.tag + " 사인 APK 준비됨");
-                    appendLog("RELEASE READY: " + release.tag + " · " + release.apkName);
-                    setBusy(false);
-                    new AlertDialog.Builder(this)
-                            .setTitle("사인 APK 완성 ✓")
-                            .setMessage(release.tag + " Release가 생성됐습니다.\n\n이 휴대폰에서 바로 APK를 받아 설치할 수 있습니다.")
-                            .setNegativeButton("나중에", null)
-                            .setPositiveButton("APK 설치", (d, w) -> downloadAndInstall())
-                            .show();
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    btnCheckRelease.setEnabled(selectedPackage != null);
-                    fail("배포/Release 대기 중 중단", e);
-                });
+        if (selectedPackage == null || selectedZipUri == null) {
+            toast("먼저 ZIP을 선택하세요.");
+            return;
+        }
+        try {
+            File jobsDir = new File(getFilesDir(), "release_jobs");
+            if (!jobsDir.exists() && !jobsDir.mkdirs()) throw new IllegalStateException("배포 작업 폴더를 만들 수 없습니다.");
+            File cached = new File(jobsDir, "BatteryPilot_v" + selectedPackage.version + "_source.zip");
+            try (InputStream in = getContentResolver().openInputStream(selectedZipUri); FileOutputStream out = new FileOutputStream(cached)) {
+                if (in == null) throw new IllegalStateException("선택한 ZIP을 다시 열 수 없습니다.");
+                byte[] buf = new byte[32 * 1024];
+                int n;
+                while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
             }
-        });
+
+            jobPrefs.edit()
+                    .putString(ReleaseDeployService.KEY_VERSION, selectedPackage.version)
+                    .putString(ReleaseDeployService.KEY_ZIP_NAME, selectedZipName)
+                    .putString(ReleaseDeployService.KEY_ZIP_PATH, cached.getAbsolutePath())
+                    .putString(ReleaseDeployService.KEY_APK_PATH, "")
+                    .putString(ReleaseDeployService.KEY_STATE, ReleaseDeployService.STATE_PREPARING)
+                    .putString(ReleaseDeployService.KEY_MESSAGE, "백그라운드 배포 시작")
+                    .putInt(ReleaseDeployService.KEY_PERCENT, 1)
+                    .putBoolean(ReleaseDeployService.KEY_RUNNING, true)
+                    .apply();
+
+            Intent service = new Intent(this, ReleaseDeployService.class)
+                    .setAction(ReleaseDeployService.ACTION_START)
+                    .putExtra(ReleaseDeployService.EXTRA_ZIP_PATH, cached.getAbsolutePath())
+                    .putExtra(ReleaseDeployService.EXTRA_VERSION, selectedPackage.version)
+                    .putExtra(ReleaseDeployService.EXTRA_ZIP_NAME, selectedZipName);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(service);
+            else startService(service);
+
+            btnCheckRelease.setEnabled(true);
+            btnInstall.setEnabled(false);
+            setStatus(1, "백그라운드 배포 시작 · 화면을 나가도 계속됩니다");
+            appendLog("v" + selectedPackage.version + " foreground 배포 서비스 시작");
+            appendLog("원격 main과 Git blob SHA를 비교해 변경 파일만 전송합니다.");
+            appendLog("앱을 닫거나 화면을 잠가도 GitHub push → Actions 대기 → APK 다운로드까지 계속됩니다.");
+            setBusy(true);
+        } catch (Exception e) {
+            fail("백그라운드 배포 시작 실패", e);
+        }
     }
 
     private void checkRelease() {
-        if (selectedPackage == null) {
-            toast("확인할 버전 ZIP을 먼저 선택하세요.");
+        final String version = currentReleaseVersion();
+        if (version.isEmpty()) {
+            toast("확인할 배포 버전이 없습니다. ZIP을 먼저 선택하세요.");
             return;
         }
         if (!saveAndValidateSettings()) return;
         setBusy(true);
-        setStatus(15, "v" + selectedPackage.version + " Release 확인 중");
+        setStatus(15, "v" + version + " Release 확인 중");
         final String repo = repo();
         final String token = token();
-        final String version = selectedPackage.version;
 
         io.execute(() -> {
             try {
@@ -315,8 +338,22 @@ public class ReleaseUploaderActivity extends Activity {
     }
 
     private void downloadAndInstall() {
+        String readyPath = jobPrefs == null ? "" : jobPrefs.getString(ReleaseDeployService.KEY_APK_PATH, "");
+        if (readyPath != null && !readyPath.trim().isEmpty()) {
+            File readyApk = new File(readyPath);
+            if (readyApk.isFile()) {
+                if (android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                    Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()));
+                    startActivity(settings);
+                    toast("'이 출처 허용'을 켠 뒤 설치 버튼을 다시 눌러주세요.");
+                    return;
+                }
+                launchInstaller(readyApk);
+                return;
+            }
+        }
         if (latestRelease == null || !latestRelease.hasApk()) {
-            toast("먼저 사인 Release 상태를 확인하세요.");
+            toast("백그라운드 배포가 완료될 때까지 기다리거나 Release 상태를 확인하세요.");
             return;
         }
         if (!saveAndValidateSettings()) return;
@@ -360,6 +397,40 @@ public class ReleaseUploaderActivity extends Activity {
             setStatus(100, "Android 설치 화면으로 전달 완료");
         } catch (Exception e) {
             fail("설치 화면 열기 실패", e);
+        }
+    }
+
+    private String currentReleaseVersion() {
+        if (selectedPackage != null && selectedPackage.version != null && !selectedPackage.version.trim().isEmpty()) return selectedPackage.version.trim();
+        return jobPrefs == null ? "" : jobPrefs.getString(ReleaseDeployService.KEY_VERSION, "").trim();
+    }
+
+    private void syncBackgroundJobState() {
+        if (jobPrefs == null || tvStatus == null) return;
+        String state = jobPrefs.getString(ReleaseDeployService.KEY_STATE, ReleaseDeployService.STATE_IDLE);
+        String version = jobPrefs.getString(ReleaseDeployService.KEY_VERSION, "");
+        String message = jobPrefs.getString(ReleaseDeployService.KEY_MESSAGE, "");
+        int percent = jobPrefs.getInt(ReleaseDeployService.KEY_PERCENT, 0);
+        boolean running = jobPrefs.getBoolean(ReleaseDeployService.KEY_RUNNING, false);
+        String bgLog = jobPrefs.getString(ReleaseDeployService.KEY_LOG, "");
+        String apkPath = jobPrefs.getString(ReleaseDeployService.KEY_APK_PATH, "");
+
+        if (!version.isEmpty() && !ReleaseDeployService.STATE_IDLE.equals(state)) {
+            setStatus(percent, message.isEmpty() ? ("v" + version + " · " + state) : message);
+            btnCheckRelease.setEnabled(true);
+            if (!bgLog.isEmpty()) tvLog.setText(bgLog);
+        }
+        boolean apkReady = apkPath != null && !apkPath.isEmpty() && new File(apkPath).isFile();
+        btnInstall.setEnabled(apkReady || (latestRelease != null && latestRelease.hasApk()));
+        btnInstall.setText(apkReady ? "완성된 APK 설치" : "완성된 APK 다운로드 · 설치");
+
+        if (running) {
+            busy = true;
+            btnTest.setEnabled(false);
+            btnPick.setEnabled(false);
+            btnDeploy.setEnabled(false);
+        } else if (busy && (ReleaseDeployService.STATE_READY.equals(state) || ReleaseDeployService.STATE_FAILED.equals(state))) {
+            setBusy(false);
         }
     }
 

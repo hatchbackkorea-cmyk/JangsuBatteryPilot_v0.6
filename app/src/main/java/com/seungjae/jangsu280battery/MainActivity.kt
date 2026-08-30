@@ -3,6 +3,10 @@ package com.seungjae.jangsu280battery
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
+import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,22 +15,33 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.provider.OpenableColumns
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.Gravity
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
+import android.media.AudioManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.text.InputType
-import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.Switch
+import android.widget.TableLayout
+import android.widget.TableRow
 import android.widget.TextView
 import android.text.SpannableString
 import android.text.Spanned
@@ -35,6 +50,11 @@ import android.widget.Toast
 import android.widget.ViewFlipper
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import java.text.SimpleDateFormat
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -78,6 +98,9 @@ class MainActivity : Activity() {
     private lateinit var tvRideMode: TextView
     private lateinit var tvAssistModeCurrent: TextView
     private lateinit var layoutAssistModeBanner: LinearLayout
+    private lateinit var layoutRideHero: LinearLayout
+    private lateinit var tvCurrentKmLabel: TextView
+    private lateinit var tvBatteryLabel: TextView
     private lateinit var layoutAutoEstimate: LinearLayout
     private lateinit var tvAutoEstimateLabel: TextView
     private lateinit var tvAutoEstimateGrade: TextView
@@ -97,7 +120,17 @@ class MainActivity : Activity() {
     private lateinit var tvCompareModel: TextView
     private lateinit var tvCompareAvinox: TextView
     private lateinit var tvCompareDetail: TextView
-    private lateinit var progressBattery: ProgressBar
+    private lateinit var tvRideRouteScale: TextView
+    private lateinit var switchRideTestMode: Switch
+    private lateinit var rideMiniProfileView: ElevationProfileView
+    private lateinit var seekRideRoute: ChargeDistanceSeekBar
+    private lateinit var pageRideRoot: LinearLayout
+    private lateinit var layoutRideWarningBanner: LinearLayout
+    private lateinit var tvRideWarningTitle: TextView
+    private lateinit var tvRideWarningReason: TextView
+    private lateinit var layoutRideReachMargins: LinearLayout
+    private lateinit var tvSafeReachMargin: TextView
+    private lateinit var tvHardReachMargin: TextView
     private lateinit var tvRiskStatus: TextView
     private lateinit var tvRiskDetail: TextView
     private lateinit var tvActualBattery: TextView
@@ -111,12 +144,17 @@ class MainActivity : Activity() {
     private lateinit var tvElevationAhead: TextView
     private lateinit var tvTenKmBattery: TextView
     private lateinit var tvAssist: TextView
+    private lateinit var rideMapPreview: ImageView
+    private lateinit var tvRideMapPreviewStatus: TextView
     private lateinit var tvNextClimb: TextView
     private lateinit var tvNextClimbDetail: TextView
     private lateinit var tvCourseStatus: TextView
     private lateinit var tvNextPoi: TextView
     private lateinit var tvPointEtaList: TextView
     private lateinit var tvPointEtaBasis: TextView
+    private lateinit var tvPointEtaRideTime: TextView
+    private lateinit var tvPointEtaStopTime: TextView
+    private lateinit var tableModeStrategy: TableLayout
     private lateinit var tvVersion: TextView
     private lateinit var profileView: ElevationProfileView
     private lateinit var btnRideReport: Button
@@ -137,9 +175,6 @@ class MainActivity : Activity() {
     private lateinit var seekPageFinishTarget: SeekBar
     private lateinit var tvPageHardReserve: TextView
     private lateinit var seekPageHardReserve: SeekBar
-    private lateinit var switchPageTestMode: Switch
-    private lateinit var tvPageTestKm: TextView
-    private lateinit var seekPageTestKm: SeekBar
     private lateinit var tvPageSettingsHint: TextView
     private lateinit var btnPageChargeSimulator: Button
     private lateinit var btnPageBleDiagnostic: Button
@@ -158,6 +193,22 @@ class MainActivity : Activity() {
     private lateinit var tvPagerIndicator: TextView
     private lateinit var pagerGesture: GestureDetector
 
+    // v0.28.1 rain / touch-lock controller.
+    // Unlocked: volume buttons keep their normal media-volume role.
+    // Locked: VOL+ short = next page, VOL- short = previous page.
+    // VOL+ long (1.5s) toggles touch lock in either state.
+    private var touchLocked = false
+    private val volumeKeyHandler = Handler(Looper.getMainLooper())
+    private var volumeUpPressedAtMs = 0L
+    private var volumeUpLongHandled = false
+    private val touchLockPrefs by lazy { getSharedPreferences("rain_touch_lock", Context.MODE_PRIVATE) }
+    private val touchLockLongPress = Runnable {
+        if (volumeUpPressedAtMs > 0L && !volumeUpLongHandled) {
+            volumeUpLongHandled = true
+            setTouchLocked(!touchLocked, announce = true)
+        }
+    }
+
     private var latestRouteKm = 0.0
     private var latestOffCourseM = 0.0
     private var latestAccuracyM = -1f
@@ -165,6 +216,9 @@ class MainActivity : Activity() {
     private var latestCourseElevation = 0.0
     private var latestLat = Double.NaN
     private var latestLon = Double.NaN
+    @Volatile private var rideMapRequestSeq = 0
+    private var lastRideMapUpdateMs = 0L
+    private var lastRideMapKm = Double.NaN
     private var latestFreeAscentM = 0.0
     private var latestBleSoc: Int? = null
     private var latestBleState: String = "BLE 대기"
@@ -202,7 +256,11 @@ class MainActivity : Activity() {
     private var voiceInputStartedMs: Long = 0L
     private var voiceInputRouteKm: Double = 0.0
     private var refreshingSettingsUi = false
+    private var refreshingRideControls = false
     private var emergencySearchRunning = false
+
+    private enum class RideWarningStage { NONE, CHARGE_IMMINENT, ECO_CONNECT, EMERGENCY, HARD_RESERVE }
+    private var lastRideWarningKey: String = ""
 
     private val rideReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -242,6 +300,8 @@ class MainActivity : Activity() {
         applySystemBarInsets()
         LearningMigration.ensureV0110FreshStart(this)
         bindViews()
+        rideMapPreview.setOnClickListener { openNextPointBicycleNavigation() }
+        tvRideMapPreviewStatus.setOnClickListener { openNextPointBicycleNavigation() }
 
         courseRepo = CourseRepository(this)
         learningStore = BatteryLearningStore(this)
@@ -289,18 +349,39 @@ class MainActivity : Activity() {
         btnPostRideAvinox.setOnClickListener { showPostRideAvinoxDialog() }
         btnPostRideCompare.setOnClickListener { showPostRideComparison() }
         btnPostRideLearn.setOnClickListener { learnLastFreeRide() }
+        setupRidePositionControls()
         setupInlineSettings()
         setupLearningPage()
         setupMobileReleasePage()
         setupSwipePager()
+        touchLocked = touchLockPrefs.getBoolean("locked", false)
+        updatePagerIndicator()
 
         renderCourseQuick()
+        refreshRidePositionControls()
         refreshInlineSettings()
         refreshLearningPage()
         renderRideState()
         renderAssistModeUi()
         renderCurrentMode()
+        maybeAutoReinterpretAvinoxOriginals()
         UpdateManager.maybeCheckOnLaunch(this)
+    }
+
+    private fun maybeAutoReinterpretAvinoxOriginals() {
+        if (logManager.isActive()) return
+        val manager = AvinoxContextReanalysisManager(this)
+        if (!manager.needsAutomaticRebuild()) return
+        manager.rebuildAsync { result ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                refreshLearningPage()
+                renderRideState()
+                if (result.samples > 0) {
+                    Toast.makeText(this, "기존 Avinox 원본 상황기반 v2 재해석 완료 · ${result.samples}구간", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun applySystemBarInsets() {
@@ -334,6 +415,9 @@ class MainActivity : Activity() {
         tvRideMode = findViewById(R.id.tvRideMode)
         tvAssistModeCurrent = findViewById(R.id.tvAssistModeCurrent)
         layoutAssistModeBanner = findViewById(R.id.layoutAssistModeBanner)
+        layoutRideHero = findViewById(R.id.layoutRideHero)
+        tvCurrentKmLabel = findViewById(R.id.tvCurrentKmLabel)
+        tvBatteryLabel = findViewById(R.id.tvBatteryLabel)
         layoutAutoEstimate = findViewById(R.id.layoutAutoEstimate)
         tvAutoEstimateLabel = findViewById(R.id.tvAutoEstimateLabel)
         tvAutoEstimateGrade = findViewById(R.id.tvAutoEstimateGrade)
@@ -353,7 +437,19 @@ class MainActivity : Activity() {
         tvCompareModel = findViewById(R.id.tvCompareModel)
         tvCompareAvinox = findViewById(R.id.tvCompareAvinox)
         tvCompareDetail = findViewById(R.id.tvCompareDetail)
-        progressBattery = findViewById(R.id.progressBattery)
+        tvRideRouteScale = findViewById(R.id.tvRideRouteScale)
+        switchRideTestMode = findViewById(R.id.switchRideTestMode)
+        rideMiniProfileView = findViewById(R.id.rideMiniProfileView)
+        rideMapPreview = findViewById(R.id.rideMapPreview)
+        tvRideMapPreviewStatus = findViewById(R.id.tvRideMapPreviewStatus)
+        seekRideRoute = findViewById(R.id.seekRideRoute)
+        pageRideRoot = findViewById(R.id.pageRideRoot)
+        layoutRideWarningBanner = findViewById(R.id.layoutRideWarningBanner)
+        tvRideWarningTitle = findViewById(R.id.tvRideWarningTitle)
+        tvRideWarningReason = findViewById(R.id.tvRideWarningReason)
+        layoutRideReachMargins = findViewById(R.id.layoutRideReachMargins)
+        tvSafeReachMargin = findViewById(R.id.tvSafeReachMargin)
+        tvHardReachMargin = findViewById(R.id.tvHardReachMargin)
         tvRiskStatus = findViewById(R.id.tvRiskStatus)
         tvRiskDetail = findViewById(R.id.tvRiskDetail)
         tvActualBattery = findViewById(R.id.tvActualBattery)
@@ -373,6 +469,9 @@ class MainActivity : Activity() {
         tvNextPoi = findViewById(R.id.tvNextPoi)
         tvPointEtaList = findViewById(R.id.tvPointEtaList)
         tvPointEtaBasis = findViewById(R.id.tvPointEtaBasis)
+        tvPointEtaRideTime = findViewById(R.id.tvPointEtaRideTime)
+        tvPointEtaStopTime = findViewById(R.id.tvPointEtaStopTime)
+        tableModeStrategy = findViewById(R.id.tableModeStrategy)
         tvVersion = findViewById(R.id.tvVersion)
         profileView = findViewById(R.id.profileView)
         btnRideReport = findViewById(R.id.btnRideReport)
@@ -393,9 +492,6 @@ class MainActivity : Activity() {
         seekPageFinishTarget = findViewById(R.id.seekPageFinishTarget)
         tvPageHardReserve = findViewById(R.id.tvPageHardReserve)
         seekPageHardReserve = findViewById(R.id.seekPageHardReserve)
-        switchPageTestMode = findViewById(R.id.switchPageTestMode)
-        tvPageTestKm = findViewById(R.id.tvPageTestKm)
-        seekPageTestKm = findViewById(R.id.seekPageTestKm)
         tvPageSettingsHint = findViewById(R.id.tvPageSettingsHint)
         btnPageChargeSimulator = findViewById(R.id.btnPageChargeSimulator)
         btnPageBleDiagnostic = findViewById(R.id.btnPageBleDiagnostic)
@@ -419,11 +515,15 @@ class MainActivity : Activity() {
             courseMeta = courseRepo.activeMeta()
             course = courseRepo.loadCourse(courseMeta.id)
             loadedCourseId = courseMeta.id
+            // v0.28.4: 테스트/계획 비교에서는 Avinox에서 고른 비교 모드를
+            // 우리 자체 모드별 학습 모델의 기준 모드와 동기화한다.
+            // Avinox의 % 숫자 자체는 여전히 자체 예측에 섞지 않는다.
+            syncPlanningModeFromAvinoxReference()
             basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             tripPlanner = EnergyTripPlanner(basePlan, plan)
-            profileView.setCourse(course)
+            configureRideRouteVisuals()
             val prefs = AppSettings.prefs(this)
             if (resetProgress) {
                 prefs.edit().putFloat(AppSettings.KEY_LAST_KM, 0f).putFloat(AppSettings.KEY_TEST_KM, 0f).apply()
@@ -548,7 +648,7 @@ class MainActivity : Activity() {
         val ref = avinoxReferenceStore.get(courseMeta.id) ?: return
         val selected = ref.selectedMode?.takeIf { ref.value(it) != null }
         val modeText = selected?.let { "실시간 비교 ${it.label} ${formatPct(ref.value(it)!!)}" } ?: "비교 표시 안 함"
-        val detail = "${ref.compactValues()} · $modeText · 자체예측/개인학습 미적용"
+        val detail = "${ref.compactValues()} · $modeText · Avinox 수치는 자체예측에 미주입 · 선택 모드만 자체 모드별 학습 기준과 동기화"
         logManager.recordEvent("AVINOX_BENCHMARK", detail, 0.0, actualStore.latest()?.percent)
     }
 
@@ -786,40 +886,54 @@ class MainActivity : Activity() {
     private fun renderAssistIdle(text: String) {
         layoutAutoEstimate.visibility = View.GONE
         tvAssistModeCurrent.text = text
-        tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-        tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_idle_bg)
+        tvAssistModeCurrent.setBackgroundColor(Color.TRANSPARENT)
         lastRenderedAssistMode = null
         lastRenderedAutoEstimate = null
+        applyRideHeroModeStyle(null)
     }
 
     private fun renderAssistModeBanner(mode: AvinoxAssistMode, tentative: Boolean) {
         val changed = lastRenderedAssistMode != mode
         renderAssistModeAndRange(mode, tentative)
+        tvAssistModeCurrent.setBackgroundColor(Color.TRANSPARENT)
         when (mode) {
-            AvinoxAssistMode.ECO -> {
-                layoutAutoEstimate.visibility = View.GONE
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_eco_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-            }
+            AvinoxAssistMode.ECO -> layoutAutoEstimate.visibility = View.GONE
             AvinoxAssistMode.AUTO -> {
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_auto_left_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
                 layoutAutoEstimate.visibility = View.VISIBLE
                 renderAutoEstimateSegment()
             }
-            AvinoxAssistMode.TRAIL -> {
-                layoutAutoEstimate.visibility = View.GONE
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_trail_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.assist_dark_text))
-            }
-            AvinoxAssistMode.TURBO -> {
-                layoutAutoEstimate.visibility = View.GONE
-                tvAssistModeCurrent.setBackgroundResource(R.drawable.assist_mode_turbo_bg)
-                tvAssistModeCurrent.setTextColor(getColor(R.color.text_primary))
-            }
+            AvinoxAssistMode.TRAIL -> layoutAutoEstimate.visibility = View.GONE
+            AvinoxAssistMode.TURBO -> layoutAutoEstimate.visibility = View.GONE
         }
+        applyRideHeroModeStyle(mode)
         if (changed) popModeBanner()
         lastRenderedAssistMode = mode
+    }
+
+    /** v0.27.7: 거리·모드·SOC·고도 프로필을 하나의 모드 색상 카드로 통합한다. */
+    private fun applyRideHeroModeStyle(mode: AvinoxAssistMode?) {
+        if (!::layoutRideHero.isInitialized) return
+        val darkText = mode == AvinoxAssistMode.TRAIL
+        val fg = getColor(if (darkText) R.color.assist_dark_text else R.color.text_primary)
+        val secondary = if (darkText) Color.argb(190, Color.red(fg), Color.green(fg), Color.blue(fg)) else getColor(R.color.text_primary)
+        val bg = when (mode) {
+            AvinoxAssistMode.ECO -> R.drawable.assist_mode_eco_bg
+            AvinoxAssistMode.AUTO -> R.drawable.assist_mode_auto_bg
+            AvinoxAssistMode.TRAIL -> R.drawable.assist_mode_trail_bg
+            AvinoxAssistMode.TURBO -> R.drawable.assist_mode_turbo_bg
+            null -> R.drawable.assist_mode_idle_bg
+        }
+        layoutRideHero.setBackgroundResource(bg)
+        tvAssistModeCurrent.setBackgroundColor(Color.TRANSPARENT)
+        tvAssistModeCurrent.setTextColor(fg)
+        tvCurrentKm.setTextColor(fg)
+        tvCurrentKmLabel.setTextColor(secondary)
+        tvBatteryLabel.setTextColor(secondary)
+        tvRideRouteScale.setTextColor(secondary)
+        tvSafeReachMargin.setTextColor(fg)
+        tvHardReachMargin.setTextColor(fg)
+        // 모드가 잡힌 주행 중에는 카드 자체가 상태색이므로 SOC 숫자는 가독성 우선.
+        if (mode != null) tvBattery.setTextColor(fg)
     }
 
     /**
@@ -861,12 +975,9 @@ class MainActivity : Activity() {
     }
 
     private fun renderAssistModeAndRange(mode: AvinoxAssistMode, tentative: Boolean) {
-        val modeText = mode.name + if (tentative) " ?" else ""
-        val rangeText = assistModeRangeText(mode)
-        val full = "$modeText   $rangeText"
-        val span = SpannableString(full)
-        span.setSpan(RelativeSizeSpan(0.50f), modeText.length, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        tvAssistModeCurrent.text = span
+        // v0.27.7: 도달거리는 바로 아래 프로필의 파란/빨간 선이 담당한다.
+        // 통합 카드 중앙에는 주행 중 한눈에 읽히도록 모드명만 크게 표시한다.
+        tvAssistModeCurrent.text = mode.name + if (tentative) " ?" else ""
     }
 
     private fun renderAutoEstimateSegment() {
@@ -910,11 +1021,11 @@ class MainActivity : Activity() {
     }
 
     private fun popModeBanner() {
-        layoutAssistModeBanner.animate().cancel()
-        layoutAssistModeBanner.scaleX = 1f
-        layoutAssistModeBanner.scaleY = 1f
-        layoutAssistModeBanner.animate().scaleX(1.055f).scaleY(1.055f).setDuration(90L).withEndAction {
-            layoutAssistModeBanner.animate().scaleX(1f).scaleY(1f).setDuration(150L).start()
+        layoutRideHero.animate().cancel()
+        layoutRideHero.scaleX = 1f
+        layoutRideHero.scaleY = 1f
+        layoutRideHero.animate().scaleX(1.025f).scaleY(1.025f).setDuration(90L).withEndAction {
+            layoutRideHero.animate().scaleX(1f).scaleY(1f).setDuration(150L).start()
         }.start()
     }
 
@@ -1176,11 +1287,11 @@ class MainActivity : Activity() {
         tvCourseQuickSelect.text = "${courseMeta.name}  ▼\n${RideFormatter.one(courseMeta.totalKm)} km · $elev\n$source · 개인 학습 ${learned}개 구간 적용"
         val ref = avinoxReferenceStore.get(courseMeta.id)
         tvAvinoxReferenceSummary.text = if (ref == null) {
-            "입력 없음 · 자체 예측만 사용\nAvinox 전체 코스 소비량은 외부 비교용으로만 저장하며 학습/예측에는 섞지 않습니다. 100% 초과 입력 가능."
+            "입력 없음 · 자체 예측만 사용\nAvinox 전체 코스 소비량은 외부 비교값이며 자체 예측 수치에는 섞지 않습니다. 100% 초과 입력 가능."
         } else {
             val selected = ref.selectedMode?.takeIf { ref.value(it) != null }
             val compare = selected?.let { "실시간 비교: ${it.label} ${formatPct(ref.value(it)!!)}" } ?: "실시간 비교 표시 안 함"
-            "${ref.compactValues()}\n$compare\n※ Avinox는 외부 benchmark · 자체 예측/개인 학습에 0% 반영"
+            "${ref.compactValues()}\n$compare\n※ Avinox 소비량 숫자는 미반영 · 선택 모드만 자체 ECO/AUTO/TRAIL/TURBO 학습 기준과 동기화"
         }
         val riding = logManager.isActive()
         tvCourseQuickSelect.isEnabled = !riding
@@ -1202,7 +1313,7 @@ class MainActivity : Activity() {
             setPadding(px(18), px(8), px(18), px(4))
         }
         root.addView(TextView(this).apply {
-            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n이 값은 외부 비교용입니다. 자체 예측이나 개인 학습에는 절대 섞이지 않습니다."
+            text = "Avinox 앱에서 같은 GPX를 분석했을 때 표시된 전체 코스 예상 소비량을 입력하세요.\n100% 초과 입력 가능 · 예: 254% = 배터리 2.54팩 분량\n소비량 숫자는 외부 비교용으로만 보존합니다. 다만 비교 모드(ECO/AUTO/TRAIL/TURBO)를 고르면 테스트/계획의 자체 예측도 같은 모드의 개인 학습 기준으로 계산합니다."
             textSize = 13f
             setTextColor(getColor(R.color.text_secondary))
             setPadding(0, 0, 0, px(8))
@@ -1307,7 +1418,7 @@ class MainActivity : Activity() {
                     renderCourseQuick()
                     renderAtKm(latestRouteKm, testMode)
                     dialog.dismiss()
-                    val savedMsg = if (selected == null) "Avinox 예상값을 외부 비교 데이터로 저장했습니다." else "Avinox ${selected.label}을 실시간 비교 모드로 설정했습니다. 자체 예측에는 반영하지 않습니다."
+                    val savedMsg = if (selected == null) "Avinox 예상값을 외부 비교 데이터로 저장했습니다." else "${selected.label} 비교 선택 · 자체 예측도 ${selected.label} 모드 학습 기준으로 다시 계산했습니다."
                     Toast.makeText(this, savedMsg, Toast.LENGTH_LONG).show()
                 } catch (e: IllegalArgumentException) {
                     Toast.makeText(this, e.message ?: "입력값을 확인하세요.", Toast.LENGTH_LONG).show()
@@ -1326,9 +1437,32 @@ class MainActivity : Activity() {
     }
 
     private fun rebuildPlanFromCurrentCourse() {
+        if (!logManager.isActive()) syncPlanningModeFromAvinoxReference()
         basePlan = BatteryPlan(course, learningStore, chargingStore.list(courseMeta.id))
         plan = AdaptiveBatteryPlan(basePlan, actualStore)
         pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
+        tripPlanner = EnergyTripPlanner(basePlan, plan)
+    }
+
+    /**
+     * v0.28.4 planning/test baseline.
+     * Avinox benchmark VALUE never enters our model; only its selected mode chooses which
+     * verified mode-specific learning bucket (ECO/AUTO/TRAIL/TURBO) BatteryLearningStore uses.
+     * During a real ride, verified BLE mode detection can still supersede this baseline.
+     */
+    private fun syncPlanningModeFromAvinoxReference() {
+        if (!::courseMeta.isInitialized || !::avinoxReferenceStore.isInitialized || !::assistProfileStore.isInitialized) return
+        if (::logManager.isInitialized && logManager.isActive()) return
+        val selected = avinoxReferenceStore.get(courseMeta.id)?.selectedMode ?: return
+        val assistMode = runCatching { AvinoxAssistMode.valueOf(selected.name) }.getOrNull() ?: return
+        assistProfileStore.setPreferredMode(assistMode)
+    }
+
+    private fun predictionModeLabel(): String? = when {
+        ::logManager.isInitialized && logManager.isActive() -> logManager.activeAssistMode()?.label
+            ?: assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }?.label
+        else -> avinoxReferenceStore.get(courseMeta.id)?.selectedMode?.label
+            ?: assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }?.label
     }
 
     private fun cleanPctText(value: Double): String {
@@ -1423,6 +1557,310 @@ class MainActivity : Activity() {
         }.getOrNull()
     }
 
+    private fun plannedChargeKms(): List<Double> = if (::basePlan.isInitialized) {
+        basePlan.checkpoints.filter { it.chargeToPct != null }.map { it.km }
+    } else emptyList()
+
+    /** v0.27.3: first-page route axis is distance/charging based, never battery based. */
+    private fun configureRideRouteVisuals() {
+        if (!::course.isInitialized) return
+        val chargeKms = plannedChargeKms()
+        profileView.setCourse(course)
+        rideMiniProfileView.setCourse(course)
+        rideMiniProfileView.setCompactMode(false)
+        rideMiniProfileView.setCheckpointKms(chargeKms)
+        seekRideRoute.setCourse(course.totalKm, chargeKms)
+    }
+
+    /**
+     * v0.29.1: test-mode switch and virtual GPX position live on the Settings page.
+     * The ride HUD keeps only the enlarged live elevation profile and route status.
+     */
+    private fun setupRidePositionControls() {
+        switchRideTestMode.setOnCheckedChangeListener { _, checked ->
+            if (refreshingRideControls) return@setOnCheckedChangeListener
+            if (logManager.isActive()) {
+                refreshRidePositionControls()
+                Toast.makeText(this, "주행 중에는 테스트 모드를 바꿀 수 없습니다. 테스트 주행에서는 위치 슬라이더만 계속 움직일 수 있습니다.", Toast.LENGTH_SHORT).show()
+                return@setOnCheckedChangeListener
+            }
+            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
+            testMode = checked
+            refreshRidePositionControls()
+            renderCurrentMode()
+        }
+        seekRideRoute.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser || refreshingRideControls || !testMode || !::course.isInitialized) return
+                val km = seekRideRoute.routeKmForProgress(progress).coerceIn(0.0, course.totalKm)
+                AppSettings.prefs(this@MainActivity).edit().putFloat(AppSettings.KEY_TEST_KM, km.toFloat()).apply()
+                latestRouteKm = km
+                renderCurrentMode()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+    }
+
+    private fun refreshRidePositionControls() {
+        if (!::course.isInitialized) return
+        refreshingRideControls = true
+        try {
+            switchRideTestMode.visibility = View.VISIBLE
+            switchRideTestMode.isChecked = AppSettings.testMode(this)
+            switchRideTestMode.isEnabled = !logManager.isActive()
+            seekRideRoute.visibility = View.VISIBLE
+            seekRideRoute.setUserSeekingEnabled(testMode)
+            val km = if (testMode) AppSettings.testKm(this).coerceIn(0.0, course.totalKm) else latestRouteKm.coerceIn(0.0, course.totalKm)
+            seekRideRoute.setRouteKm(km)
+            rideMiniProfileView.visibility = View.VISIBLE
+            rideMiniProfileView.setCurrentKm(km)
+        } finally {
+            refreshingRideControls = false
+        }
+    }
+
+    private fun renderRideRouteVisual(km: Double, simulated: Boolean) {
+        if (!::course.isInitialized) return
+        rideMiniProfileView.visibility = View.VISIBLE
+        seekRideRoute.visibility = View.VISIBLE
+        switchRideTestMode.visibility = View.VISIBLE
+        switchRideTestMode.isEnabled = !logManager.isActive()
+        rideMiniProfileView.setCurrentKm(km)
+        seekRideRoute.setRouteKm(km)
+        seekRideRoute.setUserSeekingEnabled(testMode)
+
+        val nextCharge = activePlannedChargeCheckpoints().firstOrNull { it.km > km + 0.08 }
+        val targetKm = nextCharge?.km ?: course.totalKm
+        val remain = (targetKm - km).coerceAtLeast(0.0)
+        val prefix = if (simulated) "테스트" else "거리"
+        tvRideRouteScale.text = if (nextCharge != null) {
+            "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 다음충전 ${RideFormatter.one(nextCharge.km)} · ${RideFormatter.one(remain)}km 남음"
+        } else {
+            "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 종점 ${RideFormatter.one(course.totalKm)} · ${RideFormatter.one(remain)}km 남음"
+            updateRideMapPreview(km, simulated)
+    }
+    }
+
+    /** v0.27.4: skipped stations are not segment boundaries on the live mini profile. */
+    private fun activePlannedChargeCheckpoints(): List<Checkpoint> = basePlan.checkpoints
+        .filter { it.chargeToPct != null && !replanStore.isSkipped(courseMeta.id, it.km) }
+        .sortedBy { it.km }
+
+    /**
+     * v0.27.5
+     * - Test mode keeps the whole GPX.
+     * - Real riding zooms to the current charge-to-charge leg + a small look-ahead after the next station.
+     * - The blue line is ALWAYS the reach limit at the normal reserve target (default 15%).
+     * - The red line is the last-resort hard-reserve reach (default 7%) and appears only when
+     *   a planned charge is imminent or the replan logic is already in ECO/emergency territory.
+     */
+    private fun renderRideMiniProfileContext(km: Double, simulated: Boolean, context: EtaChargeContext) {
+        if (!::course.isInitialized) return
+        rideMiniProfileView.setCurrentKm(km)
+
+        val charges = activePlannedChargeCheckpoints()
+        val next = charges.firstOrNull { it.km > km + 0.08 }
+        val targetKm = next?.km ?: course.totalKm
+
+        if (simulated || !logManager.isActive()) {
+            rideMiniProfileView.setWindow(null, null)
+        } else {
+            val previousKm = charges.lastOrNull { it.km <= km + 0.12 }?.km ?: 0.0
+            val followingKm = charges.firstOrNull { it.km > targetKm + 0.08 }?.km ?: course.totalKm
+            val availableAfterTarget = (followingKm - targetKm).coerceAtLeast(0.0)
+            val extraAfterTarget = if (next != null && availableAfterTarget > 0.05) {
+                (availableAfterTarget * 0.20).coerceIn(2.0, 5.0).coerceAtMost(availableAfterTarget)
+            } else 0.0
+            val windowEnd = (targetKm + extraAfterTarget).coerceAtMost(course.totalKm)
+            rideMiniProfileView.setWindow(previousKm, windowEnd)
+        }
+
+        layoutRideReachMargins.visibility = View.VISIBLE
+        val visualSoc = if (simulated) plan.estimate(km).percent else currentSocForReplan(km)
+        val hard = AppSettings.hardReserve(this)
+        val decision = computeReplanDecision(km, context, visualSoc)
+        val nextChargeRemainKm = next?.let { (it.km - km).coerceAtLeast(0.0) }
+        val chargeImminent = nextChargeRemainKm != null && nextChargeRemainKm <= 5.0
+        val emergencyActive = replanStore.active(courseMeta.id) != null
+
+        val recommendedReachKm = operationalReachLimitKm(km, visualSoc, finishTargetPct)
+        val showHard = chargeImminent ||
+            decision.kind == ReplanDecisionKind.ECO_CONNECT ||
+            decision.kind == ReplanDecisionKind.EMERGENCY ||
+            emergencyActive ||
+            visualSoc <= hard + 0.5
+        val hardReachKm = if (showHard) operationalReachLimitKm(km, visualSoc, hard.toDouble()) else null
+        rideMiniProfileView.setReachLimits(recommendedReachKm, hardReachKm)
+        renderReachMarginText(next, recommendedReachKm, hardReachKm, hard)
+    }
+
+    private fun renderReachMarginText(next: Checkpoint?, recommendedReachKm: Double, hardReachKm: Double?, hardReserve: Int) {
+        fun signed(delta: Double): String = "${if (delta >= 0.0) "+" else ""}${RideFormatter.one(delta)}km"
+        if (next != null) {
+            tvSafeReachMargin.text = "안전 ${finishTargetPct.roundToInt()}% · 다음충전 ${signed(recommendedReachKm - next.km)}"
+            if (hardReachKm != null) {
+                tvHardReachMargin.visibility = View.VISIBLE
+                tvHardReachMargin.text = "하드 ${hardReserve}% · ${signed(hardReachKm - next.km)}"
+            } else {
+                tvHardReachMargin.visibility = View.GONE
+            }
+        } else {
+            val remainToFinish = course.totalKm - recommendedReachKm
+            tvSafeReachMargin.text = if (remainToFinish <= 0.05) {
+                "안전 ${finishTargetPct.roundToInt()}% · 종점 도달"
+            } else {
+                "안전 ${finishTargetPct.roundToInt()}% · 종점 -${RideFormatter.one(remainToFinish)}km"
+            }
+            if (hardReachKm != null) {
+                val hardRemain = course.totalKm - hardReachKm
+                tvHardReachMargin.visibility = View.VISIBLE
+                tvHardReachMargin.text = if (hardRemain <= 0.05) "하드 ${hardReserve}% · 종점 도달" else "하드 ${hardReserve}% · -${RideFormatter.one(hardRemain)}km"
+            } else {
+                tvHardReachMargin.visibility = View.GONE
+            }
+        }
+    }
+
+    /**
+     * Farthest GPX km reachable from current SOC while preserving the requested reserve.
+     * Intermediate planned charging is deliberately ignored: this answers "with the battery I have now, how far?".
+     */
+    private fun operationalReachLimitKm(currentKm: Double, currentSoc: Double, reservePct: Double): Double {
+        val start = currentKm.coerceIn(0.0, course.totalKm)
+        val usablePct = (currentSoc - reservePct).coerceAtLeast(0.0)
+        if (usablePct <= 0.01) return start
+        val factor = (plan.calibration(start)?.factor ?: 1.0).coerceIn(0.65, 1.65)
+        fun useTo(km: Double): Double = basePlan.internalConsumption(start, km.coerceIn(start, course.totalKm)) * factor
+        if (useTo(course.totalKm) <= usablePct) return course.totalKm
+
+        var lo = start
+        var hi = course.totalKm
+        repeat(28) {
+            val mid = (lo + hi) / 2.0
+            if (useTo(mid) <= usablePct) lo = mid else hi = mid
+        }
+        return lo.coerceIn(start, course.totalKm)
+    }
+
+    private fun renderRideVisualWarning(km: Double, simulated: Boolean, context: EtaChargeContext) {
+        if ((!simulated && !logManager.isActive()) || context.activeCharge != null) {
+            hideRideVisualWarning()
+            return
+        }
+
+        val visualSoc = if (simulated) plan.estimate(km).percent else currentSocForReplan(km)
+        val hard = AppSettings.hardReserve(this)
+        val decision = computeReplanDecision(km, context, visualSoc)
+        val charges = activePlannedChargeCheckpoints()
+        val nextCharge = charges.firstOrNull { it.km > km + 0.08 }
+        val remain = nextCharge?.let { (it.km - km).coerceAtLeast(0.0) }
+        val emergencySession = replanStore.active(courseMeta.id)
+
+        val stage = when {
+            visualSoc <= hard + 0.5 -> RideWarningStage.HARD_RESERVE
+            emergencySession != null || decision.kind == ReplanDecisionKind.EMERGENCY -> RideWarningStage.EMERGENCY
+            decision.kind == ReplanDecisionKind.ECO_CONNECT -> RideWarningStage.ECO_CONNECT
+            remain != null && remain <= 5.0 -> RideWarningStage.CHARGE_IMMINENT
+            else -> RideWarningStage.NONE
+        }
+        if (stage == RideWarningStage.NONE) {
+            hideRideVisualWarning()
+            return
+        }
+
+        val target = decision.target ?: nextCharge
+        val prefix = if (simulated) "테스트 · " else ""
+        when (stage) {
+            RideWarningStage.CHARGE_IMMINENT -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_orange_bg)
+                tvRideWarningTitle.text = "${prefix}⚠ 충전 임박"
+                tvRideWarningReason.text = if (decision.kind == ReplanDecisionKind.SKIP_AVAILABLE && decision.skipNextTarget != null) {
+                    "${nextCharge?.name ?: "충전소"} ${RideFormatter.one(remain ?: 0.0)}km · 현재 계산상 충전 생략 가능"
+                } else {
+                    "${nextCharge?.name ?: "다음 충전소"} ${RideFormatter.one(remain ?: 0.0)}km · 파란 안전선과 충전소 위치를 확인하세요."
+                }
+            }
+            RideWarningStage.ECO_CONNECT -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_orange_bg)
+                tvRideWarningTitle.text = "${prefix}⚠ 충전 권장 · ECO 연결"
+                tvRideWarningReason.text = "${target?.name ?: "다음 지점"} 도착예상 ${decision.predictedPct.roundToInt()}% · 안전 기준 ${finishTargetPct.roundToInt()}% 아래"
+            }
+            RideWarningStage.EMERGENCY -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_red_bg)
+                tvRideWarningTitle.text = "${prefix}🚨 긴급 충전"
+                tvRideWarningReason.text = emergencySession?.let {
+                    "${it.candidateName} 비상 절차 진행 중 · 하드 리저브 ${hard}% 빨간선을 넘기지 마세요."
+                } ?: "${target?.name ?: "다음 지점"} 도착예상 ${decision.predictedPct.roundToInt()}% · 하드 리저브 ${hard}% 미만"
+            }
+            RideWarningStage.HARD_RESERVE -> {
+                layoutRideWarningBanner.setBackgroundResource(R.drawable.ride_warning_hard_bg)
+                tvRideWarningTitle.text = "${prefix}🚨 하드 리저브 진입"
+                tvRideWarningReason.text = "현재 ${visualSoc.roundToInt()}% · 하드 리저브 ${hard}% · 주행 연장보다 즉시 충전을 우선하세요."
+            }
+            else -> Unit
+        }
+        layoutRideWarningBanner.visibility = View.VISIBLE
+
+        val warningKey = "${stage.name}:${target?.km?.let { (it * 10).roundToInt() } ?: -1}"
+        if (warningKey != lastRideWarningKey) {
+            lastRideWarningKey = warningKey
+            when (stage) {
+                RideWarningStage.CHARGE_IMMINENT, RideWarningStage.ECO_CONNECT -> pulseWarningBanner(strong = false)
+                RideWarningStage.EMERGENCY -> {
+                    pulseWarningBanner(strong = true)
+                    flashRidePage(getColor(R.color.danger), strong = false)
+                    if (!simulated) vibrateRideWarning(260L, 170)
+                }
+                RideWarningStage.HARD_RESERVE -> {
+                    pulseWarningBanner(strong = true)
+                    flashRidePage(getColor(R.color.danger), strong = true)
+                    if (!simulated) vibrateRideWarning(500L, 230)
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun hideRideVisualWarning() {
+        layoutRideWarningBanner.visibility = View.GONE
+        layoutRideWarningBanner.clearAnimation()
+        pageRideRoot.setBackgroundColor(Color.TRANSPARENT)
+        lastRideWarningKey = ""
+    }
+
+    private fun pulseWarningBanner(strong: Boolean) {
+        layoutRideWarningBanner.clearAnimation()
+        val pulse = AlphaAnimation(if (strong) 0.28f else 0.55f, 1f).apply {
+            duration = if (strong) 280L else 360L
+            repeatMode = Animation.REVERSE
+            repeatCount = if (strong) 3 else 2
+        }
+        layoutRideWarningBanner.startAnimation(pulse)
+    }
+
+    private fun flashRidePage(color: Int, strong: Boolean) {
+        val alpha = if (strong) 105 else 55
+        val flash = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+        ValueAnimator.ofObject(ArgbEvaluator(), Color.TRANSPARENT, flash, Color.TRANSPARENT).apply {
+            duration = if (strong) 900L else 700L
+            repeatCount = if (strong) 1 else 0
+            addUpdateListener { pageRideRoot.setBackgroundColor(it.animatedValue as Int) }
+            start()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun vibrateRideWarning(durationMs: Long, amplitude: Int) {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+        if (!vibrator.hasVibrator()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(durationMs, amplitude.coerceIn(1, 255)))
+        } else {
+            vibrator.vibrate(durationMs)
+        }
+    }
+
     private fun setupInlineSettings() {
         seekPageDistanceInterval.max = 50
         seekPageTimeInterval.max = 120
@@ -1465,24 +1903,6 @@ class MainActivity : Activity() {
             AppSettings.prefs(this).edit().putInt(AppSettings.KEY_HARD_RESERVE, pct).apply()
             updateInlineSettingsLabels()
             if (::plan.isInitialized) renderAtKm(latestRouteKm, testMode)
-        })
-        switchPageTestMode.setOnCheckedChangeListener { _, checked ->
-            if (refreshingSettingsUi) return@setOnCheckedChangeListener
-            if (logManager.isActive()) {
-                refreshInlineSettings()
-                return@setOnCheckedChangeListener
-            }
-            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
-            testMode = checked
-            refreshInlineSettings()
-            renderCurrentMode()
-        }
-        seekPageTestKm.setOnSeekBarChangeListener(simpleSeekListener { value ->
-            if (refreshingSettingsUi || !switchPageTestMode.isChecked || !::course.isInitialized) return@simpleSeekListener
-            val km = (value / 10.0).coerceIn(0.0, course.totalKm)
-            AppSettings.prefs(this).edit().putFloat(AppSettings.KEY_TEST_KM, km.toFloat()).apply()
-            updateInlineSettingsLabels()
-            if (testMode) renderCurrentMode()
         })
         btnPageChargeSimulator.setOnClickListener {
             if (logManager.isActive()) {
@@ -1551,17 +1971,12 @@ class MainActivity : Activity() {
             seekPageTimeInterval.progress = AppSettings.timeIntervalMin(this)
             seekPageFinishTarget.progress = AppSettings.finishTarget(this).roundToInt().coerceIn(1, 99) - 1
             seekPageHardReserve.progress = AppSettings.hardReserve(this).coerceIn(5, 15) - 5
-            switchPageTestMode.isChecked = AppSettings.testMode(this)
-            seekPageTestKm.max = (course.totalKm * 10.0).roundToInt().coerceAtLeast(1)
-            seekPageTestKm.progress = (AppSettings.testKm(this).coerceIn(0.0, course.totalKm) * 10.0).roundToInt()
-            switchPageTestMode.isEnabled = !logManager.isActive()
-            seekPageTestKm.isEnabled = switchPageTestMode.isChecked && !logManager.isActive()
             btnPageChargeSimulator.isEnabled = !logManager.isActive()
             btnPageResetProgress.isEnabled = !logManager.isActive()
             tvPageSettingsHint.text = if (logManager.isActive()) {
-                "주행 중에는 테스트 모드를 변경할 수 없습니다. 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
+                "주행 중입니다. 테스트 주행이면 아래 GPX 위치 슬라이더를 사용할 수 있고, 음성 안내와 충전 권장 기준은 즉시 반영됩니다."
             } else {
-                "선택 코스 · ${courseMeta.name} · 테스트 위치와 모든 예측은 이 GPX 기준으로 계산됩니다."
+                "테스트 모드와 GPX 가상 위치는 이 페이지에서 조작합니다. 선택 코스 · ${courseMeta.name}"
             }
             updateInlineSettingsLabels()
         } finally {
@@ -1576,8 +1991,6 @@ class MainActivity : Activity() {
         tvPageTimeInterval.text = if (t == 0) "시간 기준 안내 · 사용 안 함" else "시간 기준 안내 · ${t}분마다"
         tvPageFinishTarget.text = "충전권장 기준 잔량 ${seekPageFinishTarget.progress + 1}%"
         tvPageHardReserve.text = "비상 하드 리저브 ${seekPageHardReserve.progress + 5}% · 이 아래면 긴급 충전 탐색"
-        val km = (seekPageTestKm.progress / 10.0).coerceIn(0.0, if (::course.isInitialized) course.totalKm else 0.0)
-        tvPageTestKm.text = if (::course.isInitialized) "테스트 위치 ${RideFormatter.one(km)} / ${RideFormatter.one(course.totalKm)} km" else "테스트 위치"
     }
 
 
@@ -1627,16 +2040,22 @@ class MainActivity : Activity() {
         if (!::learningStore.isInitialized) return
         val samples = learningStore.samples()
         val rides = HistoricalRideStore(this).records()
-        tvLearningPageSummary.text = if (samples.isEmpty()) {
-            "학습 데이터 0개 · 중립 초기 모델 사용 중\n\nFIT/GPX를 학습하면 이후 선택하는 모든 GPX 코스의 거리·고도·지형을 개인 소비 특성으로 보정합니다."
+        val contextSamples = AvinoxAssistMode.values().sumOf { learningStore.strategyContextSampleCountForMode(it) }
+        tvLearningPageSummary.text = if (samples.isEmpty() && contextSamples <= 0) {
+            "학습 데이터 0개 · 중립 초기 모델 사용 중\n\nAvinox 원본 또는 FIT/GPX를 학습하면 이후 선택하는 모든 GPX 코스의 거리·고도·지형을 개인 소비 특성으로 보정합니다."
         } else {
-            "학습 라이딩 ${rides.size}개 · 학습 구간 ${samples.size}개\n${learningStore.summaryText()}\n\n현재 선택 코스: ${if (::courseMeta.isInitialized) courseMeta.name else "-"}"
+            buildString {
+                append("학습 라이딩 ${rides.size}개 · v1 구간 ${samples.size}개")
+                append("\n${learningStore.summaryText()}")
+                append("\n${learningStore.strategyContextSummary()}")
+                append("\n\n현재 선택 코스: ${if (::courseMeta.isInitialized) courseMeta.name else "-"}")
+            }
         }
         val enabled = !logManager.isActive()
         btnLearningFit.isEnabled = enabled
         btnLearningGpx.isEnabled = enabled
         btnLearningManage.isEnabled = enabled
-        btnLearningClear.isEnabled = enabled && samples.isNotEmpty()
+        btnLearningClear.isEnabled = enabled && (samples.isNotEmpty() || contextSamples > 0)
     }
 
     private fun confirmClearLearningQuick() {
@@ -1646,6 +2065,7 @@ class MainActivity : Activity() {
             .setMessage("FIT/GPX와 실제 주행에서 만든 개인 배터리 학습 데이터를 모두 삭제할까요? 코스 GPX와 주행 로그는 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
+                ContextualBatteryLearningStore(this).clear()
                 HistoricalRideStore(this).clear()
                 HistoricalRideDataStore(this).clearAll()
                 if (::course.isInitialized) {
@@ -1969,13 +2389,9 @@ class MainActivity : Activity() {
         renderRideState()
         if (logManager.isFreeRide()) renderFreeRide() else renderAtKm(latestRouteKm, testMode)
         if (emergency != null && emergency.phase == EmergencyPhase.CHARGING) {
-            val updated = replanStore.active(courseMeta.id)
-            AlertDialog.Builder(this)
-                .setTitle("충전 완료 · 경기코스로 복귀")
-                .setMessage("원래 코스 이탈점 ${RideFormatter.one(emergency.anchorRouteKm)}km로 반드시 돌아간 뒤 경기를 이어가세요. 50m 이내로 복귀하면 앱이 자동으로 원래 GPX 진행을 재개합니다.")
-                .setPositiveButton("이탈점 길안내") { _, _ -> openExternalRoute(updated?.returnUrl ?: emergency.returnUrl) }
-                .setNegativeButton("잠시 후", null)
-                .show()
+            val updated = replanStore.active(courseMeta.id) ?: emergency.copy(phase = EmergencyPhase.RETURN)
+            Toast.makeText(this, "충전 완료 · 카카오맵으로 원래 코스 복귀 안내를 엽니다.", Toast.LENGTH_LONG).show()
+            openEmergencyBicycleNavigation(updated, toStation = false)
         } else {
             Toast.makeText(this, "충전 완료 · $pct%", Toast.LENGTH_SHORT).show()
         }
@@ -2021,11 +2437,81 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Rain mode: consume every app touch while locked. GPS/BLE/ride services keep running.
+        if (touchLocked) return true
+
         val settingsSliderTouch = ::pagerFlipper.isInitialized && pagerFlipper.displayedChild == 2 && listOf(
-            seekPageDistanceInterval, seekPageTimeInterval, seekPageFinishTarget, seekPageHardReserve, seekPageTestKm
+            seekPageDistanceInterval, seekPageTimeInterval, seekPageFinishTarget, seekPageHardReserve
         ).any { isTouchInside(ev, it) }
-        if (::pagerGesture.isInitialized && !settingsSliderTouch) pagerGesture.onTouchEvent(ev)
+        val rideTestSliderTouch = ::pagerFlipper.isInitialized && pagerFlipper.displayedChild == 0 && testMode &&
+            ::seekRideRoute.isInitialized && isTouchInside(ev, seekRideRoute)
+        if (::pagerGesture.isInitialized && !settingsSliderTouch && !rideTestSliderTouch) pagerGesture.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        if (event.repeatCount == 0) {
+                            volumeUpPressedAtMs = System.currentTimeMillis()
+                            volumeUpLongHandled = false
+                            volumeKeyHandler.removeCallbacks(touchLockLongPress)
+                            volumeKeyHandler.postDelayed(touchLockLongPress, 1500L)
+                        }
+                        // Consume VOL+ so long press can be distinguished from a short press.
+                        return true
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        volumeKeyHandler.removeCallbacks(touchLockLongPress)
+                        val wasLong = volumeUpLongHandled
+                        volumeUpPressedAtMs = 0L
+                        volumeUpLongHandled = false
+                        if (!wasLong) {
+                            if (touchLocked) {
+                                showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
+                                vibrateRideWarning(45L, 85)
+                            } else {
+                                adjustMediaVolume(AudioManager.ADJUST_RAISE)
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                if (touchLocked) {
+                    if (event.action == KeyEvent.ACTION_UP && event.repeatCount == 0) {
+                        showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
+                        vibrateRideWarning(45L, 85)
+                    }
+                    return true
+                }
+                // Unlocked VOL- stays a normal Android volume key.
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun adjustMediaVolume(direction: Int) {
+        val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+    }
+
+    private fun setTouchLocked(locked: Boolean, announce: Boolean) {
+        touchLocked = locked
+        touchLockPrefs.edit().putBoolean("locked", locked).apply()
+        updatePagerIndicator()
+        if (announce) {
+            vibrateRideWarning(if (locked) 140L else 90L, if (locked) 180 else 120)
+            Toast.makeText(
+                this,
+                if (locked) "🔒 터치 잠금 · VOL+ 다음 / VOL- 이전 · VOL+ 길게 해제"
+                else "🔓 터치 사용 · 볼륨 버튼 정상",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     private fun isTouchInside(ev: MotionEvent, view: View): Boolean {
@@ -2046,7 +2532,12 @@ class MainActivity : Activity() {
     private fun updatePagerIndicator() {
         val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배포")
         val dots = (0..5).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
-        tvPagerIndicator.text = "$dots   ${labels[pagerFlipper.displayedChild]}"
+        tvPagerIndicator.text = if (touchLocked) {
+            "🔒 터치잠금   $dots   ${labels[pagerFlipper.displayedChild]}"
+        } else {
+            "$dots   ${labels[pagerFlipper.displayedChild]}"
+        }
+        tvPagerIndicator.setTextColor(getColor(if (touchLocked) R.color.warn else R.color.text_secondary))
     }
 
     private fun addCurrentSupplyPoint() {
@@ -2209,10 +2700,11 @@ class MainActivity : Activity() {
             avinoxReference = ref
         )
         tvCompareActual.text = snapshot.actualConsumedPct?.let(::formatPct) ?: "—"
+        val modelMode = predictionModeLabel()
         setComparisonWithProjected(
             tvCompareModel,
             formatPct(snapshot.modelConsumedPct),
-            "자체 ${formatPct(snapshot.modelProjectedTotalPct)}"
+            "자체${modelMode?.let { " $it" }.orEmpty()} ${formatPct(snapshot.modelProjectedTotalPct)}"
         )
         val avinoxConsumed = snapshot.avinoxConsumedPct?.let(::formatPct) ?: "—"
         val avinoxProjected = snapshot.avinoxProjectedTotalPct?.let { total ->
@@ -2269,8 +2761,8 @@ class MainActivity : Activity() {
         }
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
-        progressBattery.progress = displaySoc ?: 0
-        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        applyRideHeroModeStyle(if (logManager.isActive()) lastRenderedAssistMode else null)
+        renderRideRouteVisual(km, simulated)
         tvBatteryRange.text = when {
             simulated -> "테스트 · 계획 $planPct% · 예상 ${range.start.roundToInt()}~${range.endInclusive.roundToInt()}%"
             freshSoc != null -> {
@@ -2301,6 +2793,8 @@ class MainActivity : Activity() {
         // 한 화면 갱신 동안 실제배터리/충전상태를 한 번만 읽어 ETA 다중 포인트 계산이 UI를 무겁게 하지 않게 한다.
         val etaContext = etaChargeContext()
         renderReplanDecision(km, etaContext)
+        renderRideMiniProfileContext(km, simulated, etaContext)
+        renderRideVisualWarning(km, simulated, etaContext)
         val remainFinish = (course.totalKm - km).coerceAtLeast(0.0)
         tvSpeed.text = if (latestSpeedKmh >= 2.0) "속도 ${RideFormatter.one(latestSpeedKmh)}km/h" else "속도 -"
         tvFinishEta.text = "종점 ${RideFormatter.one(remainFinish)}km · ${chargeAwareEtaClock(km, course.totalKm, etaSpeed, etaContext)}"
@@ -2363,17 +2857,7 @@ class MainActivity : Activity() {
         val battery10Pct = replannedProjectedSoc(km, battery10TargetKm, currentSocForReplan(km), etaContext)
         tvTenKmBattery.text = "10km 후 ${battery10Pct.roundToInt()}% · 실시간 재계획"
         val pacing = pacingAdvisor.advice(km, latestSpeedKmh, reserve)
-        val reservePrefix = when (reserve.label) {
-            "위험" -> "⚠ 목표보다 ${(-reserve.differencePct).coerceAtLeast(0.0).roundToInt()}% 부족 · 절약 페이스\n"
-            "주의" -> "목표선 근처 · 절약 우선\n"
-            else -> ""
-        }
-        tvAssist.text = "${pacing.title}\n$reservePrefix${pacing.displayText}"
-        tvAssist.setTextColor(when {
-            reserve.label == "위험" -> getColor(R.color.danger)
-            reserve.label == "주의" -> getColor(R.color.warn)
-            else -> getColor(R.color.good)
-        })
+        renderRideAssistCoach(pacing, reserve)
         tvNextPoi.text = poi?.let {
             val remainPoi = (it.routeKm - km).coerceAtLeast(0.0)
             "다음 포인트 · ${it.name} · ${RideFormatter.one(remainPoi)}km · ${chargeAwareEtaClock(km, it.routeKm, etaSpeed, etaContext)}"
@@ -2397,6 +2881,126 @@ class MainActivity : Activity() {
         }
         profileView.setCurrentKm(km)
         renderRideState()
+    }
+
+    /**
+     * v0.28.2 SOC 연동 AI 주행 어시스트.
+     * 라이더/모터파워·케이던스는 A+ 학습 기반 목표 범위다.
+     * 기어는 PL Carbon 순정 34T / 10-52T와 29x2.4 유효 둘레를 이용해
+     * SOC 기반 권장 속도에서 목표 케이던스에 가장 가까운 '권장 단수'를 계산한다.
+     * 실제 SRAM 현재 단수를 읽었다고 표현하지 않는다.
+     */
+    private fun renderRideAssistCoach(pacing: PacingAdvice, reserve: ReserveStatus) {
+        // v0.29.2: HUD는 목표 SOC 대비 여유/부족만 크게 표시한다.
+        // 상세 속도·파워·케이던스·기어 계산은 전략/음성 엔진용으로 유지한다.
+        @Suppress("UNUSED_VARIABLE") val keepAdvisor = pacing
+        val diff = abs(reserve.differencePct).roundToInt()
+        val enough = reserve.differencePct >= 0.0
+        tvAssist.text = if (enough) "${diff}% 여유" else "${diff}% 부족"
+        tvAssist.setTextColor(
+            when {
+                !enough -> getColor(R.color.danger)
+                diff <= 2 -> getColor(R.color.warn)
+                else -> getColor(R.color.good)
+            }
+        )
+    }
+
+    /**
+     * v0.29.2: 기존 KAKAO_REST_API_KEY만 이용하는 가벼운 정적 지도 미리보기.
+     * 현재 위치와 약 2.5km 앞을 한 화면에 표시하고, 탭하면 다음 지점까지 카카오맵 자전거 길찾기를 연다.
+     */
+    private fun updateRideMapPreview(km: Double, simulated: Boolean, force: Boolean = false) {
+        if (!::rideMapPreview.isInitialized || !::course.isInitialized) return
+        val key = BuildConfig.KAKAO_REST_API_KEY.trim()
+        if (key.isBlank()) {
+            tvRideMapPreviewStatus.text = "카카오맵 키 없음 · 탭하면 자전거 길찾기"
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (!force && lastRideMapKm.isFinite() && abs(km - lastRideMapKm) < 0.25 && now - lastRideMapUpdateMs < 30_000L) return
+        lastRideMapKm = km
+        lastRideMapUpdateMs = now
+
+        val coursePoint = course.pointAtKm(km.coerceIn(0.0, course.totalKm))
+        val useGps = !simulated && latestLat.isFinite() && latestLon.isFinite()
+        val lat = if (useGps) latestLat else coursePoint.lat
+        val lon = if (useGps) latestLon else coursePoint.lon
+        if (!lat.isFinite() || !lon.isFinite()) {
+            tvRideMapPreviewStatus.text = "현재 위치 확인 중 · 탭하면 카카오맵"
+            return
+        }
+
+        val target = nextReplanTarget(km)
+        val targetKm = target?.km ?: course.totalKm
+        val aheadKm = (km + 2.5).coerceAtMost(targetKm).coerceAtMost(course.totalKm)
+        val ahead = course.pointAtKm(aheadKm)
+        val marker1 = "location:${String.format(Locale.US, "%.6f,%.6f", lon, lat)}|option:false"
+        val marker2 = "location:${String.format(Locale.US, "%.6f,%.6f", ahead.lon, ahead.lat)}|option:false"
+        val url = buildString {
+            append("https://dapi.kakao.com/v2/maps/staticmap?size=720x300&format=jpg&scale=1")
+            append("&markers=").append(URLEncoder.encode(marker1, "UTF-8"))
+            if (Geo.distanceMeters(lat, lon, ahead.lat, ahead.lon) > 120.0) {
+                append("&markers=").append(URLEncoder.encode(marker2, "UTF-8"))
+            }
+        }
+        val seq = ++rideMapRequestSeq
+        tvRideMapPreviewStatus.text = "카카오맵 갱신 중 · 탭하면 자전거 길찾기"
+
+        Thread {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 6_000
+                    readTimeout = 8_000
+                    setRequestProperty("Authorization", "KakaoAK $key")
+                }
+                val code = conn.responseCode
+                if (code !in 200..299) throw IllegalStateException("HTTP $code")
+                val bitmap = conn.inputStream.use { BitmapFactory.decodeStream(it) }
+                    ?: throw IllegalStateException("지도 이미지 해석 실패")
+                runOnUiThread {
+                    if (seq != rideMapRequestSeq || isFinishing || isDestroyed) return@runOnUiThread
+                    rideMapPreview.setImageBitmap(bitmap)
+                    val label = target?.name ?: "종점"
+                    tvRideMapPreviewStatus.text = "카카오맵 · 현재 위치 · 다음 $label · 탭하면 자전거 길찾기"
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (seq != rideMapRequestSeq || isFinishing || isDestroyed) return@runOnUiThread
+                    tvRideMapPreviewStatus.text = "카카오맵 갱신 실패 · 탭하면 자전거 길찾기"
+                }
+            } finally {
+                conn?.disconnect()
+            }
+        }.start()
+    }
+
+    private fun openNextPointBicycleNavigation() {
+        if (!::course.isInitialized) return
+        val km = latestRouteKm.coerceIn(0.0, course.totalKm)
+        val startPoint = course.pointAtKm(km)
+        val startLat = if (latestLat.isFinite()) latestLat else startPoint.lat
+        val startLon = if (latestLon.isFinite()) latestLon else startPoint.lon
+        val target = nextReplanTarget(km)
+        val targetKm = target?.km ?: course.totalKm
+        val end = course.pointAtKm(targetKm)
+        val label = target?.name ?: "종점"
+        val appUri = KakaoBicycleNavigator.appRouteUri(startLat, startLon, end.lat, end.lon)
+        val launched = try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(appUri)))
+            true
+        } catch (_: Exception) { false }
+        if (!launched) {
+            val web = KakaoBicycleNavigator.mobileWebRouteUri(startLat, startLon, end.lat, end.lon)
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(web))) }
+                .onFailure { Toast.makeText(this, "카카오 자전거 길찾기를 열 수 없습니다.", Toast.LENGTH_LONG).show() }
+        }
+        if (logManager.isActive()) {
+            logManager.recordEvent("KAKAO_BICYCLE_NEXT_POINT", "주행 지도 탭 · 다음 $label", km, actualStore.latest()?.percent)
+        }
     }
 
     private data class EtaChargeContext(
@@ -2497,6 +3101,35 @@ class MainActivity : Activity() {
         }
     }
 
+    /** v0.27.6: ETA 카드 상단의 주행/정차 요약 시간을 같은 형식으로 표시한다. */
+    private fun compactHoursMinutes(totalMinutes: Double): String {
+        val minutes = totalMinutes.coerceAtLeast(0.0).roundToInt()
+        val h = minutes / 60
+        val m = minutes % 60
+        return if (h > 0) "${h}시간 ${m}분" else "${m}분"
+    }
+
+    /**
+     * v0.27.6: 현재 위치부터 종점까지 남은 순수 주행시간과 계획상 정차시간을 분리해 보여준다.
+     * 정차시간은 완료/생략된 충전은 제외하고 현재 충전 중이면 남은 충전시간만 반영한다.
+     * 식사와 충전이 동시에 이뤄지는 지점은 현재 계획 데이터상 충전 정차시간으로 포함된다.
+     */
+    private fun renderPointEtaDurationSummary(km: Double, speedKmh: Double, context: EtaChargeContext) {
+        val remainKm = (course.totalKm - km).coerceAtLeast(0.0)
+        val rideMinutes = if (speedKmh >= 3.0) remainKm / speedKmh * 60.0 else null
+        val stopMinutes = basePlan.checkpoints
+            .asSequence()
+            .filter { it.chargeToPct != null && it.km >= km - 0.18 }
+            .sumOf { remainingChargeMinutesAt(it, km, context) }
+
+        tvPointEtaRideTime.text = if (rideMinutes != null) {
+            "주행 ${compactHoursMinutes(rideMinutes)}"
+        } else {
+            "주행 계산 중"
+        }
+        tvPointEtaStopTime.text = "정차 ${compactHoursMinutes(stopMinutes)}"
+    }
+
     /**
      * 선택 GPX의 남은 모든 waypoint/POI를 한 번에 보여준다.
      * 등록 충전소는 ◆, GPX 보급계열 POI는 ◇, 일반 POI는 • 로 구분한다.
@@ -2512,6 +3145,310 @@ class MainActivity : Activity() {
      * 충전 Checkpoint 자체를 ETA 시간축의 독립 이벤트로 넣고, 가까운 POI 이름은 보조 라벨로만 사용한다.
      * 따라서 등록 충전소가 GPX 보급 waypoint와 조금 어긋나 있어도 모든 충전시간이 표시/누적된다.
      */
+    private data class ModeStrategyCell(
+        val arrivalClock: String,
+        val arrivalSocPct: Double,
+        val chargeTargetPct: Double?,
+        val stopMinutes: Double? = null,
+        val departureClock: String? = null
+    )
+
+    private data class ModeStrategyProjection(
+        val cells: List<ModeStrategyCell>,
+        val rideMinutes: Double?,
+        val stopMinutes: Double,
+        val finishSocPct: Double,
+        val usedSpeedFallback: Boolean,
+        val batterySampleCount: Int,
+        val contextSampleCount: Int,
+        val contextualBlocks: Int,
+        val fallbackBatteryBlocks: Int,
+        val contextConfidence: Int
+    )
+
+    private fun strategyClock(totalMinutesFromNow: Double?): String {
+        if (totalMinutesFromNow == null || !totalMinutesFromNow.isFinite()) return "--:--"
+        val at = System.currentTimeMillis() + (totalMinutesFromNow.coerceAtLeast(0.0) * 60_000.0).toLong()
+        return SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(at))
+    }
+
+    private fun strategyDuration(totalMinutes: Double?): String {
+        if (totalMinutes == null || !totalMinutes.isFinite()) return "--"
+        val m = totalMinutes.coerceAtLeast(0.0).roundToInt()
+        return "%d:%02d".format(Locale.US, m / 60, m % 60)
+    }
+
+    /**
+     * v0.28.9 모드별 전략용 이동시간.
+     * 상황기반 v2에서 같은 경사와 가까운 Rider/Cadence 조건의 모드별 속도를 우선 사용한다.
+     * v2 표본이 부족할 때만 기존 v1 모드속도/현재 이동평균을 보조값으로 쓴다.
+     */
+    private fun modeStrategyTravelMinutes(
+        fromKm: Double,
+        toKm: Double,
+        mode: AvinoxAssistMode,
+        fallbackSpeedKmh: Double,
+        speedCache: MutableMap<String, Pair<Double?, Boolean>>
+    ): Pair<Double?, Boolean> {
+        val startKm = fromKm.coerceIn(0.0, course.totalKm)
+        val endKm = toKm.coerceIn(startKm, course.totalKm)
+        if (endKm <= startKm + 0.001) return 0.0 to false
+
+        var x = startKm
+        var totalMinutes = 0.0
+        var usedFallback = false
+        while (x < endKm - 0.0001) {
+            val nx = (x + 0.5).coerceAtMost(endKm)
+            val dist = nx - x
+            val ascent = course.elevationBetween(x, nx).ascentM
+            val bucket = learningStore.bucket(dist, ascent)
+            val grade = if (dist > 0.001) {
+                ((course.pointAtKm(nx).ele - course.pointAtKm(x).ele) / (dist * 1000.0) * 100.0).coerceIn(-30.0, 35.0)
+            } else 0.0
+            val gradeBand = kotlin.math.round(grade).toInt()
+            val cacheKey = "${bucket.name}|$gradeBand"
+            val speedInfo = speedCache.getOrPut(cacheKey) {
+                val contextual = learningStore.strategyContextEstimate(course, x, nx, mode)
+                    ?.takeIf { it.confidence >= 35 && it.matchCount >= 2 }
+                    ?.speedKph
+                    ?.takeIf { it >= 3.0 }
+                if (contextual != null) {
+                    contextual to false
+                } else {
+                    val exact = learningStore.learnedSpeedKphForMode(bucket, mode)?.takeIf { it >= 3.0 }
+                    if (exact != null) {
+                        exact to true
+                    } else {
+                        val fallback = fallbackSpeedKmh.takeIf { it >= 3.0 }
+                            ?: learningStore.assistProfile(bucket, null)?.avgSpeedKph?.takeIf { it >= 3.0 }
+                        fallback to true
+                    }
+                }
+            }
+            val speed = speedInfo.first ?: return null to true
+            usedFallback = usedFallback || speedInfo.second
+            totalMinutes += dist / speed * 60.0
+            x = nx
+        }
+        return totalMinutes to usedFallback
+    }
+
+    /**
+     * 한 모드를 지금부터 고정해서 탄다고 가정한 전략 시뮬레이션.
+     * v0.28.9부터 저장된 Avinox 원본을 재해석한 상황기반 v2를 우선 사용한다.
+     * Avinox 외부 예상 소비율 숫자는 사용하지 않는다.
+     */
+    private fun projectModeStrategy(
+        mode: AvinoxAssistMode,
+        currentKm: Double,
+        currentSoc: Double,
+        timeline: List<PointEtaTimelineRow>,
+        fallbackSpeedKmh: Double,
+        context: EtaChargeContext
+    ): ModeStrategyProjection {
+        var cursorKm = currentKm.coerceIn(0.0, course.totalKm)
+        var soc = currentSoc.coerceIn(0.0, 100.0)
+        var rideMinutes: Double? = 0.0
+        var stopMinutes = 0.0
+        var speedFallback = false
+        val speedCache = mutableMapOf<String, Pair<Double?, Boolean>>()
+        val cells = ArrayList<ModeStrategyCell>(timeline.size)
+        var contextualBlocks = 0
+        var fallbackBatteryBlocks = 0
+        var confidenceWeighted = 0
+        val fullStrategyUse = if (course.totalKm > 0.1) {
+            learningStore.estimateStrategyConsumption(course, 0.0, course.totalKm, mode)
+        } else StrategyConsumptionEstimate(0.0, 0, 0, 0)
+        val modeAverageUsePerKm = if (course.totalKm > 0.1) fullStrategyUse.percent / course.totalKm else 0.0
+
+        timeline.forEach { row ->
+            val targetKm = row.routeKm.coerceIn(currentKm, course.totalKm)
+            if (targetKm > cursorKm + 0.001) {
+                val energy = learningStore.estimateStrategyConsumption(course, cursorKm, targetKm, mode)
+                soc -= energy.percent
+                contextualBlocks += energy.contextualBlocks
+                fallbackBatteryBlocks += energy.fallbackBlocks
+                confidenceWeighted += energy.averageConfidence * energy.contextualBlocks
+                val travel = modeStrategyTravelMinutes(cursorKm, targetKm, mode, fallbackSpeedKmh, speedCache)
+                if (rideMinutes != null && travel.first != null) rideMinutes = rideMinutes!! + travel.first!! else if (travel.first == null) rideMinutes = null
+                speedFallback = speedFallback || travel.second
+                cursorKm = targetKm
+            }
+
+            val cp = row.chargingCheckpoint
+            if (cp != null && cp.detourKm > 0.0) {
+                soc -= cp.detourKm * modeAverageUsePerKm
+            }
+            soc = soc.coerceIn(0.0, 100.0)
+
+            val chargeTarget = cp?.chargeToPct?.takeIf {
+                !replanStore.isSkipped(courseMeta.id, cp.km) && !chargeCompletedAt(cp.km, context)
+            }
+            val arrivalTotalMinutes = rideMinutes?.plus(stopMinutes)
+            val chargeMinutes = if (chargeTarget != null) {
+                val activeHere = context.activeCharge?.takeIf { abs(it.routeKm - cp.km) <= 0.35 && abs(cp.km - currentKm) <= 0.20 }
+                if (activeHere != null) {
+                    remainingChargeMinutesAt(cp, currentKm, context)
+                } else {
+                    AvinoxChargeCurve.minutesBetween(soc, chargeTarget)
+                }.coerceAtLeast(0.0)
+            } else null
+            cells += ModeStrategyCell(
+                arrivalClock = strategyClock(arrivalTotalMinutes),
+                arrivalSocPct = soc,
+                chargeTargetPct = chargeTarget,
+                stopMinutes = chargeMinutes,
+                departureClock = if (chargeMinutes != null) strategyClock(arrivalTotalMinutes?.plus(chargeMinutes)) else null
+            )
+
+            if (chargeTarget != null && chargeMinutes != null) {
+                stopMinutes += chargeMinutes
+                if (chargeTarget > soc) soc = chargeTarget.coerceIn(0.0, 100.0)
+            }
+        }
+
+        return ModeStrategyProjection(
+            cells = cells,
+            rideMinutes = rideMinutes,
+            stopMinutes = stopMinutes,
+            finishSocPct = cells.lastOrNull()?.arrivalSocPct ?: soc,
+            usedSpeedFallback = speedFallback,
+            batterySampleCount = learningStore.batterySampleCountForMode(mode),
+            contextSampleCount = learningStore.strategyContextSampleCountForMode(mode),
+            contextualBlocks = contextualBlocks,
+            fallbackBatteryBlocks = fallbackBatteryBlocks,
+            contextConfidence = if (contextualBlocks > 0) confidenceWeighted / contextualBlocks else 0
+        )
+    }
+
+    private fun strategyModeColor(mode: AvinoxAssistMode): Int = when (mode) {
+        AvinoxAssistMode.ECO -> getColor(R.color.assist_eco)
+        AvinoxAssistMode.AUTO -> getColor(R.color.assist_auto)
+        AvinoxAssistMode.TRAIL -> getColor(R.color.assist_trail)
+        AvinoxAssistMode.TURBO -> getColor(R.color.assist_turbo)
+    }
+
+    private fun strategyCell(
+        text: String,
+        widthDp: Int,
+        selected: Boolean = false,
+        header: Boolean = false,
+        textColor: Int = getColor(R.color.text_primary),
+        gravity: Int = Gravity.CENTER
+    ): TextView {
+        val density = resources.displayMetrics.density
+        val widthPx = (widthDp * density).roundToInt()
+        val padH = (4 * density).roundToInt()
+        val padV = (6 * density).roundToInt()
+        return TextView(this).apply {
+            layoutParams = TableRow.LayoutParams(widthPx, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                val gap = (1 * density).roundToInt()
+                setMargins(gap, gap, gap, gap)
+            }
+            this.text = text
+            this.gravity = gravity
+            setPadding(padH, padV, padH, padV)
+            setTextColor(textColor)
+            textSize = if (header) 12f else 11f
+            if (header || selected) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setBackgroundColor(when {
+                selected -> getColor(R.color.accent_dark)
+                header -> getColor(R.color.panel2)
+                else -> getColor(R.color.panel)
+            })
+            minHeight = (42 * density).roundToInt()
+        }
+    }
+
+    private fun renderModeStrategyTable(
+        km: Double,
+        speedKmh: Double,
+        context: EtaChargeContext,
+        timeline: List<PointEtaTimelineRow>
+    ) {
+        tableModeStrategy.removeAllViews()
+        val modes = listOf(AvinoxAssistMode.ECO, AvinoxAssistMode.AUTO, AvinoxAssistMode.TRAIL, AvinoxAssistMode.TURBO)
+        val selectedName = avinoxReferenceStore.get(courseMeta.id)?.selectedMode?.name
+            ?: assistProfileStore.preferredMode().takeIf { assistProfileStore.hasPreferredMode() }?.name
+        val currentSoc = currentSocForReplan(km)
+        val projections = modes.associateWith { mode ->
+            projectModeStrategy(mode, km, currentSoc, timeline, speedKmh, context)
+        }
+
+        val header = TableRow(this)
+        header.addView(strategyCell("포인트", 94, header = true, gravity = Gravity.START or Gravity.CENTER_VERTICAL))
+        modes.forEach { mode ->
+            val p = projections.getValue(mode)
+            val selected = mode.name == selectedName
+            val sampleMark = if (p.contextSampleCount <= 0) "※" else ""
+            header.addView(strategyCell(mode.name + sampleMark, 72, selected = selected, header = true, textColor = strategyModeColor(mode)))
+        }
+        tableModeStrategy.addView(header)
+
+        timeline.forEachIndexed { index, row ->
+            val tr = TableRow(this)
+            val label = row.chargingCheckpoint?.name ?: row.poi?.name ?: "종점"
+            val mark = when {
+                row.chargingCheckpoint != null -> "◆"
+                row.poi?.isSupplyLike() == true -> "◇"
+                row.routeKm >= course.totalKm - 0.05 -> "◎"
+                else -> "•"
+            }
+            tr.addView(strategyCell("$mark $label\n${RideFormatter.one(row.routeKm)}km", 94, gravity = Gravity.START or Gravity.CENTER_VERTICAL))
+            modes.forEach { mode ->
+                val cell = projections.getValue(mode).cells[index]
+                val soc = cell.arrivalSocPct.roundToInt().coerceIn(0, 100)
+                val socText = cell.chargeTargetPct?.let { target -> "$soc→${target.roundToInt()}%" } ?: "$soc%"
+                val selected = mode.name == selectedName
+                val color = when {
+                    soc <= AppSettings.hardReserve(this) -> getColor(R.color.danger)
+                    soc <= finishTargetPct -> getColor(R.color.warn)
+                    else -> getColor(R.color.text_primary)
+                }
+                val cellText = if (cell.chargeTargetPct != null && cell.stopMinutes != null && cell.departureClock != null) {
+                    "${cell.arrivalClock}\n$socText\n정차 ${cell.stopMinutes.roundToInt()}분\n출발 ${cell.departureClock}"
+                } else {
+                    "${cell.arrivalClock}\n$socText"
+                }
+                tr.addView(strategyCell(cellText, 72, selected = selected, textColor = color))
+            }
+            tableModeStrategy.addView(tr)
+        }
+
+        val summary = TableRow(this)
+        summary.addView(strategyCell("전체\n남은 전략", 94, header = true, gravity = Gravity.START or Gravity.CENTER_VERTICAL))
+        modes.forEach { mode ->
+            val p = projections.getValue(mode)
+            val total = p.rideMinutes?.plus(p.stopMinutes)
+            val selected = mode.name == selectedName
+            val text = "총 ${strategyDuration(total)}\n정차 ${p.stopMinutes.roundToInt()}분\n종점 ${p.finishSocPct.roundToInt().coerceIn(0, 100)}%"
+            summary.addView(strategyCell(text, 72, selected = selected, header = true, textColor = strategyModeColor(mode)))
+        }
+        tableModeStrategy.addView(summary)
+
+        val fallbackModes = modes.filter {
+            val p = projections.getValue(it)
+            p.usedSpeedFallback || p.contextSampleCount <= 0 || p.fallbackBatteryBlocks > 0
+        }
+        val selectedText = modes.firstOrNull { it.name == selectedName }?.label?.let { " · 현재 비교 $it 열 강조" }.orEmpty()
+        tvPointEtaBasis.text = buildString {
+            append("우리 GPX + Avinox 원본 상황기반 v2 전략")
+            append(selectedText)
+            append(" · 경사/속도/Rider/Cadence를 맞춰 모드별 재해석")
+            if (fallbackModes.isNotEmpty()) {
+                append("\n※ ${fallbackModes.joinToString("/") { it.label }} 일부 구간은 v2 표본 부족으로 기존 v1/이동속도 보조값 사용")
+            } else {
+                val avgConfidence = modes.map { projections.getValue(it).contextConfidence }.filter { it > 0 }.average().takeIf { !it.isNaN() }?.roundToInt()
+                append(" · 전 구간 v2")
+                if (avgConfidence != null) append(" 신뢰도 약 ${avgConfidence}%")
+            }
+        }
+    }
+
+    /**
+     * v0.28.6: ECO/AUTO/TRAIL/TURBO 전략표에서 충전 포인트의 정차시간과 출발시각까지 함께 보여준다.
+     * Avinox 외부 소비량 값은 표 계산에 절대 넣지 않고, 선택 모드는 강조 열에만 사용한다.
+     */
     private fun renderPointEtas(km: Double, speedKmh: Double, context: EtaChargeContext) {
         val upcomingPois = course.pois
             .asSequence()
@@ -2526,49 +3463,24 @@ class MainActivity : Activity() {
             .sortedBy { it.km }
             .toList()
 
-        // 충전소와 거의 같은 위치의 POI만 중복 제거한다. 충전소 자체는 항상 별도 행으로 남는다.
         val poiRows = upcomingPois
             .filter { poi -> plannedCharges.none { cp -> abs(cp.km - poi.routeKm) <= 0.12 } }
             .map { PointEtaTimelineRow(routeKm = it.routeKm, poi = it) }
         val chargeRows = plannedCharges.map { PointEtaTimelineRow(routeKm = it.km, chargingCheckpoint = it) }
-        val timeline = (poiRows + chargeRows).sortedWith(
+        val finishAlreadyPresent = (poiRows + chargeRows).any { abs(it.routeKm - course.totalKm) <= 0.05 }
+        val finishRow = if (finishAlreadyPresent || course.totalKm < km - 0.05) emptyList()
+            else listOf(PointEtaTimelineRow(routeKm = course.totalKm))
+        val timeline = (poiRows + chargeRows + finishRow).sortedWith(
             compareBy<PointEtaTimelineRow> { it.routeKm }
                 .thenBy { if (it.chargingCheckpoint != null) 0 else 1 }
         )
 
-        val emergencyEta = replanStore.active(courseMeta.id) != null
-        tvPointEtaBasis.text = if (speedKmh >= 3.0) {
-            "이동평균 ${RideFormatter.one(speedKmh)}km/h + ${if (emergencyEta) "비상 우회/충전/복귀 + " else ""}남은 충전시간 포함 · 등록 충전소 ${plannedCharges.size}개 · 자동 재계산"
-        } else {
-            "이동속도가 잡히면 주행시간 + 계획/비상 충전시간을 합쳐 ETA를 계산합니다. · 등록 충전소 ${plannedCharges.size}개"
+        if (timeline.isEmpty()) {
+            tableModeStrategy.removeAllViews()
+            tvPointEtaBasis.text = "남은 포인트 없음 · 코스 완료"
+            return
         }
-
-        tvPointEtaList.text = if (timeline.isEmpty()) {
-            "남은 포인트 없음 · 종점 ${chargeAwareEtaClock(km, course.totalKm, speedKmh, context)}"
-        } else {
-            timeline.joinToString("\n") { row ->
-                val cp = row.chargingCheckpoint
-                if (cp != null) {
-                    val eta = chargeAwareEtaClock(km, cp.km, speedKmh, context)
-                    val nearPoi = upcomingPois
-                        .minByOrNull { abs(it.routeKm - cp.km) }
-                        ?.takeIf { abs(it.routeKm - cp.km) <= 0.50 }
-                    val nearbyName = nearPoi?.name
-                        ?.takeIf { it.isNotBlank() && !cp.name.contains(it, ignoreCase = true) && !it.contains(cp.name, ignoreCase = true) }
-                    val label = if (nearbyName != null) "${cp.name} · $nearbyName" else cp.name
-                    if (replanStore.isSkipped(courseMeta.id, cp.km)) {
-                        "◆ ${RideFormatter.one(cp.km)}km · 도착 $eta · $label\n   ↳ 충전 생략 확정 · 충전시간 0분 반영"
-                    } else {
-                        "◆ ${RideFormatter.one(cp.km)}km · 도착 $eta · $label\n   ↳ ${cp.chargeToPct!!.roundToInt()}% 충전 · 예상 출발 ${chargeAwareDepartureClock(km, cp, speedKmh, context)}"
-                    }
-                } else {
-                    val p = row.poi!!
-                    val mark = if (p.isSupplyLike()) "◇" else "•"
-                    val eta = chargeAwareEtaClock(km, p.routeKm, speedKmh, context)
-                    "$mark ${RideFormatter.one(p.routeKm)}km · $eta · ${p.name}"
-                }
-            }
-        }
+        renderModeStrategyTable(km, speedKmh, context, timeline)
     }
 
 
@@ -2632,9 +3544,9 @@ class MainActivity : Activity() {
         return soc.coerceIn(0.0, 100.0)
     }
 
-    private fun computeReplanDecision(km: Double, context: EtaChargeContext): ReplanDecision {
+    private fun computeReplanDecision(km: Double, context: EtaChargeContext, currentSocOverride: Double? = null): ReplanDecision {
         val hard = AppSettings.hardReserve(this)
-        val soc = currentSocForReplan(km)
+        val soc = (currentSocOverride ?: currentSocForReplan(km)).coerceIn(0.0, 100.0)
         val target = nextReplanTarget(km)
             ?: return ReplanDecision(ReplanDecisionKind.NORMAL, null, soc, hard)
         val predicted = replannedProjectedSoc(km, target.km, soc, context)
@@ -2893,7 +3805,7 @@ class MainActivity : Activity() {
                 replanStore.start(session)
                 logManager.recordEvent("EMERGENCY_DETOUR_START", "${c.place.name} 비상충전 · 복귀앵커 ${RideFormatter.one(anchor.routeKm)}km · 왕복 ${RideFormatter.one(c.roundTripKm)}km", anchor.routeKm, currentSocForReplan(anchor.routeKm))
                 renderAtKm(anchor.routeKm, testMode)
-                openExternalRoute(c.outbound.landingUrl)
+                openEmergencyBicycleNavigation(session, toStation = true)
             }
             .setNegativeButton("다른 후보", null)
             .show()
@@ -2901,16 +3813,16 @@ class MainActivity : Activity() {
 
     private fun showEmergencySessionDialog(session: EmergencyDetourSession) {
         val msg = when (session.phase) {
-            EmergencyPhase.OUTBOUND -> "${session.candidateName}으로 이동 중입니다.\n원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km는 고정되어 코스 진행도가 앞으로 점프하지 않습니다.\n충전소에 도착하면 메인의 '충전 시작'을 누르세요."
+            EmergencyPhase.OUTBOUND -> "카카오맵 자전거 길찾기로 ${session.candidateName} 이동 중입니다.\nBattery Copilot GPS/BLE/SOC는 백그라운드에서 계속 동작합니다.\n원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km는 고정되며, 도착하면 메인의 '충전 시작'을 누르세요."
             EmergencyPhase.CHARGING -> "비상 충전 중입니다. 권장 목표 ${emergencyRecommendedChargeTargetPct(session)}%.\n충전 완료 후에는 반드시 ${RideFormatter.one(session.anchorRouteKm)}km 이탈점으로 돌아갑니다."
-            EmergencyPhase.RETURN -> "원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km로 복귀 중입니다.\nGPS가 이탈점 50m 이내에 들어오면 자동으로 원래 GPX 진행을 재개합니다."
+            EmergencyPhase.RETURN -> "카카오맵 자전거 길찾기로 원래 이탈점 ${RideFormatter.one(session.anchorRouteKm)}km 복귀 중입니다.\nBattery Copilot은 백그라운드에서 계속 기록하며, GPS가 이탈점 50m 이내에 들어오면 원래 GPX 진행을 자동 재개합니다."
         }
         val b = AlertDialog.Builder(this).setTitle("비상 충전 / 경기코스 복귀").setMessage(msg)
         when (session.phase) {
-            EmergencyPhase.OUTBOUND -> b.setPositiveButton("충전소 길안내") { _, _ -> openExternalRoute(session.outboundUrl) }
+            EmergencyPhase.OUTBOUND -> b.setPositiveButton("카카오 자전거 안내") { _, _ -> openEmergencyBicycleNavigation(session, toStation = true) }
                 .setNeutralButton("우회 취소") { _, _ -> confirmCancelEmergency(session) }
             EmergencyPhase.CHARGING -> b.setPositiveButton("확인", null)
-            EmergencyPhase.RETURN -> b.setPositiveButton("이탈점 길안내") { _, _ -> openExternalRoute(session.returnUrl) }
+            EmergencyPhase.RETURN -> b.setPositiveButton("카카오 복귀 안내") { _, _ -> openEmergencyBicycleNavigation(session, toStation = false) }
         }
         b.setNegativeButton("닫기", null).show()
     }
@@ -2927,13 +3839,48 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun openExternalRoute(url: String) {
-        if (url.isBlank()) {
-            Toast.makeText(this, "카카오 자전거 길안내 URL을 받지 못했습니다.", Toast.LENGTH_LONG).show()
-            return
+    private fun openEmergencyBicycleNavigation(session: EmergencyDetourSession, toStation: Boolean) {
+        // RideService is a foreground location service, so opening Kakao Map only moves this
+        // Activity to the background; GPS/BLE/SOC/logging continue in Battery Copilot.
+        val startLat = when {
+            latestLat.isFinite() -> latestLat
+            toStation -> session.anchorLat
+            else -> session.candidateLat
         }
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
-            .onFailure { Toast.makeText(this, "길안내를 열 수 없습니다: ${it.message}", Toast.LENGTH_LONG).show() }
+        val startLon = when {
+            latestLon.isFinite() -> latestLon
+            toStation -> session.anchorLon
+            else -> session.candidateLon
+        }
+        val endLat = if (toStation) session.candidateLat else session.anchorLat
+        val endLon = if (toStation) session.candidateLon else session.anchorLon
+        val fallback = if (toStation) session.outboundUrl else session.returnUrl
+        val label = if (toStation) "충전소" else "원래 코스 이탈점"
+
+        val appUri = KakaoBicycleNavigator.appRouteUri(startLat, startLon, endLat, endLon)
+        val launchedApp = try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(appUri)))
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: Exception) {
+            false
+        }
+
+        if (!launchedApp) {
+            val webUrl = fallback.ifBlank { KakaoBicycleNavigator.mobileWebRouteUri(startLat, startLon, endLat, endLon) }
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(webUrl))) }
+                .onFailure { Toast.makeText(this, "카카오 자전거 길찾기를 열 수 없습니다: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
+
+        if (logManager.isActive()) {
+            logManager.recordEvent(
+                if (toStation) "EMERGENCY_KAKAO_BICYCLE_OUTBOUND" else "EMERGENCY_KAKAO_BICYCLE_RETURN",
+                "카카오맵 자전거 길찾기 · $label · Battery Copilot 백그라운드 유지",
+                session.anchorRouteKm,
+                actualStore.latest()?.percent
+            )
+        }
     }
 
     /** 비상 우회가 진행 중이면 해당 왕복/충전의 아직 남은 시간을 이후 모든 ETA에 더한다. */
@@ -2973,8 +3920,13 @@ class MainActivity : Activity() {
         val displaySoc = freshSoc ?: storedSoc
         tvBattery.text = displaySoc?.let { "$it%" } ?: "—"
         tvBattery.setTextColor(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
-        progressBattery.progress = displaySoc ?: 0
-        progressBattery.progressTintList = android.content.res.ColorStateList.valueOf(displaySoc?.let { batteryColor(it.toDouble()) } ?: getColor(R.color.text_secondary))
+        applyRideHeroModeStyle(if (logManager.isActive()) lastRenderedAssistMode else null)
+        rideMiniProfileView.visibility = View.GONE
+        layoutRideReachMargins.visibility = View.GONE
+        hideRideVisualWarning()
+        seekRideRoute.visibility = View.GONE
+        tvRideRouteScale.text = "임의주행 · GPX/충전소 거리축 없음"
+        switchRideTestMode.visibility = View.GONE
         tvBatteryRange.text = when {
             freshSoc != null -> "● BLE 실제 · 임의주행 · GPS + 배터리 자동 기록"
             storedSoc != null -> "최근 실측 $storedSoc% · BLE 재연결 중 · 임의주행"
@@ -2998,7 +3950,8 @@ class MainActivity : Activity() {
         tvFinishEta.text = "종점 없음"
         tvElevationAhead.text = "▲ ${latestFreeAscentM.roundToInt()} m"
         tvTenKmBattery.text = consumed?.let { "누적소비 ${formatPct(it)}" } ?: "BLE 배터리 연결 대기"
-        tvAssist.text = "임의주행 데이터 수집 중 · GPS + Avinox BLE SOC 자동 저장\n종료 후 FIT · Avinox 예상값을 붙여 3자 비교"
+        tvAssist.text = consumed?.let { "${formatPct(it)} 사용" } ?: "데이터 수집 중"
+        tvAssist.setTextColor(getColor(R.color.accent))
         tvCourseStatus.text = "임의주행에서는 선택 GPX를 사용하지 않습니다."
         tvNextPoi.text = ""
         tvPointEtaBasis.text = "계획주행에서 GPX 포인트 ETA를 표시합니다."
@@ -3124,6 +4077,11 @@ class MainActivity : Activity() {
         packageManager.getPackageInfo(packageName, 0).versionName ?: "0.18.2"
     } catch (_: Exception) { "0.18.2" }
 
+    override fun onDestroy() {
+        volumeKeyHandler.removeCallbacks(touchLockLongPress)
+        super.onDestroy()
+    }
+
     override fun onResume() {
         super.onResume()
         UpdateManager.resumePendingInstall(this)
@@ -3140,10 +4098,12 @@ class MainActivity : Activity() {
             plan = AdaptiveBatteryPlan(basePlan, actualStore)
             pacingAdvisor = EnergyPacingAdvisor(course, learningStore)
             tripPlanner = EnergyTripPlanner(basePlan, plan)
+            configureRideRouteVisuals()
         }
         loadBleSnapshot()
         applySettings()
         renderCourseQuick()
+        refreshRidePositionControls()
         refreshInlineSettings()
         refreshLearningPage()
         renderCurrentMode()

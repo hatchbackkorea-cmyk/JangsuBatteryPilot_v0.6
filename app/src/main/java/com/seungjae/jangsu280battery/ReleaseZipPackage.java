@@ -6,6 +6,8 @@ import android.net.Uri;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,10 +40,19 @@ final class ReleaseZipPackage {
     }
 
     static ReleaseZipPackage read(ContentResolver resolver, Uri uri) throws IOException {
-        Map<String, byte[]> raw = new LinkedHashMap<>();
-        long total = 0L;
         InputStream opened = resolver.openInputStream(uri);
         if (opened == null) throw new IOException("ZIP을 열 수 없습니다.");
+        return read(opened);
+    }
+
+    static ReleaseZipPackage read(File file) throws IOException {
+        if (file == null || !file.isFile()) throw new IOException("백그라운드 배포 ZIP을 찾을 수 없습니다.");
+        return read(new FileInputStream(file));
+    }
+
+    private static ReleaseZipPackage read(InputStream opened) throws IOException {
+        Map<String, byte[]> raw = new LinkedHashMap<>();
+        long total = 0L;
         try (InputStream in = opened; ZipInputStream zis = new ZipInputStream(in)) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {

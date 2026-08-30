@@ -412,22 +412,25 @@ class SettingsActivity : Activity() {
 
     private fun refreshLearningSummary() {
         val count = learningStore.samples().size
+        val contextCount = AvinoxAssistMode.values().sumOf { learningStore.strategyContextSampleCountForMode(it) }
         val historical = historicalRideStore.records()
         val protoRecords = historical.filter { it.sourceType == HistoricalSourceType.PROTO }
         val legacyA = historical.filter { it.sourceType != HistoricalSourceType.PROTO }
         val auxRecords = fitAuxStore.records()
-        tvLearningSummary.text = if (count == 0) {
+        tvLearningSummary.text = if (count == 0 && contextCount == 0) {
             if (auxRecords.isEmpty()) "학습 데이터 없음 · 중립 초기 모델 사용 중"
             else "A급 배터리 학습 없음 · 중립 소비모델 유지\n${fitAuxStore.summaryText()}"
         } else {
             buildString {
-                append("저장된 A+/A급 개인 학습 데이터 ${count}개 구간\n${learningStore.summaryText()}")
+                append("저장된 A+/A급 개인 학습 데이터 ${count}개 구간")
+                if (count > 0) append("\n${learningStore.summaryText()}")
+                if (contextCount > 0) append("\n${learningStore.strategyContextSummary()}")
                 if (auxRecords.isNotEmpty()) append("\n${fitAuxStore.summaryText()}")
             }
         }
         tvHistoricalLearningSummary.text = when {
-            historical.isEmpty() && auxRecords.isEmpty() -> "Avinox 원본 A+ / FIT 백업 학습 없음"
-            else -> "A+ 원본 ${protoRecords.size}개 · 기존 A급 ${legacyA.size}개 · B급 FIT ${auxRecords.size}개 · A+/A급 샘플 ${historical.sumOf { it.sampleCount }}개"
+            historical.isEmpty() && auxRecords.isEmpty() && contextCount == 0 -> "Avinox 원본 A+ / FIT 백업 학습 없음"
+            else -> "A+ 원본 ${protoRecords.size}개 · 상황 v2 ${contextCount}구간 · 기존 A급 ${legacyA.size}개 · B급 FIT ${auxRecords.size}개"
         }
     }
 
@@ -437,6 +440,7 @@ class SettingsActivity : Activity() {
             .setMessage("지금까지 저장된 개인 배터리 소비 학습 데이터를 모두 삭제할까요? Avinox 원본 A+ 학습과 기존 A급, B급 FIT 보조학습도 함께 초기화됩니다. 주행 로그 파일과 실제 배터리 기록은 삭제하지 않습니다.")
             .setPositiveButton("학습 데이터 삭제") { _, _ ->
                 learningStore.clear()
+                ContextualBatteryLearningStore(this).clear()
                 historicalRideStore.clear()
                 fitAuxStore.clear()
                 protoSyncManager.clearHistory()
