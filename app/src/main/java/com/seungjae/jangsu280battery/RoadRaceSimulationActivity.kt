@@ -5,11 +5,12 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
@@ -94,30 +95,42 @@ class RoadRaceSimulationActivity : Activity() {
             Toast.makeText(this, "시뮬레이션은 최대 20명입니다.", Toast.LENGTH_LONG).show(); return
         }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(38, 8, 38, 0) }
-        fun field(hint: String, decimal: Boolean = false): EditText {
-            val e = EditText(this).apply {
-                this.hint = hint
-                inputType = if (decimal) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL else InputType.TYPE_CLASS_TEXT
-            }
-            wrap.addView(e, LinearLayout.LayoutParams(-1, -2))
-            return e
+        val name = EditText(this).apply { hint = "참가자 이름/닉네임" }
+        wrap.addView(name, LinearLayout.LayoutParams(-1, -2))
+
+        fun label(text: String) {
+            wrap.addView(TextView(this).apply { this.text = text; setPadding(0, 12, 0, 2) }, LinearLayout.LayoutParams(-1, -2))
         }
-        val name = field("참가자 이름/닉네임")
-        val target = field("목표 완주시간 · 예: 05:00")
-        val startDelay = field("출발 지연(분) · 동시출발이면 0", true).apply { setText("0") }
-        val aidStop = field("각 보급소 휴식(분) · 모두 패스면 0", true).apply { setText("0") }
+        fun spinner(values: List<String>): Spinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@RoadRaceSimulationActivity, android.R.layout.simple_spinner_dropdown_item, values)
+        }
+
+        label("목표 순수 주행시간 · 보급시간 별도")
+        val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val hour = spinner((0..20).map { "${it}시간" }).apply { setSelection(5) }
+        val minute = spinner((0..59).map { String.format(Locale.US, "%02d분", it) })
+        timeRow.addView(hour, LinearLayout.LayoutParams(0, -2, 1f))
+        timeRow.addView(minute, LinearLayout.LayoutParams(0, -2, 1f))
+        wrap.addView(timeRow, LinearLayout.LayoutParams(-1, -2))
+
+        label("출발 지연")
+        val startDelay = spinner((0..60).map { "${it}분" })
+        wrap.addView(startDelay, LinearLayout.LayoutParams(-1, -2))
+        label("각 보급소 휴식 · 1분 단위")
+        val aidStop = spinner((0..60).map { "${it}분" })
+        wrap.addView(aidStop, LinearLayout.LayoutParams(-1, -2))
 
         AlertDialog.Builder(this)
             .setTitle("참가자 목표시간 추가")
-            .setMessage("개인 능력값 없이 목표시간과 보급소 휴식만으로 GPX 경사도에 맞춘 진행을 재생합니다.")
+            .setMessage("목표 순수 주행시간에 선택한 보급소 휴식시간을 별도로 더해 시뮬레이션합니다.")
             .setView(wrap)
             .setPositiveButton("추가") { _, _ ->
                 val nickname = name.text.toString().trim().ifBlank { "라이더${riderConfigs.size + 1}" }
-                val targetSec = parseTargetSeconds(target.text.toString().trim())
-                val delaySec = (startDelay.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0
-                val stopSec = (aidStop.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0
-                if (targetSec == null) {
-                    Toast.makeText(this, "목표시간을 05:00처럼 입력해 주세요.", Toast.LENGTH_LONG).show()
+                val targetSec = hour.selectedItemPosition * 3600.0 + minute.selectedItemPosition * 60.0
+                val delaySec = startDelay.selectedItemPosition * 60.0
+                val stopSec = aidStop.selectedItemPosition * 60.0
+                if (targetSec < 600.0) {
+                    Toast.makeText(this, "목표 주행시간을 확인해 주세요.", Toast.LENGTH_LONG).show()
                 } else {
                     riderConfigs += SimulationRiderConfig(nickname, targetSec, delaySec, stopSec)
                     refreshRiders(); rebuildPlans()
@@ -234,11 +247,11 @@ class RoadRaceSimulationActivity : Activity() {
 
     private fun refreshRiders() {
         tvRiders.text = if (riderConfigs.isEmpty()) {
-            "참가자 없음 · 목표 완주시간만 입력하면 됩니다."
+            "참가자 없음 · 목표 순수 주행시간을 선택하면 됩니다."
         } else buildString {
             append("참가자 ${riderConfigs.size}/20")
             riderConfigs.forEach { r ->
-                append("\n• ${r.nickname} · 목표 ${duration(r.targetSec)}")
+                append("\n• ${r.nickname} · 주행목표 ${duration(r.targetSec)}")
                 if (r.startOffsetSec > 0) append(" · 출발 +${duration(r.startOffsetSec)}")
                 append(if (r.defaultAidStopSec > 0) " · 보급소당 ${duration(r.defaultAidStopSec)}" else " · 보급 PASS")
             }

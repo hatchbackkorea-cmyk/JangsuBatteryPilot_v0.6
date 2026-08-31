@@ -18,8 +18,8 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="10dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="참가자 · 최대 20명" android:textColor="@color/orange" android:textStyle="bold" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="참가자마다 목표 완주시간과 보급소 휴식만 입력합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
-            <TextView android:id="@+id/tvSimRiders" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="@color/text_primary" android:textSize="12sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="참가자마다 목표 순수 주행시간과 보급소 휴식을 입력합니다. 보급시간은 주행시간에 별도로 더합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:id="@+id/tvSimRiders" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="@color/text_primary" android:textSize="16sp" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
                 <Button android:id="@+id/btnSimAddRider" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="+ 참가자 목표시간" />
                 <Button android:id="@+id/btnSimClearRiders" android:layout_width="wrap_content" android:layout_height="46dp" android:layout_marginStart="5dp" android:text="초기화" />
@@ -33,7 +33,7 @@
                 <Button android:id="@+id/btnSimPlay" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="▶ 시뮬레이션 재생" android:textStyle="bold" />
                 <Button android:id="@+id/btnSimReset" android:layout_width="wrap_content" android:layout_height="50dp" android:layout_marginStart="5dp" android:text="↺ 처음" />
             </LinearLayout>
-            <TextView android:id="@+id/tvSimStandings" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="참가자 목표시간을 추가하고 재생하세요." android:textColor="@color/text_primary" android:textSize="12sp" />
+            <TextView android:id="@+id/tvSimStandings" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="참가자 목표시간을 추가하고 재생하세요." android:textColor="@color/text_primary" android:textSize="15sp" />
         </LinearLayout>
 
         <TextView android:id="@+id/tvSimSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@color/panel" android:padding="12dp" android:textColor="@color/text_primary" android:textSize="13sp" android:visibility="gone" />

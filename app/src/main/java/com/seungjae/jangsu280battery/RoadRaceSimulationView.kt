@@ -96,11 +96,29 @@ class RoadRaceSimulationView @JvmOverloads constructor(
             paint.strokeWidth = 3f
             paint.color = Color.BLACK
             canvas.drawCircle(x, y, if (s.status.contains("휴식")) 11f else 9f, paint)
+            val riderName = s.nickname
+            paint.textSize = 36f
+            paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            val nameWidth = paint.measureText(riderName)
+            val labelX = if (x + 14f + nameWidth > width - 6f) (x - 14f - nameWidth).coerceAtLeast(6f) else x + 14f
+            val labelY = (y - 14f).coerceAtLeast(40f)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 7f
+            paint.color = Color.BLACK
+            canvas.drawText(riderName, labelX, labelY, paint)
             paint.style = Paint.Style.FILL
             paint.color = Color.WHITE
-            paint.textSize = 18f
-            val label = "${s.nickname} ${String.format(java.util.Locale.US, "%.1f", s.routeKm)}km"
-            canvas.drawText(label, x + 10f, y + 5f, paint)
+            canvas.drawText(riderName, labelX, labelY, paint)
+            paint.textSize = 19f
+            paint.typeface = android.graphics.Typeface.DEFAULT
+            val distance = String.format(java.util.Locale.US, "%.1f km", s.routeKm)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 4f
+            paint.color = Color.BLACK
+            canvas.drawText(distance, labelX, labelY + 22f, paint)
+            paint.style = Paint.Style.FILL
+            paint.color = Color.WHITE
+            canvas.drawText(distance, labelX, labelY + 22f, paint)
         }
         paint.color = Color.LTGRAY
         paint.textSize = 20f

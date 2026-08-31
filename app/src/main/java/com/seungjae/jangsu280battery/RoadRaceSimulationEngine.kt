@@ -2,7 +2,7 @@ package com.seungjae.jangsu280battery
 
 import kotlin.math.max
 
-/** 목표시간 기반 ROAD 그란폰도 사전 시뮬레이션. */
+/** 목표 주행시간 + 별도 보급정차 기반 ROAD 그란폰도 사전 시뮬레이션. */
 data class SimulationRiderConfig(
     val nickname: String,
     val targetSec: Double,
@@ -75,7 +75,7 @@ object RoadRaceSimulationEngine {
             motionPlan = motion,
             aidStops = aidStops,
             checkpoints = cps,
-            finishRaceSec = config.startOffsetSec + config.targetSec
+            finishRaceSec = config.startOffsetSec + motion.totalSec
         )
     }
 

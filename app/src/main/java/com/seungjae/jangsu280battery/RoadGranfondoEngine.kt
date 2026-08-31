@@ -4,7 +4,7 @@ import java.security.MessageDigest
 import java.util.Locale
 import kotlin.math.exp
 
-/** 목표 완주시간 안에 포함할 보급소 정차 계획. */
+/** 보급소 정차 계획. 정차시간은 목표 주행시간과 별도로 더한다. */
 data class RoadAidSelection(
     val name: String,
     val km: Double,
@@ -28,6 +28,9 @@ data class RoadCheckpoint(
 )
 
 data class RoadPlan(
+    /** 보급 정차를 제외한 순수 목표 주행시간. */
+    val ridingTargetSec: Double,
+    /** 목표 주행시간 + 선택한 보급 정차시간. */
     val totalSec: Double,
     val targetSpecified: Boolean,
     val checkpoints: List<RoadCheckpoint>,
@@ -37,6 +40,8 @@ data class RoadPlan(
     val aidStops: List<RoadAidPlan>,
     val modelLabel: String
 ) {
+    val totalStopSec: Double get() = aidStops.sumOf { it.stopSec }
+
     private fun ridingElapsedSec(km: Double): Double {
         if (samplesKm.isEmpty()) return 0.0
         val x = km.coerceIn(0.0, samplesKm.last())
@@ -64,21 +69,23 @@ data class RoadPlan(
 }
 
 /**
- * 개인 파워 예측을 하지 않는 목표시간 전용 페이스 배분 엔진.
- * GPX의 경사 난이도로 구간별 시간 비율만 만든 뒤 사용자가 정한 목표시간에 정확히 맞춘다.
- * 선택한 보급소 정차시간은 목표 완주시간 안에 포함된다.
+ * 개인 파워 예측을 하지 않는 목표 페이스 배분 엔진.
+ * GPX 경사 난이도로 구간별 시간 비율만 만든 뒤 사용자가 정한 순수 주행시간에 정확히 맞춘다.
+ * 보급소 정차시간은 순수 주행시간과 별도로 더해 최종 계획 완주시간을 만든다.
  */
 object RoadGranfondoEngine {
-    fun buildTargetPlan(course: CourseData, targetSec: Double, aidSelections: List<RoadAidSelection> = emptyList()): RoadPlan {
+    fun buildTargetPlan(
+        course: CourseData,
+        ridingTargetSec: Double,
+        aidSelections: List<RoadAidSelection> = emptyList()
+    ): RoadPlan {
         require(course.totalKm > 0.1) { "유효한 GPX 코스가 필요합니다." }
-        require(targetSec >= 600.0) { "목표 완주시간을 확인해 주세요." }
+        require(ridingTargetSec >= 600.0) { "목표 주행시간을 확인해 주세요." }
 
         val aids = aidSelections
             .filter { it.km in 0.05..(course.totalKm - 0.05) && it.stopSec > 0.0 }
             .sortedBy { it.km }
         val totalStopSec = aids.sumOf { it.stopSec }
-        require(totalStopSec < targetSec - 300.0) { "정차시간 합계가 목표 완주시간보다 너무 깁니다." }
-        val ridingTargetSec = targetSec - totalStopSec
 
         // 보급소 위치도 샘플에 넣어 도착시간 계산이 끊기지 않게 한다.
         val step = 0.25
@@ -128,13 +135,14 @@ object RoadGranfondoEngine {
         }
 
         return RoadPlan(
-            totalSec = targetSec,
+            ridingTargetSec = ridingTargetSec,
+            totalSec = ridingTargetSec + totalStopSec,
             targetSpecified = true,
             checkpoints = checkpoints,
             samplesKm = kms.toDoubleArray(),
             samplesElapsedSec = ridingScaled.toDoubleArray(),
             aidStops = aidPlans,
-            modelLabel = "GPX 경사 가중 목표시간 배분"
+            modelLabel = "GPX 경사 가중 목표 페이스 배분"
         )
     }
 
@@ -168,7 +176,6 @@ object RoadGranfondoEngine {
         var k = 10.0
         while (k < course.totalKm - 0.5) { all += ("${k.toInt()} km" to k); k += 10.0 }
 
-        // 선택한 보급소만 일정표에 보급소로 강조한다.
         aids.forEach { a -> all += (a.name.ifBlank { "보급소" } to a.km) }
 
         var search = 0.0
