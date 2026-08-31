@@ -183,7 +183,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                 }
                 runOnUiThread {
                     refreshProfile(); buildPlan(false)
-                    Toast.makeText(this, "FIT $ok개 반영${if (errors.isNotEmpty()) " · 실패 ${errors.size}" else ""}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "FIT ${ok}개 반영${if (errors.isNotEmpty()) " · 실패 ${errors.size}" else ""}", Toast.LENGTH_LONG).show()
                 }
             }.start()
         }
