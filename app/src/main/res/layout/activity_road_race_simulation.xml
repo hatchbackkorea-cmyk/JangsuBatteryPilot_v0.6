@@ -8,7 +8,7 @@
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
             <Button android:id="@+id/btnSimBack" android:layout_width="wrap_content" android:layout_height="42dp" android:text="← ROAD" />
-            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="🎬 목표시간 레이스 시뮬레이터" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="🎬 목표시간 · 평속 레이스 시뮬레이터" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="10dp">
@@ -18,7 +18,7 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="10dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="참가자 · 최대 20명" android:textColor="@color/orange" android:textStyle="bold" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="나는 ROAD 계획의 목표/보급 설정이 자동 입력됩니다. 다른 참가자는 보급소와 정차시간을 사람별로 따로 설정합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="나는 ROAD 계획의 목표시간/평속과 보급 설정이 자동 입력됩니다. 다른 참가자도 목표시간 또는 목표평속을 고르고 보급소·정차시간을 사람별로 따로 설정합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
             <TextView android:id="@+id/tvSimRiders" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="@color/text_primary" android:textSize="16sp" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
                 <Button android:id="@+id/btnSimAddRider" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="+ 참가자" />
@@ -34,7 +34,7 @@
                 <Button android:id="@+id/btnSimPlay" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="▶ 시뮬레이션 재생" android:textStyle="bold" />
                 <Button android:id="@+id/btnSimReset" android:layout_width="wrap_content" android:layout_height="50dp" android:layout_marginStart="5dp" android:text="↺ 처음" />
             </LinearLayout>
-            <TextView android:id="@+id/tvSimStandings" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="참가자 목표시간을 추가하고 재생하세요." android:textColor="@color/text_primary" android:textSize="15sp" />
+            <TextView android:id="@+id/tvSimStandings" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="참가자 목표시간/평속을 설정하고 재생하세요." android:textColor="@color/text_primary" android:textSize="15sp" />
         </LinearLayout>
 
         <TextView android:id="@+id/tvSimSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@color/panel" android:padding="12dp" android:textColor="@color/text_primary" android:textSize="13sp" android:visibility="gone" />

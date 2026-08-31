@@ -6,12 +6,14 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Spinner
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
@@ -27,6 +29,8 @@ class RoadRaceSimulationActivity : Activity() {
         private const val KEY_PLAN_BASIS = "plan_basis"
         private const val KEY_NICK = "group_nick"
         private const val MAX_RIDERS = 20
+        private const val BASIS_TIME = "time"
+        private const val BASIS_SPEED = "speed"
         private const val AUTO_TARGET_REAL_SEC = 50.0
         private const val MIN_AUTO_MULTIPLIER = 1.0
         private const val MAX_AUTO_MULTIPLIER = 2400.0
@@ -119,10 +123,12 @@ class RoadRaceSimulationActivity : Activity() {
         if (force) riderConfigs.removeAll { it.isSelf }
         val targetSec = savedSelfTargetSec(c)
         if (targetSec < 600.0) return
+        val targetBasis = if (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME) == BASIS_SPEED) BASIS_SPEED else BASIS_TIME
         val nickname = prefs.getString(KEY_NICK, null)?.trim().orEmpty().ifBlank { "나" }
         val self = SimulationRiderConfig(
             nickname = nickname,
             targetSec = targetSec,
+            targetBasis = targetBasis,
             startOffsetSec = 0.0,
             aidSelections = savedSelfAidSelections(c),
             isSelf = true
@@ -131,7 +137,7 @@ class RoadRaceSimulationActivity : Activity() {
     }
 
     private fun savedSelfTargetSec(c: CourseData): Double {
-        return if (prefs.getString(KEY_PLAN_BASIS, "time") == "speed") {
+        return if (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME) == BASIS_SPEED) {
             val defaultIdx = TARGET_SPEEDS.indexOfFirst { it >= 25.0 }.coerceAtLeast(0)
             val idx = prefs.getInt(KEY_TARGET_SPEED_INDEX, defaultIdx).coerceIn(TARGET_SPEEDS.indices)
             val speed = TARGET_SPEEDS[idx]
@@ -176,9 +182,16 @@ class RoadRaceSimulationActivity : Activity() {
             adapter = ArrayAdapter(this@RoadRaceSimulationActivity, android.R.layout.simple_spinner_dropdown_item, values)
         }
 
-        label("목표 순수 주행시간 · 보급시간 별도")
-        val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        label("목표 기준 · 보급시간은 별도")
         val existingTarget = existing?.targetSec ?: 5.0 * 3600.0
+        val existingBasis = existing?.targetBasis ?: BASIS_TIME
+        val basis = spinner(listOf("목표 주행시간", "목표 평속")).apply {
+            setSelection(if (existingBasis == BASIS_SPEED) 1 else 0)
+        }
+        wrap.addView(basis, LinearLayout.LayoutParams(-1, -2))
+
+        label("목표 순수 주행시간")
+        val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val targetHour = (existingTarget / 3600.0).toInt().coerceIn(0, 20)
         val targetMinute = ((existingTarget.toLong() % 3600L) / 60L).toInt().coerceIn(0, 59)
         val hour = spinner((0..20).map { "${it}시간" }).apply { setSelection(targetHour) }
@@ -186,6 +199,26 @@ class RoadRaceSimulationActivity : Activity() {
         timeRow.addView(hour, LinearLayout.LayoutParams(0, -2, 1f))
         timeRow.addView(minute, LinearLayout.LayoutParams(0, -2, 1f))
         wrap.addView(timeRow, LinearLayout.LayoutParams(-1, -2))
+
+        label("목표 평속")
+        val currentSpeed = if (existingTarget > 0.0) c.totalKm / (existingTarget / 3600.0) else 25.0
+        val speedIndex = TARGET_SPEEDS.indices.minByOrNull { kotlin.math.abs(TARGET_SPEEDS[it] - currentSpeed) } ?: 0
+        val speed = spinner(TARGET_SPEEDS.map { "${one(it)} km/h" }).apply { setSelection(speedIndex) }
+        wrap.addView(speed, LinearLayout.LayoutParams(-1, -2))
+
+        fun applyBasisUi() {
+            val bySpeed = basis.selectedItemPosition == 1
+            hour.isEnabled = !bySpeed
+            minute.isEnabled = !bySpeed
+            speed.isEnabled = bySpeed
+            timeRow.alpha = if (bySpeed) 0.45f else 1.0f
+            speed.alpha = if (bySpeed) 1.0f else 0.45f
+        }
+        basis.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = applyBasisUi()
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        applyBasisUi()
 
         label("출발 지연")
         val startDelay = spinner((0..60).map { "${it}분" }).apply {
@@ -224,15 +257,22 @@ class RoadRaceSimulationActivity : Activity() {
         }
 
         val title = if (existing == null) "참가자 추가" else if (existing.isSelf) "내 시뮬레이션 설정" else "참가자 수정"
+        val scroll = ScrollView(this).apply { addView(wrap) }
         val builder = AlertDialog.Builder(this)
             .setTitle(title)
-            .setMessage("보급소 방문 여부와 정차시간은 이 참가자에게만 적용됩니다.")
-            .setView(wrap)
+            .setMessage("참가자마다 목표시간 또는 목표평속을 선택하고, 보급소 방문 여부와 정차시간도 각각 따로 설정합니다.")
+            .setView(scroll)
             .setPositiveButton(if (existing == null) "추가" else "저장") { _, _ ->
                 val nickname = name.text.toString().trim().ifBlank {
                     if (existing?.isSelf == true) "나" else "라이더${(editIndex ?: riderConfigs.size) + 1}"
                 }
-                val targetSec = hour.selectedItemPosition * 3600.0 + minute.selectedItemPosition * 60.0
+                val targetBasis = if (basis.selectedItemPosition == 1) BASIS_SPEED else BASIS_TIME
+                val selectedSpeed = TARGET_SPEEDS.getOrElse(speed.selectedItemPosition) { 25.0 }
+                val targetSec = if (targetBasis == BASIS_SPEED) {
+                    c.totalKm / selectedSpeed.coerceAtLeast(1.0) * 3600.0
+                } else {
+                    hour.selectedItemPosition * 3600.0 + minute.selectedItemPosition * 60.0
+                }
                 val delaySec = startDelay.selectedItemPosition * 60.0
                 val riderAids = aidInputs.mapNotNull { input ->
                     val stopMin = STOP_MINUTES.getOrElse(input.spinner.selectedItemPosition) { 0 }
@@ -240,11 +280,12 @@ class RoadRaceSimulationActivity : Activity() {
                     else RoadAidSelection(input.poi.name.ifBlank { "보급소" }, input.poi.routeKm, stopMin * 60.0)
                 }
                 if (targetSec < 600.0) {
-                    Toast.makeText(this, "목표 주행시간을 확인해 주세요.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "목표 주행시간 또는 목표 평속을 확인해 주세요.", Toast.LENGTH_LONG).show()
                 } else {
                     val updated = SimulationRiderConfig(
                         nickname = nickname,
                         targetSec = targetSec,
+                        targetBasis = targetBasis,
                         startOffsetSec = delaySec,
                         aidSelections = riderAids,
                         isSelf = existing?.isSelf == true
@@ -408,7 +449,12 @@ class RoadRaceSimulationActivity : Activity() {
                 if (r.isSelf) append("⭐ ")
                 append("${r.nickname}")
                 if (r.isSelf) append(" (나)")
-                append(" · 주행목표 ${duration(r.targetSec)}")
+                val avg = course?.let { courseData -> if (r.targetSec > 0.0) courseData.totalKm / (r.targetSec / 3600.0) else 0.0 } ?: 0.0
+                if (r.targetBasis == BASIS_SPEED) {
+                    append(" · 목표평속 ${one(avg)}km/h · 주행 ${duration(r.targetSec)}")
+                } else {
+                    append(" · 목표시간 ${duration(r.targetSec)} · 환산 ${one(avg)}km/h")
+                }
                 if (r.startOffsetSec > 0) append(" · 출발 +${duration(r.startOffsetSec)}")
                 if (r.aidSelections.isEmpty()) {
                     append(" · 보급 PASS")

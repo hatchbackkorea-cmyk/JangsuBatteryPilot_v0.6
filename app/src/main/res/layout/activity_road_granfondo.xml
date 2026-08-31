@@ -61,7 +61,7 @@
             <TextView android:id="@+id/tvRoadPlan" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:background="@color/panel2" android:padding="10dp" android:text="목표 주행시간 또는 평속과 보급소 정차시간을 설정해 주세요." android:textColor="@color/text_primary" android:textSize="14sp" />
             <TextView android:id="@+id/tvRoadSchedule" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:textColor="@color/text_secondary" android:textSize="12sp" />
             <Button android:id="@+id/btnRoadSavePdf" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="📄 계획표 PDF 저장 · 고도그래프 포함" android:textStyle="bold" />
-            <Button android:id="@+id/btnRoadSimulator" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:text="🎬 참가자 목표시간 시뮬레이션" android:textStyle="bold" />
+            <Button android:id="@+id/btnRoadSimulator" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:text="🎬 참가자 목표시간 · 평속 시뮬레이션" android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel2" android:orientation="vertical" android:padding="12dp">
