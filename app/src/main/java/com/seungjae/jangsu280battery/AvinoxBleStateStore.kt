@@ -16,6 +16,11 @@ data class AvinoxBleSnapshot(
         soc?.takeIf { updatedMs > 0L && nowMs - updatedMs in 0..maxAgeMs }
 }
 
+data class AvinoxBleRawSnapshot(
+    val hex: String?,
+    val updatedMs: Long
+)
+
 class AvinoxBleStateStore(context: Context) {
     companion object {
         private const val PREFS = "avinox_ble_runtime"
@@ -23,6 +28,8 @@ class AvinoxBleStateStore(context: Context) {
         private const val KEY_STATE = "state"
         private const val KEY_UPDATED = "updated_ms"
         private const val KEY_ADDRESS = "address"
+        private const val KEY_RAW_HEX = "raw_hex"
+        private const val KEY_RAW_UPDATED = "raw_updated_ms"
     }
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -35,6 +42,16 @@ class AvinoxBleStateStore(context: Context) {
             updatedMs = prefs.getLong(KEY_UPDATED, 0L),
             address = prefs.getString(KEY_ADDRESS, null)
         )
+    }
+
+    fun rawSnapshot(): AvinoxBleRawSnapshot = AvinoxBleRawSnapshot(
+        hex = prefs.getString(KEY_RAW_HEX, null),
+        updatedMs = prefs.getLong(KEY_RAW_UPDATED, 0L)
+    )
+
+    fun setRawNotification(bytes: ByteArray, nowMs: Long = System.currentTimeMillis()) {
+        val hex = bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+        prefs.edit().putString(KEY_RAW_HEX, hex).putLong(KEY_RAW_UPDATED, nowMs).apply()
     }
 
     fun setState(state: String, address: String? = snapshot().address) {

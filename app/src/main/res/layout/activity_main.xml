@@ -235,6 +235,27 @@
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="※ ZIP의 .github/workflows 업데이트는 기본 OFF입니다. 기존 자동 사인 workflow를 보존하는 쪽이 안전합니다. GitHub 토큰은 Android Keystore로 암호화 저장합니다." android:textColor="@color/text_secondary" android:textSize="12sp" />
             </LinearLayout>
         </ScrollView>
+        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="top" android:orientation="vertical" android:paddingLeft="18dp" android:paddingRight="18dp" android:paddingTop="18dp" android:paddingBottom="24dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="배터리" android:textColor="@color/text_primary" android:textSize="26sp" android:textStyle="bold" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Avinox 원본과 실시간 BLE에서 확인 가능한 배터리 정보를 한곳에 모읍니다." android:textColor="@color/text_secondary" android:textSize="12sp" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="12dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="현재 / 원본 요약" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/tvBatteryCenterSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="배터리 정보 준비 중…" android:textColor="@color/text_primary" android:textSize="13sp" />
+                    <Button android:id="@+id/btnBatteryCenterRefresh" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="8dp" android:text="♻ 기존 Avinox 원본 다시 분석" android:textStyle="bold" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="12dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="정밀 분석 / 상태별 캡처" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/tvBatteryCenterSession" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="테스트 세션 없음" android:textColor="@color/text_secondary" android:textSize="12sp" />
+                    <Button android:id="@+id/btnBatteryCenterForensics" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="8dp" android:text="🔬 배터리 정밀 분석 열기" android:textStyle="bold" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="테스트는 한 번에 끝낼 필요가 없습니다. 대기·주행·충전·충전제한·스위치 상태를 시간 날 때 하나씩 저장하고 나중에 이어갈 수 있습니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="12dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="미해독 후보" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="BMS 실제 cycle · SOH · 팩 전압/전류 · 셀별 전압/편차 · 밸런싱 · 충전 제한/보호상태 · 배터리 FW/시리얼 · 좌/우 스위치 정확한 배터리 %" android:textColor="@color/text_secondary" android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
     </ViewFlipper>
-    <TextView android:id="@+id/tvPagerIndicator" android:layout_width="match_parent" android:layout_height="32dp" android:gravity="center" android:text="●  ○  ○  ○  ○  ○   주행" android:textColor="@color/text_secondary" android:textSize="11sp" android:textStyle="bold" />
+    <TextView android:id="@+id/tvPagerIndicator" android:layout_width="match_parent" android:layout_height="32dp" android:gravity="center" android:text="●  ○  ○  ○  ○  ○  ○   주행" android:textColor="@color/text_secondary" android:textSize="11sp" android:textStyle="bold" />
 </LinearLayout>

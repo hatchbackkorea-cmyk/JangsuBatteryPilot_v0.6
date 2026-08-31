@@ -72,6 +72,11 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".BatteryForensicsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".HistoricalRideActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

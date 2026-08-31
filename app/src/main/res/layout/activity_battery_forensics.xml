@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="배터리 정밀 분석"
+            android:textColor="@color/text_primary"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="기존 Avinox 원본 + 실시간 FFF4 BLE를 함께 모읍니다. 테스트는 연속으로 할 필요 없습니다. 상태별로 나눠 저장해도 같은 세션에 이어집니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_accent_bg"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="실시간 Avinox" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvBatteryProbeLive" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="BLE 대기" android:textColor="@color/text_primary" android:textSize="14sp" />
+            <TextView android:id="@+id/tvBatteryProbeRaw" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="FFF4 RAW 수신 전" android:textColor="@color/text_secondary" android:textSize="10sp" android:fontFamily="monospace" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="이미 저장된 Avinox 원본 재분석" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvBatteryProbeHistory" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="분석 중" android:textColor="@color/text_primary" android:textSize="13sp" />
+            <Button android:id="@+id/btnBatteryProbeAnalyzeProto" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="7dp" android:text="♻ 기존 Avinox 원본 다시 분석" android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="상태별 캡처 세션" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvBatteryProbeSession" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="테스트 세션 없음" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnBatteryProbeStartSession" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="시작 / 이어하기" android:textStyle="bold" />
+                <Button android:id="@+id/btnBatteryProbeEndSession" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:layout_marginStart="6dp" android:text="세션 종료" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnBatteryCaptureIdle" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="대기" />
+                <Button android:id="@+id/btnBatteryCaptureRide" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:layout_marginStart="4dp" android:text="주행/부하" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnBatteryCaptureChargePlug" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="충전기 연결" />
+                <Button android:id="@+id/btnBatteryCaptureCharging" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:layout_marginStart="4dp" android:text="충전 중" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnBatteryCaptureLimit" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="충전제한 변경" />
+                <Button android:id="@+id/btnBatteryCaptureFull" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:layout_marginStart="4dp" android:text="충전 종료" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnBatteryCaptureLeftSwitch" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="왼쪽 스위치" />
+                <Button android:id="@+id/btnBatteryCaptureRightSwitch" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:layout_marginStart="4dp" android:text="오른쪽 스위치" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="각 버튼은 그 순간의 SOC, BLE 상태, FFF4 RAW, 충전상태와 기존 원본 분석 요약을 저장합니다. 오늘 일부만 하고 며칠 뒤 이어도 됩니다." android:textColor="@color/text_secondary" android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/panel_bg"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="아직 미해독" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvBatteryProbeUnknown" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="미해독 목록" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Button android:id="@+id/btnBatteryProbeFullGatt" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="🧪 전체 Avinox GATT 정밀진단" android:textStyle="bold" />
+            <Button android:id="@+id/btnBatteryProbeExport" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:text="📤 테스트 로그 ZIP 공유" android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="20dp"
+            android:text="※ BMS 실제 cycle/SOH/전압/셀밸런싱 등은 검증 전에는 표시하지 않습니다. '관측 방전 환산'은 주행 원본으로 계산한 참고값입니다."
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+    </LinearLayout>
+</ScrollView>

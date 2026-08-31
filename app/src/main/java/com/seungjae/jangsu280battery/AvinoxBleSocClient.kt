@@ -319,6 +319,7 @@ class AvinoxBleSocClient(
     private fun processNotification(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
         if (characteristic.uuid != FFF4) return
         val receivedAt = System.currentTimeMillis()
+        stateStore.setRawNotification(bytes, receivedAt)
         listener.onRawNotification(receivedAt, bytes.copyOf(), connectedAddress)
         val soc = parseVerifiedSoc(bytes) ?: return
         main.post {
