@@ -2,13 +2,14 @@ package com.seungjae.jangsu280battery
 
 import kotlin.math.max
 
-/** 목표 주행시간/목표 평속 + 참가자별 개별 보급정차 기반 ROAD 그란폰도 사전 시뮬레이션. */
+/** 목표 주행시간/목표 평속/컷오프 페이스 + 참가자별 개별 보급정차 기반 ROAD 그란폰도 사전 시뮬레이션. */
 data class SimulationRiderConfig(
     val nickname: String,
     val targetSec: Double,
     val targetBasis: String = "time",
     val startOffsetSec: Double = 0.0,
     val aidSelections: List<RoadAidSelection> = emptyList(),
+    val cutoffSelections: List<RoadCutoffSelection> = emptyList(),
     val isSelf: Boolean = false
 )
 

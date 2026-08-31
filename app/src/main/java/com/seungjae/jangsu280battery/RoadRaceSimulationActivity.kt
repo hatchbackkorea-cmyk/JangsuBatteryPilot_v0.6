@@ -27,10 +27,14 @@ class RoadRaceSimulationActivity : Activity() {
         private const val KEY_TARGET_MINUTE = "target_minute"
         private const val KEY_TARGET_SPEED_INDEX = "target_speed_index"
         private const val KEY_PLAN_BASIS = "plan_basis"
+        private const val KEY_CUTOFF_DERIVED_SEC = "cutoff_derived_riding_sec"
+        private const val KEY_START_HOUR = "start_hour"
+        private const val KEY_START_MINUTE = "start_minute"
         private const val KEY_NICK = "group_nick"
         private const val MAX_RIDERS = 20
         private const val BASIS_TIME = "time"
         private const val BASIS_SPEED = "speed"
+        private const val BASIS_CUTOFF = "cutoff"
         private const val AUTO_TARGET_REAL_SEC = 50.0
         private const val MIN_AUTO_MULTIPLIER = 1.0
         private const val MAX_AUTO_MULTIPLIER = 2400.0
@@ -39,6 +43,7 @@ class RoadRaceSimulationActivity : Activity() {
     }
 
     private data class RiderAidInput(val poi: RoutePoi, val check: CheckBox, val spinner: Spinner)
+    private data class RiderCutoffCandidate(val name: String, val km: Double)
 
     private lateinit var courseRepo: CourseRepository
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
@@ -123,7 +128,11 @@ class RoadRaceSimulationActivity : Activity() {
         if (force) riderConfigs.removeAll { it.isSelf }
         val targetSec = savedSelfTargetSec(c)
         if (targetSec < 600.0) return
-        val targetBasis = if (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME) == BASIS_SPEED) BASIS_SPEED else BASIS_TIME
+        val targetBasis = when (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME)) {
+            BASIS_SPEED -> BASIS_SPEED
+            BASIS_CUTOFF -> BASIS_CUTOFF
+            else -> BASIS_TIME
+        }
         val nickname = prefs.getString(KEY_NICK, null)?.trim().orEmpty().ifBlank { "나" }
         val self = SimulationRiderConfig(
             nickname = nickname,
@@ -131,21 +140,33 @@ class RoadRaceSimulationActivity : Activity() {
             targetBasis = targetBasis,
             startOffsetSec = 0.0,
             aidSelections = savedSelfAidSelections(c),
+            cutoffSelections = savedRaceCutoffs(c),
             isSelf = true
         )
         riderConfigs.add(0, self)
     }
 
     private fun savedSelfTargetSec(c: CourseData): Double {
-        return if (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME) == BASIS_SPEED) {
-            val defaultIdx = TARGET_SPEEDS.indexOfFirst { it >= 25.0 }.coerceAtLeast(0)
-            val idx = prefs.getInt(KEY_TARGET_SPEED_INDEX, defaultIdx).coerceIn(TARGET_SPEEDS.indices)
-            val speed = TARGET_SPEEDS[idx]
-            c.totalKm / speed * 3600.0
-        } else {
-            val h = prefs.getInt(KEY_TARGET_HOUR, 5).coerceIn(0, 20)
-            val m = prefs.getInt(KEY_TARGET_MINUTE, 0).coerceIn(0, 59)
-            h * 3600.0 + m * 60.0
+        return when (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME)) {
+            BASIS_SPEED -> {
+                val defaultIdx = TARGET_SPEEDS.indexOfFirst { it >= 25.0 }.coerceAtLeast(0)
+                val idx = prefs.getInt(KEY_TARGET_SPEED_INDEX, defaultIdx).coerceIn(TARGET_SPEEDS.indices)
+                val speed = TARGET_SPEEDS[idx]
+                c.totalKm / speed * 3600.0
+            }
+            BASIS_CUTOFF -> runCatching {
+                RoadGranfondoEngine.solveCutoffTarget(
+                    c,
+                    savedRaceStartMinuteOfDay(),
+                    savedRaceCutoffs(c),
+                    savedSelfAidSelections(c)
+                ).ridingTargetSec
+            }.getOrElse { prefs.getLong(KEY_CUTOFF_DERIVED_SEC, 0L).toDouble() }
+            else -> {
+                val h = prefs.getInt(KEY_TARGET_HOUR, 5).coerceIn(0, 20)
+                val m = prefs.getInt(KEY_TARGET_MINUTE, 0).coerceIn(0, 59)
+                h * 3600.0 + m * 60.0
+            }
         }
     }
 
@@ -168,7 +189,7 @@ class RoadRaceSimulationActivity : Activity() {
             Toast.makeText(this, "ROAD 화면에서 대회 GPX를 먼저 불러와 주세요.", Toast.LENGTH_LONG).show(); return
         }
         val existing = editIndex?.let { riderConfigs.getOrNull(it) }
-        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(38, 8, 38, 0) }
+        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(4), dp(18), dp(12)) }
         val name = EditText(this).apply {
             hint = "참가자 이름/닉네임"
             setText(existing?.nickname.orEmpty())
@@ -176,17 +197,22 @@ class RoadRaceSimulationActivity : Activity() {
         wrap.addView(name, LinearLayout.LayoutParams(-1, -2))
 
         fun label(text: String) {
-            wrap.addView(TextView(this).apply { this.text = text; setPadding(0, 12, 0, 2) }, LinearLayout.LayoutParams(-1, -2))
+            wrap.addView(TextView(this).apply { this.text = text; setPadding(0, dp(10), 0, dp(2)) }, LinearLayout.LayoutParams(-1, -2))
         }
         fun spinner(values: List<String>): Spinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@RoadRaceSimulationActivity, android.R.layout.simple_spinner_dropdown_item, values)
         }
 
+        wrap.addView(TextView(this).apply {
+            text = "참가자마다 목표시간·목표평속·컷오프 페이스 중 하나를 고르고, 보급소 방문 여부와 정차시간도 따로 설정합니다."
+            setPadding(0, 0, 0, dp(4))
+        })
+
         label("목표 기준 · 보급시간은 별도")
         val existingTarget = existing?.targetSec ?: 5.0 * 3600.0
         val existingBasis = existing?.targetBasis ?: BASIS_TIME
-        val basis = spinner(listOf("목표 주행시간", "목표 평속")).apply {
-            setSelection(if (existingBasis == BASIS_SPEED) 1 else 0)
+        val basis = spinner(listOf("목표 주행시간", "목표 평속", "컷오프 페이스 · 자동 평속")).apply {
+            setSelection(when (existingBasis) { BASIS_SPEED -> 1; BASIS_CUTOFF -> 2; else -> 0 })
         }
         wrap.addView(basis, LinearLayout.LayoutParams(-1, -2))
 
@@ -206,19 +232,10 @@ class RoadRaceSimulationActivity : Activity() {
         val speed = spinner(TARGET_SPEEDS.map { "${one(it)} km/h" }).apply { setSelection(speedIndex) }
         wrap.addView(speed, LinearLayout.LayoutParams(-1, -2))
 
-        fun applyBasisUi() {
-            val bySpeed = basis.selectedItemPosition == 1
-            hour.isEnabled = !bySpeed
-            minute.isEnabled = !bySpeed
-            speed.isEnabled = bySpeed
-            timeRow.alpha = if (bySpeed) 0.45f else 1.0f
-            speed.alpha = if (bySpeed) 1.0f else 0.45f
+        val cutoffPreview = TextView(this).apply {
+            setPadding(0, dp(5), 0, dp(3))
         }
-        basis.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = applyBasisUi()
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-        applyBasisUi()
+        wrap.addView(cutoffPreview, LinearLayout.LayoutParams(-1, -2))
 
         label("출발 지연")
         val startDelay = spinner((0..60).map { "${it}분" }).apply {
@@ -232,13 +249,13 @@ class RoadRaceSimulationActivity : Activity() {
         if (aids.isEmpty()) {
             wrap.addView(TextView(this).apply {
                 text = "이 GPX에는 보급/급수 포인트가 없습니다."
-                setPadding(0, 5, 0, 5)
+                setPadding(0, dp(5), 0, dp(5))
             })
         } else {
             aids.forEach { poi ->
                 val saved = existing?.aidSelections?.minByOrNull { abs(it.km - poi.routeKm) }
                     ?.takeIf { abs(it.km - poi.routeKm) <= 0.03 }
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 3, 0, 3) }
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(3), 0, dp(3)) }
                 val check = CheckBox(this).apply {
                     text = "${one(poi.routeKm)}km  ${poi.name.ifBlank { "보급소" }}"
                     isChecked = saved != null
@@ -256,66 +273,170 @@ class RoadRaceSimulationActivity : Activity() {
             }
         }
 
-        val title = if (existing == null) "참가자 추가" else if (existing.isSelf) "내 시뮬레이션 설정" else "참가자 수정"
-        val scroll = ScrollView(this).apply { addView(wrap) }
-        val builder = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage("참가자마다 목표시간 또는 목표평속을 선택하고, 보급소 방문 여부와 정차시간도 각각 따로 설정합니다.")
-            .setView(scroll)
-            .setPositiveButton(if (existing == null) "추가" else "저장") { _, _ ->
-                val nickname = name.text.toString().trim().ifBlank {
-                    if (existing?.isSelf == true) "나" else "라이더${(editIndex ?: riderConfigs.size) + 1}"
-                }
-                val targetBasis = if (basis.selectedItemPosition == 1) BASIS_SPEED else BASIS_TIME
-                val selectedSpeed = TARGET_SPEEDS.getOrElse(speed.selectedItemPosition) { 25.0 }
-                val targetSec = if (targetBasis == BASIS_SPEED) {
-                    c.totalKm / selectedSpeed.coerceAtLeast(1.0) * 3600.0
-                } else {
-                    hour.selectedItemPosition * 3600.0 + minute.selectedItemPosition * 60.0
-                }
-                val delaySec = startDelay.selectedItemPosition * 60.0
-                val riderAids = aidInputs.mapNotNull { input ->
-                    val stopMin = STOP_MINUTES.getOrElse(input.spinner.selectedItemPosition) { 0 }
-                    if (!input.check.isChecked || stopMin <= 0) null
-                    else RoadAidSelection(input.poi.name.ifBlank { "보급소" }, input.poi.routeKm, stopMin * 60.0)
-                }
-                if (targetSec < 600.0) {
-                    Toast.makeText(this, "목표 주행시간 또는 목표 평속을 확인해 주세요.", Toast.LENGTH_LONG).show()
-                } else {
-                    val updated = SimulationRiderConfig(
-                        nickname = nickname,
-                        targetSec = targetSec,
-                        targetBasis = targetBasis,
-                        startOffsetSec = delaySec,
-                        aidSelections = riderAids,
-                        isSelf = existing?.isSelf == true
-                    )
-                    if (editIndex == null) riderConfigs += updated else riderConfigs[editIndex] = updated
-                    if (updated.isSelf) prefs.edit().putString(KEY_NICK, nickname).apply()
-                    pauseSimulation()
-                    simSec = 0.0
-                    refreshRiders()
-                    rebuildPlans()
-                    renderFrame()
-                }
-            }
-            .setNegativeButton("취소", null)
+        fun currentAids(): List<RoadAidSelection> = aidInputs.mapNotNull { input ->
+            val stopMin = STOP_MINUTES.getOrElse(input.spinner.selectedItemPosition) { 0 }
+            if (!input.check.isChecked || stopMin <= 0) null
+            else RoadAidSelection(input.poi.name.ifBlank { "보급소" }, input.poi.routeKm, stopMin * 60.0)
+        }
 
-        if (existing != null) {
-            builder.setNeutralButton("삭제") { _, _ ->
-                if (existing.isSelf) {
-                    Toast.makeText(this, "내 참가자는 기본 참가자라 삭제되지 않습니다.", Toast.LENGTH_LONG).show()
-                } else {
-                    editIndex?.let { riderConfigs.removeAt(it) }
-                    pauseSimulation()
-                    simSec = 0.0
-                    refreshRiders()
-                    rebuildPlans()
-                    renderFrame()
-                }
+        fun updateCutoffPreview() {
+            val isCutoff = basis.selectedItemPosition == 2
+            cutoffPreview.visibility = if (isCutoff) View.VISIBLE else View.GONE
+            if (!isCutoff) return
+            val raceCutoffs = savedRaceCutoffs(c)
+            if (raceCutoffs.isEmpty()) {
+                cutoffPreview.text = "⚠ ROAD 페이스 계획에서 컷오프 지점과 마감시각을 먼저 설정해 주세요."
+                return
+            }
+            val delayMin = startDelay.selectedItemPosition.coerceIn(0, 60)
+            val participantStart = (savedRaceStartMinuteOfDay() + delayMin) % 1440
+            val result = runCatching {
+                RoadGranfondoEngine.solveCutoffTarget(c, participantStart, raceCutoffs, currentAids())
+            }
+            cutoffPreview.text = result.fold(
+                onSuccess = { sol ->
+                    "컷오프 ${raceCutoffs.size}곳 적용 · 출발 ${clockMinuteOfDay(participantStart)} · 필요 최소 평속 ${one(sol.requiredAvgKph)} km/h · 순수주행 ${duration(sol.ridingTargetSec)} · 기준 ${sol.controlling.name}"
+                },
+                onFailure = { "⚠ 컷오프 계산 확인: ${it.message}" }
+            )
+        }
+
+        fun applyBasisUi() {
+            val byTime = basis.selectedItemPosition == 0
+            val bySpeed = basis.selectedItemPosition == 1
+            hour.isEnabled = byTime
+            minute.isEnabled = byTime
+            speed.isEnabled = bySpeed
+            timeRow.alpha = if (byTime) 1.0f else 0.42f
+            speed.alpha = if (bySpeed) 1.0f else 0.42f
+            updateCutoffPreview()
+        }
+        basis.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = applyBasisUi()
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        startDelay.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = updateCutoffPreview()
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        aidInputs.forEach { input ->
+            input.check.setOnCheckedChangeListener { _, checked ->
+                input.spinner.isEnabled = checked
+                updateCutoffPreview()
+            }
+            input.spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = updateCutoffPreview()
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             }
         }
-        builder.show()
+        applyBasisUi()
+
+        val title = if (existing == null) "참가자 추가" else if (existing.isSelf) "내 시뮬레이션 설정" else "참가자 수정"
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, dp(4))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(wrap)
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val buttonBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+        }
+        val deleteButton = Button(this).apply {
+            text = "삭제"
+            visibility = if (existing != null) View.VISIBLE else View.GONE
+        }
+        val cancelButton = Button(this).apply { text = "취소" }
+        val saveButton = Button(this).apply { text = if (existing == null) "참가자 추가" else "저장" }
+        if (existing != null) buttonBar.addView(deleteButton, LinearLayout.LayoutParams(0, -2, 1f))
+        else buttonBar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        buttonBar.addView(cancelButton, LinearLayout.LayoutParams(-2, -2))
+        buttonBar.addView(saveButton, LinearLayout.LayoutParams(-2, -2))
+        root.addView(buttonBar, LinearLayout.LayoutParams(-1, -2))
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(root)
+            .create()
+
+        cancelButton.setOnClickListener { dialog.dismiss() }
+        deleteButton.setOnClickListener {
+            if (existing?.isSelf == true) {
+                Toast.makeText(this, "내 참가자는 기본 참가자라 삭제되지 않습니다.", Toast.LENGTH_LONG).show()
+            } else {
+                editIndex?.let { riderConfigs.removeAt(it) }
+                pauseSimulation()
+                simSec = 0.0
+                refreshRiders()
+                rebuildPlans()
+                renderFrame()
+                dialog.dismiss()
+            }
+        }
+        saveButton.setOnClickListener {
+            val nickname = name.text.toString().trim().ifBlank {
+                if (existing?.isSelf == true) "나" else "라이더${(editIndex ?: riderConfigs.size) + 1}"
+            }
+            val targetBasis = when (basis.selectedItemPosition) {
+                1 -> BASIS_SPEED
+                2 -> BASIS_CUTOFF
+                else -> BASIS_TIME
+            }
+            val riderAids = currentAids()
+            val delaySec = startDelay.selectedItemPosition * 60.0
+            val raceCutoffs = savedRaceCutoffs(c)
+            val selectedSpeed = TARGET_SPEEDS.getOrElse(speed.selectedItemPosition) { 25.0 }
+            val targetSec = when (targetBasis) {
+                BASIS_SPEED -> c.totalKm / selectedSpeed.coerceAtLeast(1.0) * 3600.0
+                BASIS_CUTOFF -> {
+                    if (raceCutoffs.isEmpty()) {
+                        Toast.makeText(this, "ROAD 페이스 계획에서 컷오프 지점과 마감시각을 먼저 설정해 주세요.", Toast.LENGTH_LONG).show()
+                        return@setOnClickListener
+                    }
+                    val participantStart = (savedRaceStartMinuteOfDay() + startDelay.selectedItemPosition) % 1440
+                    runCatching {
+                        RoadGranfondoEngine.solveCutoffTarget(c, participantStart, raceCutoffs, riderAids).ridingTargetSec
+                    }.getOrElse {
+                        Toast.makeText(this, "컷오프 페이스 계산 실패: ${it.message}", Toast.LENGTH_LONG).show()
+                        return@setOnClickListener
+                    }
+                }
+                else -> hour.selectedItemPosition * 3600.0 + minute.selectedItemPosition * 60.0
+            }
+            if (targetSec < 600.0) {
+                Toast.makeText(this, "목표 주행시간/평속/컷오프 조건을 확인해 주세요.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val updated = SimulationRiderConfig(
+                nickname = nickname,
+                targetSec = targetSec,
+                targetBasis = targetBasis,
+                startOffsetSec = delaySec,
+                aidSelections = riderAids,
+                cutoffSelections = if (targetBasis == BASIS_CUTOFF) raceCutoffs else emptyList(),
+                isSelf = existing?.isSelf == true
+            )
+            if (editIndex == null) riderConfigs += updated else riderConfigs[editIndex] = updated
+            if (updated.isSelf) prefs.edit().putString(KEY_NICK, nickname).apply()
+            pauseSimulation()
+            simSec = 0.0
+            refreshRiders()
+            rebuildPlans()
+            renderFrame()
+            dialog.dismiss()
+        }
+
+        dialog.setOnShowListener {
+            val dm = resources.displayMetrics
+            dialog.window?.setLayout((dm.widthPixels * 0.96f).toInt(), (dm.heightPixels * 0.90f).toInt())
+            scroll.post { scroll.scrollTo(0, 0) }
+        }
+        dialog.show()
     }
 
     private fun showEditRiderPicker() {
@@ -450,10 +571,10 @@ class RoadRaceSimulationActivity : Activity() {
                 append("${r.nickname}")
                 if (r.isSelf) append(" (나)")
                 val avg = course?.let { courseData -> if (r.targetSec > 0.0) courseData.totalKm / (r.targetSec / 3600.0) else 0.0 } ?: 0.0
-                if (r.targetBasis == BASIS_SPEED) {
-                    append(" · 목표평속 ${one(avg)}km/h · 주행 ${duration(r.targetSec)}")
-                } else {
-                    append(" · 목표시간 ${duration(r.targetSec)} · 환산 ${one(avg)}km/h")
+                when (r.targetBasis) {
+                    BASIS_SPEED -> append(" · 목표평속 ${one(avg)}km/h · 주행 ${duration(r.targetSec)}")
+                    BASIS_CUTOFF -> append(" · 컷오프환산 ${one(avg)}km/h · 주행 ${duration(r.targetSec)}")
+                    else -> append(" · 목표시간 ${duration(r.targetSec)} · 환산 ${one(avg)}km/h")
                 }
                 if (r.startOffsetSec > 0) append(" · 출발 +${duration(r.startOffsetSec)}")
                 if (r.aidSelections.isEmpty()) {
@@ -481,6 +602,45 @@ class RoadRaceSimulationActivity : Activity() {
         val m = (sec % 3600) / 60
         val s = sec % 60
         return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%d:%02d", m, s)
+    }
+
+    private fun savedRaceStartMinuteOfDay(): Int {
+        val h = prefs.getInt(KEY_START_HOUR, 8).coerceIn(0, 23)
+        val m = prefs.getInt(KEY_START_MINUTE, 0).coerceIn(0, 59)
+        return h * 60 + m
+    }
+
+    private fun savedRaceCutoffs(c: CourseData): List<RoadCutoffSelection> {
+        val courseKey = RoadGranfondoEngine.courseKey(c)
+        return riderCutoffCandidates(c).mapNotNull { candidate ->
+            val suffix = "${courseKey}_${(candidate.km * 1000).toInt()}"
+            val checked = prefs.getBoolean("cutoff_${suffix}_checked", false)
+            if (!checked) return@mapNotNull null
+            val hour = prefs.getInt("cutoff_${suffix}_hour", 0).coerceIn(0, 23)
+            val minute = prefs.getInt("cutoff_${suffix}_minute", 0).coerceIn(0, 59)
+            RoadCutoffSelection(candidate.name, candidate.km, hour * 60 + minute)
+        }
+    }
+
+    private fun riderCutoffCandidates(c: CourseData): List<RiderCutoffCandidate> {
+        val pois = c.pois.filter { poi ->
+            val text = "${poi.name} ${poi.desc} ${poi.type}".lowercase()
+            poi.isSupplyLike() || text.contains("컷오프") || text.contains("cutoff") || text.contains("cut-off") ||
+                text.contains("체크포인트") || text.contains("checkpoint")
+        }.map { RiderCutoffCandidate(it.name.ifBlank { "체크포인트" }, it.routeKm) }
+            .filter { it.km in 0.05..(c.totalKm - 0.05) }
+        val merged = mutableListOf<RiderCutoffCandidate>()
+        (pois.sortedBy { it.km } + RiderCutoffCandidate("FINISH", c.totalKm)).forEach { candidate ->
+            val near = merged.indexOfFirst { abs(it.km - candidate.km) <= 0.08 }
+            if (near < 0) merged += candidate
+            else if (candidate.name == "FINISH") merged[near] = candidate
+        }
+        return merged.sortedBy { it.km }
+    }
+
+    private fun clockMinuteOfDay(minuteOfDay: Int): String {
+        val v = ((minuteOfDay % 1440) + 1440) % 1440
+        return String.format(Locale.US, "%02d:%02d", v / 60, v % 60)
     }
 
     private fun aidPrefSuffix(courseKey: String, poi: RoutePoi): String =

@@ -24,7 +24,7 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. 목표 페이스 계획" android:textColor="@color/accent" android:textStyle="bold" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="목표 주행시간 또는 목표 평속 중 하나를 기준으로 선택합니다. 보급 정차시간은 목표 주행시간과 별도로 더해 최종 완주 계획을 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="목표 주행시간 / 목표 평속 / 컷오프 기준 중 하나를 선택합니다. 컷오프 기준은 평속을 직접 정하지 않고 컷오프 시각과 보급 정차시간으로 필요한 페이스를 자동 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="최초 출발시각" android:textColor="@color/text_primary" android:textStyle="bold" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
@@ -34,9 +34,10 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="6dp" android:text="분" android:textColor="@color/text_primary" />
             </LinearLayout>
 
-            <RadioGroup android:id="@+id/rgRoadPlanBasis" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal">
-                <RadioButton android:id="@+id/rbRoadTargetTime" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:checked="true" android:text="목표 주행시간" android:textColor="@color/text_primary" />
-                <RadioButton android:id="@+id/rbRoadTargetSpeed" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="목표 평속" android:textColor="@color/text_primary" />
+            <RadioGroup android:id="@+id/rgRoadPlanBasis" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="vertical">
+                <RadioButton android:id="@+id/rbRoadTargetTime" android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="목표 주행시간 기준" android:textColor="@color/text_primary" />
+                <RadioButton android:id="@+id/rbRoadTargetSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="목표 평속 기준" android:textColor="@color/text_primary" />
+                <RadioButton android:id="@+id/rbRoadCutoff" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="컷오프 기준 · 평속 자동 계산" android:textColor="@color/text_primary" />
             </RadioGroup>
 
             <LinearLayout android:id="@+id/llRoadTargetTimeInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
@@ -51,14 +52,19 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="6dp" android:text="km/h" android:textColor="@color/text_primary" />
             </LinearLayout>
 
-            <TextView android:id="@+id/tvRoadBasisPreview" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="코스를 선택하면 목표시간과 평속을 서로 환산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <LinearLayout android:id="@+id/llRoadCutoffInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="실제 컷오프가 있는 지점을 체크하고 마감 시각을 지정하세요. 보급/CP/컷오프 POI와 FINISH를 후보로 보여줍니다. 가장 빡빡한 컷오프를 기준으로 필요한 최소 주행평속을 자동 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+                <LinearLayout android:id="@+id/llRoadCutoffStations" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="vertical" />
+            </LinearLayout>
+
+            <TextView android:id="@+id/tvRoadBasisPreview" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="코스를 선택하면 목표시간·평속을 환산하고 컷오프 기준 페이스도 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="보급소 선택 · 정차시간" android:textColor="@color/text_primary" android:textStyle="bold" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="실제로 들를 보급소만 체크하세요. 각 보급시간은 1분 단위로 선택하며 목표 주행시간에 별도로 더합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
             <LinearLayout android:id="@+id/llRoadAidStations" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="vertical" />
 
-            <Button android:id="@+id/btnRoadBuildPlan" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="9dp" android:text="🎯 목표 페이스 일정 만들기" android:textStyle="bold" />
-            <TextView android:id="@+id/tvRoadPlan" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:background="@color/panel2" android:padding="10dp" android:text="목표 주행시간 또는 평속과 보급소 정차시간을 설정해 주세요." android:textColor="@color/text_primary" android:textSize="14sp" />
+            <Button android:id="@+id/btnRoadBuildPlan" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="9dp" android:text="🎯 목표 페이스 일정 만들기 · 컷오프 지원" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRoadPlan" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:background="@color/panel2" android:padding="10dp" android:text="목표시간/평속 또는 컷오프 기준과 보급소 정차시간을 설정해 주세요." android:textColor="@color/text_primary" android:textSize="14sp" />
             <TextView android:id="@+id/tvRoadSchedule" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:textColor="@color/text_secondary" android:textSize="12sp" />
             <Button android:id="@+id/btnRoadSavePdf" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="📄 계획표 PDF 저장 · 고도그래프 포함" android:textStyle="bold" />
             <Button android:id="@+id/btnRoadSimulator" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:text="🎬 참가자 목표시간 · 평속 시뮬레이션" android:textStyle="bold" />

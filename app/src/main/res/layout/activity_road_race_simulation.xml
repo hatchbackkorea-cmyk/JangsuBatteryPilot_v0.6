@@ -18,7 +18,7 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="10dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="참가자 · 최대 20명" android:textColor="@color/orange" android:textStyle="bold" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="나는 ROAD 계획의 목표시간/평속과 보급 설정이 자동 입력됩니다. 다른 참가자도 목표시간 또는 목표평속을 고르고 보급소·정차시간을 사람별로 따로 설정합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="나는 ROAD 계획의 목표시간/평속 또는 컷오프에서 자동 계산된 평속과 보급 설정이 자동 입력됩니다. 다른 참가자도 목표시간 또는 목표평속을 고르고 보급소·정차시간을 사람별로 따로 설정합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
             <TextView android:id="@+id/tvSimRiders" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="@color/text_primary" android:textSize="16sp" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
                 <Button android:id="@+id/btnSimAddRider" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="+ 참가자" />

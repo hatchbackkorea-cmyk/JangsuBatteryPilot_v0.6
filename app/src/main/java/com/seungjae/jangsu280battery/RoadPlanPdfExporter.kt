@@ -77,7 +77,13 @@ object RoadPlanPdfExporter {
         text("거리 ${one(course.totalKm)} km  ·  획득고도 ${course.totalAscentM.toInt()} m  ·  하강 ${course.totalDescentM.toInt()} m", 10.5f)
         text("계획 기준: $basisLabel", 10.5f)
         text("출발 ${clock(startMinuteOfDay, 0.0)}  ·  순수 주행 ${duration(plan.ridingTargetSec)}  ·  보급 ${duration(plan.totalStopSec)}  ·  계획 완주 ${clock(startMinuteOfDay, plan.totalSec)}", 11.5f, true, 9f)
-        text("주행 평속 ${one(course.totalKm / (plan.ridingTargetSec / 3600.0))} km/h  ·  정차 포함 전체평균 ${one(course.totalKm / (plan.totalSec / 3600.0))} km/h", 10.5f, false, 10f)
+        text("주행 평속 ${one(course.totalKm / (plan.ridingTargetSec / 3600.0))} km/h  ·  정차 포함 전체평균 ${one(course.totalKm / (plan.totalSec / 3600.0))} km/h", 10.5f, false, 6f)
+        if (plan.cutoffs.isNotEmpty()) {
+            val controlling = plan.cutoffs.minByOrNull { it.marginSec }
+            text("컷오프 ${plan.cutoffs.size}곳  ·  자동 계산 기준 ${controlling?.name ?: "-"} ${controlling?.let { one(it.km) } ?: "-"} km", 10.5f, true, 10f)
+        } else {
+            y += 4f
+        }
 
         drawElevation(canvas!!, course, MARGIN, y, PAGE_W - MARGIN, y + 155f, line, paint, plan)
         y += 173f
@@ -116,6 +122,16 @@ object RoadPlanPdfExporter {
             text("선택한 보급소", 13f, true, 4f)
             plan.aidStops.forEach { aid ->
                 text("${one(aid.km)} km  ${aid.name}  ·  ${clock(startMinuteOfDay, aid.arrivalElapsedSec)} 도착 → ${clock(startMinuteOfDay, aid.departureElapsedSec)} 출발  (${duration(aid.stopSec)} 정차)", 9.5f, false, 2f)
+            }
+        }
+
+        if (plan.cutoffs.isNotEmpty()) {
+            if (y > PAGE_H - 170f) newPage()
+            y += 7f
+            text("컷오프 기준", 13f, true, 4f)
+            plan.cutoffs.forEach { cutoff ->
+                val margin = if (cutoff.marginSec >= 0.0) "+${duration(cutoff.marginSec)}" else "-${duration(-cutoff.marginSec)}"
+                text("${one(cutoff.km)} km  ${cutoff.name}  ·  계획 ${clock(startMinuteOfDay, cutoff.plannedArrivalElapsedSec)} / 컷오프 ${clock(startMinuteOfDay, cutoff.deadlineElapsedSec)}  ·  여유 $margin", 9.5f, false, 2f)
             }
         }
 
@@ -163,6 +179,13 @@ object RoadPlanPdfExporter {
             val x = left + 8f + (aid.km / max(0.001, course.totalKm) * (right - left - 16f)).toFloat()
             val yy = bottom - 21f - ((p.ele - minEle) / span * (bottom - top - 42f)).toFloat()
             canvas.drawCircle(x, yy, 3.8f, marker)
+        }
+        val cutoffMarker = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(190, 55, 55); style = Paint.Style.FILL }
+        plan.cutoffs.forEach { cutoff ->
+            val p = course.pointAtKm(cutoff.km)
+            val x = left + 8f + (cutoff.km / max(0.001, course.totalKm) * (right - left - 16f)).toFloat()
+            val yy = bottom - 21f - ((p.ele - minEle) / span * (bottom - top - 42f)).toFloat()
+            canvas.drawCircle(x, yy, 4.5f, cutoffMarker)
         }
 
         textPaint.color = Color.DKGRAY
