@@ -40,6 +40,16 @@ class AvinoxBleSocClient(
         fun onBleState(state: String, address: String? = null)
         fun onSoc(soc: Int, timestampMs: Long, address: String?)
         fun onRawNotification(timestampMs: Long, bytes: ByteArray, address: String?)
+        fun onGattRead(
+            timestampMs: Long,
+            serviceUuid: UUID,
+            characteristicUuid: UUID,
+            properties: Int,
+            status: Int,
+            bytes: ByteArray,
+            address: String?
+        ) {}
+        fun onGattSweepFinished(timestampMs: Long, attempted: Int, succeeded: Int, address: String?) {}
     }
 
     companion object {
@@ -63,6 +73,10 @@ class AvinoxBleSocClient(
     private var pendingSoc: Int? = null
     private var pendingCount = 0
     private var lastDeliveredSoc: Int? = null
+    private val gattReadQueue = java.util.ArrayDeque<BluetoothGattCharacteristic>()
+    private var gattReadAttempted = 0
+    private var gattReadSucceeded = 0
+    private var gattReadSweepActive = false
 
     private val scanTimeout = Runnable {
         if (scanning) {
@@ -94,6 +108,10 @@ class AvinoxBleSocClient(
         lastDeliveredSoc = null
         pendingSoc = null
         pendingCount = 0
+        gattReadQueue.clear()
+        gattReadAttempted = 0
+        gattReadSucceeded = 0
+        gattReadSweepActive = false
         if (!hasPermissions()) {
             dispatchState("BLE 권한 필요")
             return
@@ -134,11 +152,74 @@ class AvinoxBleSocClient(
         connectedAddress = null
         pendingSoc = null
         pendingCount = 0
+        gattReadQueue.clear()
+        gattReadSweepActive = false
         dispatchState("BLE 대기")
     }
 
     private fun adapter(): BluetoothAdapter? =
         (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+
+    /**
+     * v0.30.0 battery forensics: read every currently discovered readable GATT
+     * characteristic once. This is strictly read-only and never writes a characteristic.
+     * The normal CCCD notification subscription is the only BLE write used by this client.
+     */
+    @Suppress("MissingPermission", "DEPRECATION")
+    fun requestGattReadSweep(): Boolean {
+        if (!started || !hasConnectPermission()) return false
+        val currentGatt = gatt ?: return false
+        if (gattReadSweepActive) return false
+        val readable = currentGatt.services.flatMap { service ->
+            service.characteristics.filter { ch ->
+                ch.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
+            }
+        }
+        if (readable.isEmpty()) {
+            listener.onGattSweepFinished(System.currentTimeMillis(), 0, 0, connectedAddress)
+            return false
+        }
+        gattReadQueue.clear()
+        readable.forEach { gattReadQueue.addLast(it) }
+        gattReadAttempted = 0
+        gattReadSucceeded = 0
+        gattReadSweepActive = true
+        main.post { readNextGattCharacteristic(currentGatt) }
+        return true
+    }
+
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun readNextGattCharacteristic(currentGatt: BluetoothGatt) {
+        if (!started || gatt !== currentGatt || !hasConnectPermission()) {
+            finishGattReadSweep()
+            return
+        }
+        val ch = gattReadQueue.pollFirst() ?: run {
+            finishGattReadSweep()
+            return
+        }
+        gattReadAttempted += 1
+        val ok = runCatching { currentGatt.readCharacteristic(ch) }.getOrDefault(false)
+        if (!ok) {
+            listener.onGattRead(
+                System.currentTimeMillis(),
+                ch.service?.uuid ?: UUID(0L, 0L),
+                ch.uuid,
+                ch.properties,
+                -1,
+                byteArrayOf(),
+                connectedAddress
+            )
+            main.post { readNextGattCharacteristic(currentGatt) }
+        }
+    }
+
+    private fun finishGattReadSweep() {
+        if (!gattReadSweepActive) return
+        gattReadSweepActive = false
+        gattReadQueue.clear()
+        listener.onGattSweepFinished(System.currentTimeMillis(), gattReadAttempted, gattReadSucceeded, connectedAddress)
+    }
 
     private fun hasPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -275,6 +356,15 @@ class AvinoxBleSocClient(
             processNotification(characteristic, value)
         }
 
+        @Deprecated("Deprecated callback before API 33")
+        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            handleGattRead(g, characteristic, characteristic.value ?: byteArrayOf(), status)
+        }
+
+        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            handleGattRead(g, characteristic, value, status)
+        }
+
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (descriptor.characteristic.uuid == FFF4) {
                 main.post {
@@ -283,6 +373,21 @@ class AvinoxBleSocClient(
                 }
             }
         }
+    }
+
+    private fun handleGattRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, bytes: ByteArray, status: Int) {
+        if (!gattReadSweepActive) return
+        if (status == BluetoothGatt.GATT_SUCCESS) gattReadSucceeded += 1
+        listener.onGattRead(
+            System.currentTimeMillis(),
+            characteristic.service?.uuid ?: UUID(0L, 0L),
+            characteristic.uuid,
+            characteristic.properties,
+            status,
+            bytes.copyOf(),
+            connectedAddress
+        )
+        main.post { readNextGattCharacteristic(g) }
     }
 
     private fun findSocCharacteristic(services: List<BluetoothGattService>): BluetoothGattCharacteristic? =

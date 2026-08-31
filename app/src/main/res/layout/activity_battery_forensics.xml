@@ -60,6 +60,7 @@
             android:padding="12dp">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="상태별 캡처 세션" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
             <TextView android:id="@+id/tvBatteryProbeSession" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="테스트 세션 없음" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <TextView android:id="@+id/tvBatteryCaptureStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="상태 버튼을 누르면 직전 8초 + 이후 20초의 FFF4 전체 패킷과 GATT READ를 함께 수집합니다." android:textColor="@color/warn" android:textSize="11sp" android:textStyle="bold" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:orientation="horizontal">
                 <Button android:id="@+id/btnBatteryProbeStartSession" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="시작 / 이어하기" android:textStyle="bold" />
                 <Button android:id="@+id/btnBatteryProbeEndSession" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:layout_marginStart="6dp" android:text="세션 종료" />
@@ -81,7 +82,7 @@
                 <Button android:id="@+id/btnBatteryCaptureLeftSwitch" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="왼쪽 스위치" />
                 <Button android:id="@+id/btnBatteryCaptureRightSwitch" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:layout_marginStart="4dp" android:text="오른쪽 스위치" />
             </LinearLayout>
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="각 버튼은 그 순간의 SOC, BLE 상태, FFF4 RAW, 충전상태와 기존 원본 분석 요약을 저장합니다. 오늘 일부만 하고 며칠 뒤 이어도 됩니다." android:textColor="@color/text_secondary" android:textSize="10sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="v0.30.0부터 순간 1패킷이 아니라 직전 8초 링버퍼 + 버튼 이후 20초의 모든 FFF4 패킷을 길이별 그대로 저장합니다. 동시에 읽을 수 있는 GATT 특성도 1회 READ 스윕합니다. 빠르게 충전되어 SOC가 올라가도 시작/종료 SOC가 함께 기록됩니다." android:textColor="@color/text_secondary" android:textSize="10sp" />
         </LinearLayout>
 
         <LinearLayout

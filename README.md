@@ -1,3 +1,10 @@
+## v0.30.2 ROAD 그란폰도 시뮬레이터
+- ROAD 대회 GPX를 기준으로 최대 20명의 참가자를 동시에 예상 재생합니다.
+- 참가자별 최근 ROAD FIT 여러 개 또는 1/5/20/60분 파워를 별도 프로필로 사용합니다.
+- 30배속/60배속, 참가자 전체 코스/고도 위치, 현재 예상순위, 보급소 PASS/휴식, 포인트별 통과 예상순위를 제공합니다.
+- 시뮬레이션 종료 후 완주 예상순위와 거리-시간/포인트별 순위변화 그래프를 표시합니다.
+- 입력자료: `GRANFONDO_SIMULATION_INPUT_v0.30.2_KO.md`
+
 # GPX Battery Copilot v0.29.7
 ## v0.29.7 Release Kotlin 빌드 수정
 - `MainActivity.renderRideRouteVisual()`의 지도 미리보기 호출이 `TextView.text`의 `if` 표현식 안에 들어가 `Any`로 추론되던 컴파일 오류를 수정했습니다.

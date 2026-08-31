@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <Button android:id="@+id/btnRoadBackMode" android:layout_width="wrap_content" android:layout_height="42dp" android:text="← 모드" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="🚴 ROAD 그란폰도 코치" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1. 코스" android:textColor="@color/accent" android:textStyle="bold" />
+            <Button android:id="@+id/btnRoadImportGpx" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="6dp" android:text="GPX 코스 선택" />
+            <TextView android:id="@+id/tvRoadCourse" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="로드 코스 없음" android:textColor="@color/text_primary" android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. 내 라이딩 능력" android:textColor="@color/accent" android:textStyle="bold" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnRoadImportFit" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="기존 FIT 추가" />
+                <Button android:id="@+id/btnRoadPower" android:layout_width="0dp" android:layout_height="46dp" android:layout_marginStart="5dp" android:layout_weight="1" android:text="시간별 파워" />
+            </LinearLayout>
+            <TextView android:id="@+id/tvRoadProfile" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="학습 FIT 0개" android:textColor="@color/text_primary" android:textSize="13sp" />
+            <Button android:id="@+id/btnRoadClearFits" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end" android:text="FIT 학습 초기화" android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3. 완주 계획" android:textColor="@color/accent" android:textStyle="bold" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="목표시간 " android:textColor="@color/text_secondary" />
+                <EditText android:id="@+id/etRoadTargetTime" android:layout_width="90dp" android:layout_height="46dp" android:gravity="center" android:hint="06:30" android:inputType="text" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <Button android:id="@+id/btnRoadBuildPlan" android:layout_width="0dp" android:layout_height="46dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="계획 만들기" />
+            </LinearLayout>
+            <TextView android:id="@+id/tvRoadPlan" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="GPX와 목표시간을 넣으면 통과 계획을 계산합니다." android:textColor="@color/text_primary" android:textSize="13sp" />
+            <TextView android:id="@+id/tvRoadSchedule" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Button android:id="@+id/btnRoadSimulator" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="🎬 참가자 그란폰도 시뮬레이션" android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel2" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4. 실시간 코칭" android:textColor="@color/good" android:textStyle="bold" />
+            <Button android:id="@+id/btnRoadRideToggle" android:layout_width="match_parent" android:layout_height="54dp" android:layout_marginTop="6dp" android:text="▶ 주행 시작" android:textSize="17sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRoadLive" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="주행 대기" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="18dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="5. 그룹 라이딩 · 베타" android:textColor="@color/orange" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="같은 GPX를 쓰는 팀원이 인터넷으로 위치를 공유하면 코스 진행거리 기준으로 앞/뒤를 표시합니다. 방 최대 20명 · 별도 그룹 릴레이 서버가 필요합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <EditText android:id="@+id/etRoadGroupRelay" android:layout_width="match_parent" android:layout_height="44dp" android:hint="릴레이 URL 예: https://..." android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <Button android:id="@+id/btnRoadGroupMakeRoom" android:layout_width="match_parent" android:layout_height="42dp" android:text="6자리 방 코드 만들기" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <EditText android:id="@+id/etRoadGroupRoom" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:hint="방 코드" android:inputType="text" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <EditText android:id="@+id/etRoadGroupNick" android:layout_width="0dp" android:layout_height="44dp" android:layout_marginStart="5dp" android:layout_weight="1" android:hint="닉네임" android:inputType="textPersonName" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            </LinearLayout>
+            <Button android:id="@+id/btnRoadGroupToggle" android:layout_width="match_parent" android:layout_height="46dp" android:text="그룹 연결" />
+            <TextView android:id="@+id/tvRoadGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="그룹 미연결" android:textColor="@color/text_primary" android:textSize="13sp" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

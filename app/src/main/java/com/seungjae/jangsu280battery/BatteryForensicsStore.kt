@@ -59,6 +59,19 @@ class BatteryForensicsStore(context: Context) {
         val labels: List<String>
     )
 
+    data class RawPacket(
+        val timestampMs: Long,
+        val bytes: ByteArray,
+        val address: String? = null
+    )
+
+    data class CaptureWindow(
+        val sessionId: String,
+        val captureId: String,
+        val label: String,
+        val startedMs: Long
+    )
+
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val root = File(app.filesDir, "battery_forensics").apply { mkdirs() }
@@ -162,7 +175,8 @@ class BatteryForensicsStore(context: Context) {
         val labels = LinkedHashSet<String>()
         if (file.exists()) file.forEachLine { line ->
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
-            if (o.optString("type") == "SNAPSHOT") {
+            val type = o.optString("type")
+            if (type == "SNAPSHOT" || type == "CAPTURE_WINDOW_END") {
                 snapshots += 1
                 o.optString("label").takeIf { it.isNotBlank() }?.let(labels::add)
             }
@@ -199,6 +213,91 @@ class BatteryForensicsStore(context: Context) {
         return status()
     }
 
+    fun beginCaptureWindow(label: String, prePackets: List<RawPacket>): CaptureWindow? {
+        val session = startOrResumeSession()
+        val sessionId = session.id ?: return null
+        val now = System.currentTimeMillis()
+        val safeLabel = label.replace(Regex("[^0-9A-Za-z가-힣_-]"), "_").take(28).ifBlank { "capture" }
+        val captureId = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date(now)) + "_" + safeLabel
+        val ble = AvinoxBleStateStore(app).snapshot()
+        val charge = ChargingSessionStore(app).active()
+        appendEvent(sessionId, JSONObject()
+            .put("type", "CAPTURE_WINDOW_START")
+            .put("captureId", captureId)
+            .put("timestampMs", now)
+            .put("label", label)
+            .put("socStart", ble.soc ?: JSONObject.NULL)
+            .put("bleState", ble.state)
+            .put("bleAddress", ble.address ?: JSONObject.NULL)
+            .put("chargeActiveStart", charge != null)
+            .put("chargeArrivalPct", charge?.arrivalPct ?: JSONObject.NULL)
+            .put("chargeTargetPct", charge?.targetPct ?: JSONObject.NULL)
+            .put("prePacketCount", prePackets.size))
+        prePackets.sortedBy { it.timestampMs }.forEach { appendRawPacket(sessionId, captureId, "PRE", it) }
+        return CaptureWindow(sessionId, captureId, label, now)
+    }
+
+    fun appendCaptureRaw(window: CaptureWindow, phase: String, timestampMs: Long, bytes: ByteArray, address: String?) {
+        appendRawPacket(window.sessionId, window.captureId, phase, RawPacket(timestampMs, bytes.copyOf(), address))
+    }
+
+    fun appendCaptureGattRead(
+        window: CaptureWindow,
+        timestampMs: Long,
+        serviceUuid: String,
+        characteristicUuid: String,
+        properties: Int,
+        status: Int,
+        bytes: ByteArray,
+        address: String?
+    ) {
+        val obj = JSONObject()
+            .put("timestampMs", timestampMs)
+            .put("serviceUuid", serviceUuid)
+            .put("characteristicUuid", characteristicUuid)
+            .put("properties", properties)
+            .put("status", status)
+            .put("length", bytes.size)
+            .put("hex", bytes.toHex())
+            .put("address", address ?: JSONObject.NULL)
+        appendJsonLine(gattFile(window.sessionId, window.captureId), obj)
+    }
+
+    fun finishCaptureWindow(
+        window: CaptureWindow,
+        rawPacketCount: Int,
+        packetLengthCounts: Map<Int, Int>,
+        gattAttempted: Int,
+        gattSucceeded: Int,
+        note: String = ""
+    ): SessionStatus {
+        val now = System.currentTimeMillis()
+        val ble = AvinoxBleStateStore(app).snapshot()
+        val charge = ChargingSessionStore(app).active()
+        val actual = BatteryActualStore(app).latest()
+        val lengths = JSONObject()
+        packetLengthCounts.toSortedMap().forEach { (length, count) -> lengths.put(length.toString(), count) }
+        appendEvent(window.sessionId, JSONObject()
+            .put("type", "CAPTURE_WINDOW_END")
+            .put("captureId", window.captureId)
+            .put("timestampMs", now)
+            .put("startedMs", window.startedMs)
+            .put("durationMs", (now - window.startedMs).coerceAtLeast(0L))
+            .put("label", window.label)
+            .put("note", note)
+            .put("socEnd", ble.soc ?: JSONObject.NULL)
+            .put("bleState", ble.state)
+            .put("bleAddress", ble.address ?: JSONObject.NULL)
+            .put("actualSoc", actual?.percent ?: JSONObject.NULL)
+            .put("actualRouteKm", actual?.routeKm ?: JSONObject.NULL)
+            .put("chargeActiveEnd", charge != null)
+            .put("rawPacketCount", rawPacketCount)
+            .put("packetLengthCounts", lengths)
+            .put("gattAttempted", gattAttempted)
+            .put("gattSucceeded", gattSucceeded))
+        return status()
+    }
+
     fun exportCurrentOrLatest(): File? {
         val id = prefs.getString(KEY_OPEN_SESSION, null) ?: latestSessionId() ?: return null
         val dir = sessionDir(id)
@@ -223,12 +322,35 @@ class BatteryForensicsStore(context: Context) {
     private fun sessionDir(id: String) = File(root, "session_$id")
     private fun eventFile(id: String) = File(sessionDir(id), "snapshots.jsonl")
 
+    @Synchronized
     private fun appendEvent(id: String, obj: JSONObject) {
         val dir = sessionDir(id).apply { mkdirs() }
         val f = File(dir, "snapshots.jsonl")
         f.appendText(obj.toString() + "\n")
         dir.setLastModified(System.currentTimeMillis())
     }
+
+    private fun rawFile(sessionId: String, captureId: String) = File(sessionDir(sessionId), "capture_${captureId}_fff4.jsonl")
+    private fun gattFile(sessionId: String, captureId: String) = File(sessionDir(sessionId), "capture_${captureId}_gatt.jsonl")
+
+    private fun appendRawPacket(sessionId: String, captureId: String, phase: String, packet: RawPacket) {
+        val obj = JSONObject()
+            .put("timestampMs", packet.timestampMs)
+            .put("phase", phase)
+            .put("length", packet.bytes.size)
+            .put("hex", packet.bytes.toHex())
+            .put("address", packet.address ?: JSONObject.NULL)
+        appendJsonLine(rawFile(sessionId, captureId), obj)
+    }
+
+    @Synchronized
+    private fun appendJsonLine(file: File, obj: JSONObject) {
+        file.parentFile?.mkdirs()
+        file.appendText(obj.toString() + "\n")
+        file.parentFile?.setLastModified(System.currentTimeMillis())
+    }
+
+    private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
 
     private fun writeHistorySummary(id: String, s: HistorySummary) {
         val o = JSONObject()
