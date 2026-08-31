@@ -144,6 +144,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildTargetPlan(showToast = true) }
         findViewById<Button>(R.id.btnRoadSavePdf).setOnClickListener { savePlanPdf() }
         findViewById<Button>(R.id.btnRoadSimulator).setOnClickListener {
+            // 시뮬레이터의 기본 참가자(나)가 현재 화면의 목표/보급 선택을 그대로 가져가도록 저장한다.
+            savePlanInputPrefs()
+            selectedAids()
+            prefs.edit().putString(KEY_NICK, etNick.text.toString().trim().ifBlank { "나" }).apply()
             startActivity(Intent(this, RoadRaceSimulationActivity::class.java))
         }
         btnRide.setOnClickListener { if (riding) stopRide() else startRide() }

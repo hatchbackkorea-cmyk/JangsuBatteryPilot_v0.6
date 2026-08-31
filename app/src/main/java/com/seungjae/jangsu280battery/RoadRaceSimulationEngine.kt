@@ -2,12 +2,13 @@ package com.seungjae.jangsu280battery
 
 import kotlin.math.max
 
-/** 목표 주행시간 + 별도 보급정차 기반 ROAD 그란폰도 사전 시뮬레이션. */
+/** 목표 주행시간 + 참가자별 개별 보급정차 기반 ROAD 그란폰도 사전 시뮬레이션. */
 data class SimulationRiderConfig(
     val nickname: String,
     val targetSec: Double,
     val startOffsetSec: Double = 0.0,
-    val defaultAidStopSec: Double = 0.0
+    val aidSelections: List<RoadAidSelection> = emptyList(),
+    val isSelf: Boolean = false
 )
 
 data class SimulationAidStop(
@@ -54,10 +55,10 @@ data class SimulationCheckpointStanding(
 
 object RoadRaceSimulationEngine {
     fun buildRiderPlan(course: CourseData, config: SimulationRiderConfig): SimulationRiderPlan {
-        val aidSelections = if (config.defaultAidStopSec > 0.0) {
-            aidStations(course).map { RoadAidSelection(it.name.ifBlank { "보급소" }, it.routeKm, config.defaultAidStopSec) }
-        } else emptyList()
-        val motion = RoadGranfondoEngine.buildTargetPlan(course, config.targetSec, aidSelections)
+        val validAids = config.aidSelections
+            .filter { it.stopSec > 0.0 && it.km in 0.05..(course.totalKm - 0.05) }
+            .sortedBy { it.km }
+        val motion = RoadGranfondoEngine.buildTargetPlan(course, config.targetSec, validAids)
         val aidStops = motion.aidStops.map {
             SimulationAidStop(
                 it.name,
