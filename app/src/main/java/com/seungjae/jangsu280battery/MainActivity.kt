@@ -189,6 +189,10 @@ class MainActivity : Activity() {
     private lateinit var btnLearningClear: Button
     private lateinit var btnPageMobileRelease: Button
     private lateinit var tvPageMobileReleaseStatus: TextView
+    private lateinit var tvBatteryCenterSummary: TextView
+    private lateinit var tvBatteryCenterSession: TextView
+    private lateinit var btnBatteryCenterRefresh: Button
+    private lateinit var btnBatteryCenterForensics: Button
     private lateinit var pagerFlipper: ViewFlipper
     private lateinit var tvPagerIndicator: TextView
     private lateinit var pagerGesture: GestureDetector
@@ -353,6 +357,7 @@ class MainActivity : Activity() {
         setupInlineSettings()
         setupLearningPage()
         setupMobileReleasePage()
+        setupBatteryCenterPage()
         setupSwipePager()
         touchLocked = touchLockPrefs.getBoolean("locked", false)
         updatePagerIndicator()
@@ -506,6 +511,10 @@ class MainActivity : Activity() {
         btnLearningClear = findViewById(R.id.btnLearningClear)
         btnPageMobileRelease = findViewById(R.id.btnPageMobileRelease)
         tvPageMobileReleaseStatus = findViewById(R.id.tvPageMobileReleaseStatus)
+        tvBatteryCenterSummary = findViewById(R.id.tvBatteryCenterSummary)
+        tvBatteryCenterSession = findViewById(R.id.tvBatteryCenterSession)
+        btnBatteryCenterRefresh = findViewById(R.id.btnBatteryCenterRefresh)
+        btnBatteryCenterForensics = findViewById(R.id.btnBatteryCenterForensics)
         pagerFlipper = findViewById(R.id.pagerFlipper)
         tvPagerIndicator = findViewById(R.id.tvPagerIndicator)
     }
@@ -1638,8 +1647,8 @@ class MainActivity : Activity() {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 다음충전 ${RideFormatter.one(nextCharge.km)} · ${RideFormatter.one(remain)}km 남음"
         } else {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 종점 ${RideFormatter.one(course.totalKm)} · ${RideFormatter.one(remain)}km 남음"
-            updateRideMapPreview(km, simulated)
-    }
+        }
+        updateRideMapPreview(km, simulated)
     }
 
     /** v0.27.4: skipped stations are not segment boundaries on the live mini profile. */
@@ -2419,6 +2428,43 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun setupBatteryCenterPage() {
+        btnBatteryCenterForensics.setOnClickListener { startActivity(Intent(this, BatteryForensicsActivity::class.java)) }
+        btnBatteryCenterRefresh.setOnClickListener { refreshBatteryCenterPage(full = true) }
+        refreshBatteryCenterPage(full = true)
+    }
+
+    private fun refreshBatteryCenterPage(full: Boolean) {
+        val store = BatteryForensicsStore(this)
+        val ble = AvinoxBleStateStore(this).snapshot()
+        val session = store.status()
+        tvBatteryCenterSession.text = if (session.open) {
+            "열린 테스트 ${session.id} · 상태 저장 ${session.snapshots}회\n${if (session.labels.isEmpty()) "아직 캡처 없음" else session.labels.joinToString(" · ")}"
+        } else {
+            "열린 테스트 없음${store.latestSessionId()?.let { " · 최근 $it" }.orEmpty()}\n정밀 분석에서 시간 날 때 나눠서 테스트할 수 있습니다."
+        }
+        if (!full) {
+            val first = tvBatteryCenterSummary.text.toString().lineSequence().drop(1).joinToString("\n")
+            tvBatteryCenterSummary.text = "실시간 SOC ${ble.soc?.let { "$it%" } ?: "—"} · ${ble.state}" + if (first.isNotBlank()) "\n$first" else ""
+            return
+        }
+        tvBatteryCenterSummary.text = "실시간 SOC ${ble.soc?.let { "$it%" } ?: "—"} · ${ble.state}\n기존 Avinox 원본 분석 중…"
+        Thread {
+            val h = store.analyzeExistingProto()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val latestBle = AvinoxBleStateStore(this).snapshot()
+                tvBatteryCenterSummary.text = buildString {
+                    append("실시간 SOC ${latestBle.soc?.let { "$it%" } ?: "—"} · ${latestBle.state}")
+                    append("\nAvinox 원본 ${h.protoFiles}개 · 분석 ${h.parsedFiles}개 · 샘플 ${h.samples}")
+                    append("\n관측 소비 ${String.format(java.util.Locale.US, "%.1f", h.consumedPct)}% · 충전 ${String.format(java.util.Locale.US, "%.1f", h.chargedPct)}%")
+                    append("\n관측 방전 환산 ${String.format(java.util.Locale.US, "%.2f", h.observedEquivalentCycles)}회 · 온도 ${h.minTempC?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—"}~${h.maxTempC?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—"}℃")
+                    append("\n※ 환산 횟수는 BMS 실제 cycle count가 아니라 저장된 주행 SOC 하락 합계입니다.")
+                }
+            }
+        }.start()
+    }
+
     private fun setupSwipePager() {
         pagerFlipper.displayedChild = 0
         updatePagerIndicator()
@@ -2429,7 +2475,7 @@ class MainActivity : Activity() {
                 val dx = e2.x - start.x
                 val dy = e2.y - start.y
                 if (abs(dx) < 90f || abs(dx) < abs(dy) * 1.25f || abs(velocityX) < 250f) return false
-                if (dx < 0) showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
+                if (dx < 0) showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(6))
                 else showPagerChild((pagerFlipper.displayedChild - 1).coerceAtLeast(0))
                 return true
             }
@@ -2470,7 +2516,7 @@ class MainActivity : Activity() {
                         volumeUpLongHandled = false
                         if (!wasLong) {
                             if (touchLocked) {
-                                showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(5))
+                                showPagerChild((pagerFlipper.displayedChild + 1).coerceAtMost(6))
                                 vibrateRideWarning(45L, 85)
                             } else {
                                 adjustMediaVolume(AudioManager.ADJUST_RAISE)
@@ -2523,15 +2569,15 @@ class MainActivity : Activity() {
     }
 
     private fun showPagerChild(index: Int) {
-        val target = index.coerceIn(0, 5)
+        val target = index.coerceIn(0, 6)
         if (target == pagerFlipper.displayedChild) return
         pagerFlipper.displayedChild = target
         updatePagerIndicator()
     }
 
     private fun updatePagerIndicator() {
-        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배포")
-        val dots = (0..5).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
+        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배포", "배터리")
+        val dots = (0..6).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
         tvPagerIndicator.text = if (touchLocked) {
             "🔒 터치잠금   $dots   ${labels[pagerFlipper.displayedChild]}"
         } else {
@@ -4106,6 +4152,7 @@ class MainActivity : Activity() {
         refreshRidePositionControls()
         refreshInlineSettings()
         refreshLearningPage()
+        if (::tvBatteryCenterSummary.isInitialized) refreshBatteryCenterPage(full = false)
         renderCurrentMode()
         if (!logManager.isActive()) runAutomaticLearningImportInBackground()
     }

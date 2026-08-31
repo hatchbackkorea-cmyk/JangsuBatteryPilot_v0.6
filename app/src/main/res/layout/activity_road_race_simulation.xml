@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnSimBack"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="← ROAD" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="🎬 그란폰도 레이스 시뮬레이터"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="대회 코스"
+                android:textColor="@color/accent"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvSimCourse"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="참가자 · 최대 20명"
+                android:textColor="@color/orange"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvSimRiders"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnSimAddRider"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:text="+ 참가자 FIT" />
+                <Button
+                    android:id="@+id/btnSimAddPowerRider"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_marginStart="5dp"
+                    android:layout_weight="1"
+                    android:text="+ 파워만" />
+                <Button
+                    android:id="@+id/btnSimClearRiders"
+                    android:layout_width="wrap_content"
+                    android:layout_height="46dp"
+                    android:layout_marginStart="5dp"
+                    android:text="초기화" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel2"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <TextView
+                    android:id="@+id/tvSimClock"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="대회 경과 0:00 · 자동 배속"
+                    android:textColor="@color/text_primary"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+            <com.seungjae.jangsu280battery.RoadRaceSimulationView
+                android:id="@+id/roadSimulationView"
+                android:layout_width="match_parent"
+                android:layout_height="390dp"
+                android:layout_marginTop="6dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnSimPlay"
+                    android:layout_width="0dp"
+                    android:layout_height="50dp"
+                    android:layout_weight="1"
+                    android:text="▶ 시뮬레이션 재생"
+                    android:textStyle="bold" />
+                <Button
+                    android:id="@+id/btnSimReset"
+                    android:layout_width="wrap_content"
+                    android:layout_height="50dp"
+                    android:layout_marginStart="5dp"
+                    android:text="↺ 처음" />
+            </LinearLayout>
+            <TextView
+                android:id="@+id/tvSimStandings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:fontFamily="monospace"
+                android:text="참가자 FIT을 추가하고 재생하세요."
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvSimSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@color/panel"
+            android:padding="12dp"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <com.seungjae.jangsu280battery.RoadSimulationSummaryView
+            android:id="@+id/roadSimulationSummaryView"
+            android:layout_width="match_parent"
+            android:layout_height="720dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="20dp"
+            android:visibility="gone" />
+    </LinearLayout>
+</ScrollView>

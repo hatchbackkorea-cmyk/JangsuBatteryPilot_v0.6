@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/tvBikeModeVersion"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Ride Copilot"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="오늘 어떤 자전거로 탈까요?"
+        android:textColor="@color/text_primary"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnBikeModeEmtb"
+        android:layout_width="match_parent"
+        android:layout_height="92dp"
+        android:layout_marginTop="30dp"
+        android:text="⚡ eMTB\n배터리 코파일럿"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnBikeModeRoad"
+        android:layout_width="match_parent"
+        android:layout_height="92dp"
+        android:layout_marginTop="14dp"
+        android:text="🚴 ROAD\n그란폰도 페이스 코치"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:gravity="center"
+        android:text="eMTB 데이터와 로드 페이스 데이터는 서로 섞지 않습니다."
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+</LinearLayout>

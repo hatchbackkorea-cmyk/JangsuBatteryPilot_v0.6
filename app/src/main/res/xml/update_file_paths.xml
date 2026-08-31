@@ -3,4 +3,5 @@
     <external-files-path name="updates" path="updates/" />
     <cache-path name="mobile_release_apk" path="release_apk/" />
     <files-path name="background_release_apk" path="release_apk/" />
+    <cache-path name="battery_forensics_exports" path="battery_forensics_exports/" />
 </paths>
