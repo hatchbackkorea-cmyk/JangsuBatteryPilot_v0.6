@@ -1647,8 +1647,8 @@ class MainActivity : Activity() {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 다음충전 ${RideFormatter.one(nextCharge.km)} · ${RideFormatter.one(remain)}km 남음"
         } else {
             "$prefix ${RideFormatter.one(km)}/${RideFormatter.one(course.totalKm)}km · 종점 ${RideFormatter.one(course.totalKm)} · ${RideFormatter.one(remain)}km 남음"
-            updateRideMapPreview(km, simulated)
-    }
+        }
+        updateRideMapPreview(km, simulated)
     }
 
     /** v0.27.4: skipped stations are not segment boundaries on the live mini profile. */

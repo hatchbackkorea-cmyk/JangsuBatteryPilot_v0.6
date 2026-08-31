@@ -1,3 +1,8 @@
+# v0.29.7 — Release Kotlin build fix
+- `MainActivity.kt`의 `tvRideRouteScale.text` 대입식에서 `updateRideMapPreview()`가 else 블록 마지막 식이 되어 `Any`가 추론되던 오류 수정.
+- 경로 텍스트 계산과 지도 미리보기 갱신을 분리.
+- v0.29.6 배터리 정밀분석/분할 세션 기능 유지.
+
 # v0.29.6 — 배터리 원본 재분석 + 분할 테스트 세션
 
 - 메인 7번째 `배터리` 페이지 추가. 실시간 Avinox SOC/BLE 상태와 기존 Shizuku Avinox 원본 요약을 한 화면에 표시.

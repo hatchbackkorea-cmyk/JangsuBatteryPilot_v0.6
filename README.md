@@ -1,4 +1,9 @@
-# GPX Battery Copilot v0.29.6
+# GPX Battery Copilot v0.29.7
+## v0.29.7 Release Kotlin 빌드 수정
+- `MainActivity.renderRideRouteVisual()`의 지도 미리보기 호출이 `TextView.text`의 `if` 표현식 안에 들어가 `Any`로 추론되던 컴파일 오류를 수정했습니다.
+- 지도 미리보기 갱신을 텍스트 대입 이후의 독립 호출로 분리했습니다.
+- v0.29.6 배터리 원본 재분석 / 분할 진단 기능은 그대로 유지합니다.
+
 ## v0.29.6 배터리 원본 재분석 / 분할 진단
 - 메인에 7번째 `배터리` 페이지를 추가했습니다.
 - 이미 Shizuku로 저장된 Avinox 원본 `.proto`를 다시 분석해 SOC 소비/충전 증가/온도/샘플/거리와 `관측 방전 환산`을 표시합니다.
