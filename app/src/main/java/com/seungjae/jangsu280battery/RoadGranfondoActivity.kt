@@ -69,6 +69,8 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private var groupEnabled = false
     private var lastGroupSyncMs = 0L
     private var groupSyncBusy = false
+    private var pendingStravaAnalysis = false
+    private var stravaAnalysisBusy = false
     private val riderId: String by lazy {
         prefs.getString(KEY_RIDER_ID, null) ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_RIDER_ID, it).apply() }
     }
@@ -101,14 +103,11 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
         findViewById<Button>(R.id.btnRoadBackMode).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
-        findViewById<Button>(R.id.btnRoadImportFit).setOnClickListener { pickFits() }
-        findViewById<Button>(R.id.btnRoadPower).setOnClickListener { showPowerDialog() }
+        findViewById<Button>(R.id.btnRoadStravaAnalyze).setOnClickListener { startStravaRoadAnalysis() }
+        findViewById<Button>(R.id.btnRoadFtp).setOnClickListener { showFtpDialog() }
         findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildPlan(showToast = true) }
         findViewById<Button>(R.id.btnRoadSimulator).setOnClickListener {
             startActivity(Intent(this, RoadRaceSimulationActivity::class.java))
-        }
-        findViewById<Button>(R.id.btnRoadClearFits).setOnClickListener {
-            profileStore.clearFits(); refreshProfile(); buildPlan(false)
         }
         btnRide.setOnClickListener { if (riding) stopRide() else startRide() }
         findViewById<Button>(R.id.btnRoadGroupMakeRoom).setOnClickListener {
@@ -127,6 +126,17 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     override fun onPause() {
         if (!riding) runCatching { locationManager.removeUpdates(this) }
         super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (pendingStravaAnalysis) {
+            val store = StravaSecureStore(this)
+            if (store.isConnected() && store.hasActivityRead()) {
+                pendingStravaAnalysis = false
+                runStravaRoadAnalysis()
+            }
+        }
     }
 
     private fun pickGpx() {
@@ -189,32 +199,75 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         }
     }
 
-    private fun showPowerDialog() {
-        val p = profileStore.load().power
-        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(42, 10, 42, 0) }
-        fun field(label: String, value: Double?): EditText {
-            val e = EditText(this).apply {
-                hint = "$label W"
-                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                setText(value?.toInt()?.toString() ?: "")
-            }
-            wrap.addView(e, LinearLayout.LayoutParams(-1, -2))
-            return e
+    private fun showFtpDialog() {
+        val oldFtp = profileStore.load().power.sixtyMinuteW
+        val input = EditText(this).apply {
+            hint = "FTP W · 예: 210"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(oldFtp?.toInt()?.toString() ?: "")
+            setPadding(42, 10, 42, 0)
         }
-        val e1 = field("1분 최고", p.oneMinuteW)
-        val e5 = field("5분 최고", p.fiveMinuteW)
-        val e20 = field("20분 최고", p.twentyMinuteW)
-        val e60 = field("60분/FTP 근처", p.sixtyMinuteW)
         AlertDialog.Builder(this)
-            .setTitle("시간별 라이더 파워")
-            .setMessage("모르는 항목은 비워도 됩니다. 60분 값이 있으면 장거리 지속 파워 기준으로 가장 우선합니다.")
-            .setView(wrap)
+            .setTitle("FTP 직접 입력")
+            .setMessage("Strava를 사용하지 않는 경우 FTP 하나만 입력합니다. 시뮬레이터는 FTP + GPX 경사로 기본 능력 프로필을 만듭니다.")
+            .setView(input)
             .setPositiveButton("저장") { _, _ ->
-                profileStore.savePower(RoadPowerProfile(e1.num(), e5.num(), e20.num(), e60.num()))
-                refreshProfile(); buildPlan(false)
+                val ftp = input.text.toString().trim().toDoubleOrNull()
+                if (ftp == null || ftp !in 50.0..700.0) {
+                    Toast.makeText(this, "FTP는 50~700W 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
+                } else {
+                    profileStore.saveFtpOnly(ftp)
+                    refreshProfile(); buildPlan(false)
+                    Toast.makeText(this, "FTP ${ftp.toInt()}W 저장", Toast.LENGTH_SHORT).show()
+                }
             }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    private fun startStravaRoadAnalysis() {
+        if (stravaAnalysisBusy) return
+        val store = StravaSecureStore(this)
+        if (!store.isConnected() || !store.hasActivityRead()) {
+            pendingStravaAnalysis = true
+            Toast.makeText(this, "Strava 연결 화면에서 ROAD 읽기 권한을 승인해 주세요. 승인 후 자동으로 분석을 시작합니다.", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, StravaActivity::class.java))
+            return
+        }
+        runStravaRoadAnalysis()
+    }
+
+    private fun runStravaRoadAnalysis() {
+        if (stravaAnalysisBusy) return
+        stravaAnalysisBusy = true
+        tvProfile.text = "Strava ROAD 기록 목록 불러오는 중…"
+        Thread {
+            val result = runCatching {
+                val store = StravaSecureStore(this)
+                val token = StravaClient.ensureAccessToken(store)
+                StravaRoadAnalyzer.analyze(token) { done, total, name ->
+                    runOnUiThread {
+                        if (stravaAnalysisBusy) tvProfile.text = "Strava ROAD 분석 $done/$total · $name"
+                    }
+                }
+            }
+            runOnUiThread {
+                stravaAnalysisBusy = false
+                result.onSuccess { analyzed ->
+                    profileStore.replaceWithStrava(analyzed)
+                    refreshProfile(); buildPlan(false)
+                    Toast.makeText(this, "Strava ROAD ${analyzed.activityCount}개 분석 완료", Toast.LENGTH_LONG).show()
+                }.onFailure { e ->
+                    refreshProfile()
+                    val message = e.message ?: e.javaClass.simpleName
+                    Toast.makeText(this, "Strava 분석 실패 · $message", Toast.LENGTH_LONG).show()
+                    if (message.contains("401") || message.contains("403") || message.contains("권한")) {
+                        pendingStravaAnalysis = true
+                        startActivity(Intent(this, StravaActivity::class.java))
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun loadRoadCourse() {
@@ -237,11 +290,27 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private fun refreshProfile() {
         val p = profileStore.load()
         tvProfile.text = buildString {
-            append("학습 FIT ${p.fitCount}개")
-            p.overallSpeedKph()?.let { append(" · 학습 평속 ${one(it)} km/h") }
-            p.avgPowerW()?.let { append(" · FIT 평균 파워 ${it.toInt()}W") }
-            p.power.sustainableW()?.let { append("\n시간별 파워 기반 지속파워 약 ${it.toInt()}W") }
-            if (p.importedNames.isNotEmpty()) append("\n최근: ${p.importedNames.takeLast(3).joinToString(" · ")}")
+            when {
+                p.stravaActivityCount > 0 -> append("Strava ROAD ${p.stravaActivityCount}개 분석")
+                p.fitCount > 0 -> append("학습 FIT ${p.fitCount}개")
+                p.powerSource == "ftp" && p.power.sixtyMinuteW != null -> append("FTP 직접 입력 ${p.power.sixtyMinuteW.toInt()}W")
+                else -> append("Strava 분석 또는 FTP 입력")
+            }
+            p.overallSpeedKph()?.let { append(" · 로드 평속 ${one(it)} km/h") }
+            if (p.powerSource == "strava") {
+                val vals = listOfNotNull(
+                    p.power.fiveSecondW?.let { "5초 ${it.toInt()}W" },
+                    p.power.thirtySecondW?.let { "30초 ${it.toInt()}W" },
+                    p.power.oneMinuteW?.let { "1분 ${it.toInt()}W" },
+                    p.power.fiveMinuteW?.let { "5분 ${it.toInt()}W" },
+                    p.power.twentyMinuteW?.let { "20분 ${it.toInt()}W" },
+                    p.power.sixtyMinuteW?.let { "60분 ${it.toInt()}W" }
+                )
+                if (vals.isNotEmpty()) append("\nPR · ${vals.joinToString(" · ")}")
+            } else if (p.power.sixtyMinuteW != null) {
+                append("\nFTP 기준 지속파워 ${p.power.sixtyMinuteW.toInt()}W")
+            }
+            if (p.importedNames.isNotEmpty()) append("\n최근: ${p.importedNames.takeLast(2).joinToString(" · ")}")
         }
     }
 

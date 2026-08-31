@@ -1,3 +1,13 @@
+# v0.30.4 — Strava ROAD 능력 분석 + FTP fallback
+- ROAD `내 라이딩 능력`에 `STRAVA 과거 ROAD 라이딩 분석` 추가.
+- Strava OAuth 권한을 `activity:read_all,activity:write`로 확장하고 승인 scope 저장.
+- `sport_type=Ride`만 최대 최근 60개 분석. MTB/Gravel/e-bike/VirtualRide 제외.
+- Strava time/watts stream에서 5초/30초/1분/5분/20분/60분 최고 평균파워 직접 계산.
+- outdoor Ride의 속도/경사 stream으로 경사별 실제 속도 프로필 생성. trainer Ride는 파워 PR에만 반영.
+- Strava 미사용자는 `FTP 직접 입력` 하나만으로 ROAD 모델 생성.
+- 시뮬레이터의 파워-only 참가자도 FTP 1개 입력으로 단순화.
+- v0.30.3 FIX1의 `${ok}개` Kotlin 보간 수정 유지.
+
 # v0.30.3 — 1분 자동완주 시뮬레이션
 - 시뮬레이션의 수동 `30배속 / 60배속` 버튼을 완전히 제거.
 - 참가자별 예상 완주계획을 만든 뒤 가장 늦은 완주자의 예상시간을 기준으로 자동 배속 계산.

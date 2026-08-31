@@ -8,6 +8,8 @@ import kotlin.math.max
 private val ROAD_GRADE_BINS = listOf(-99.0 to -4.0, -4.0 to -1.0, -1.0 to 1.0, 1.0 to 3.0, 3.0 to 6.0, 6.0 to 99.0)
 
 data class RoadPowerProfile(
+    val fiveSecondW: Double? = null,
+    val thirtySecondW: Double? = null,
     val oneMinuteW: Double? = null,
     val fiveMinuteW: Double? = null,
     val twentyMinuteW: Double? = null,
@@ -38,7 +40,10 @@ data class RoadTrainingProfile(
     val totalMovingSec: Double,
     val bins: List<RoadGradeBin>,
     val importedNames: List<String>,
-    val power: RoadPowerProfile
+    val power: RoadPowerProfile,
+    val stravaActivityCount: Int = 0,
+    val stravaLastSyncMs: Long = 0L,
+    val powerSource: String? = null
 ) {
     fun overallSpeedKph(): Double? = if (totalMovingSec > 60.0) totalDistanceKm / (totalMovingSec / 3600.0) else null
     fun speedForGrade(grade: Double): Double? = bins.firstOrNull { it.contains(grade) }?.avgSpeedKph()
@@ -75,8 +80,16 @@ class RoadProfileStore(context: Context) {
                 bins = if (bins.size == ROAD_GRADE_BINS.size) bins else emptyBins(),
                 importedNames = (o.optJSONArray("names") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
                 power = RoadPowerProfile(
-                    p.optNullableDouble("one"), p.optNullableDouble("five"), p.optNullableDouble("twenty"), p.optNullableDouble("sixty")
-                )
+                    fiveSecondW = p.optNullableDouble("fiveSec"),
+                    thirtySecondW = p.optNullableDouble("thirtySec"),
+                    oneMinuteW = p.optNullableDouble("one"),
+                    fiveMinuteW = p.optNullableDouble("five"),
+                    twentyMinuteW = p.optNullableDouble("twenty"),
+                    sixtyMinuteW = p.optNullableDouble("sixty")
+                ),
+                stravaActivityCount = o.optInt("stravaActivityCount", 0),
+                stravaLastSyncMs = o.optLong("stravaLastSyncMs", 0L),
+                powerSource = o.optString("powerSource").takeIf { it.isNotBlank() }
             )
         }.getOrElse { emptyProfile() }
     }
@@ -126,13 +139,47 @@ class RoadProfileStore(context: Context) {
     }
 
     fun savePower(power: RoadPowerProfile): RoadTrainingProfile {
-        val next = load().copy(power = power)
+        val next = load().copy(power = power, powerSource = "manual")
+        save(next)
+        return next
+    }
+
+    /** Strava를 쓰지 않는 참가자는 FTP 하나만으로 ROAD 모델을 만든다. */
+    fun saveFtpOnly(ftpW: Double): RoadTrainingProfile {
+        require(ftpW in 50.0..700.0) { "FTP는 50~700W 범위로 입력해 주세요." }
+        val old = load()
+        val next = old.copy(
+            power = RoadPowerProfile(sixtyMinuteW = ftpW),
+            powerSource = "ftp"
+        )
+        save(next)
+        return next
+    }
+
+    /** Strava ROAD 분석 결과는 중복 FIT 혼합을 피하기 위해 주행 기반 프로필을 통째로 교체한다. */
+    fun replaceWithStrava(result: StravaRoadAnalysisResult): RoadTrainingProfile {
+        val old = load()
+        val fallbackFtp = old.power.sixtyMinuteW?.takeIf { old.powerSource == "ftp" }
+        val stravaPower = result.power
+        val mergedPower = if (stravaPower.sustainableW() != null) stravaPower else RoadPowerProfile(sixtyMinuteW = fallbackFtp)
+        val next = RoadTrainingProfile(
+            fitCount = 0,
+            totalDistanceKm = result.totalDistanceKm,
+            totalMovingSec = result.totalMovingSec,
+            bins = if (result.bins.size == ROAD_GRADE_BINS.size) result.bins else emptyBins(),
+            importedNames = result.activityNames.takeLast(12),
+            power = mergedPower,
+            stravaActivityCount = result.activityCount,
+            stravaLastSyncMs = result.analyzedAtMs,
+            powerSource = if (stravaPower.sustainableW() != null) "strava" else if (fallbackFtp != null) "ftp" else null
+        )
         save(next)
         return next
     }
 
     fun clearFits(): RoadTrainingProfile {
-        val next = emptyProfile().copy(power = load().power)
+        val old = load()
+        val next = emptyProfile().copy(power = old.power, powerSource = old.powerSource)
         save(next)
         return next
     }
@@ -142,11 +189,16 @@ class RoadProfileStore(context: Context) {
             .put("fitCount", p.fitCount)
             .put("totalDistanceKm", p.totalDistanceKm)
             .put("totalMovingSec", p.totalMovingSec)
+            .put("stravaActivityCount", p.stravaActivityCount)
+            .put("stravaLastSyncMs", p.stravaLastSyncMs)
+            .put("powerSource", p.powerSource ?: JSONObject.NULL)
         val bins = JSONArray()
         p.bins.forEach { b -> bins.put(JSONObject().put("min", b.minGrade).put("max", b.maxGrade).put("seconds", b.seconds).put("speedWeighted", b.speedWeighted).put("powerSeconds", b.powerSeconds).put("powerWeighted", b.powerWeighted)) }
         o.put("bins", bins)
         o.put("names", JSONArray(p.importedNames))
         o.put("power", JSONObject().apply {
+            put("fiveSec", p.power.fiveSecondW ?: JSONObject.NULL)
+            put("thirtySec", p.power.thirtySecondW ?: JSONObject.NULL)
             put("one", p.power.oneMinuteW ?: JSONObject.NULL)
             put("five", p.power.fiveMinuteW ?: JSONObject.NULL)
             put("twenty", p.power.twentyMinuteW ?: JSONObject.NULL)

@@ -99,7 +99,7 @@ class StravaActivity : Activity() {
     private fun startOAuth() {
         if (store.clientSecret().isNullOrBlank() && !saveSecret()) return
         val redirect = URLEncoder.encode(StravaSecureStore.REDIRECT_URI, "UTF-8")
-        val scope = URLEncoder.encode("activity:write", "UTF-8")
+        val scope = URLEncoder.encode("activity:read_all,activity:write", "UTF-8")
         val url = "https://www.strava.com/oauth/mobile/authorize" +
             "?client_id=${StravaSecureStore.CLIENT_ID}" +
             "&redirect_uri=$redirect" +
@@ -117,8 +117,9 @@ class StravaActivity : Activity() {
         }
         val code = data.getQueryParameter("code") ?: return
         val granted = data.getQueryParameter("scope").orEmpty()
-        if (!granted.contains("activity:write")) {
-            refreshUi("업로드 권한(activity:write)이 허용되지 않았습니다.")
+        val hasRead = granted.contains("activity:read") || granted.contains("activity:read_all")
+        if (!hasRead) {
+            refreshUi("ROAD 분석 권한(activity:read)이 허용되지 않았습니다.")
             return
         }
         val secret = store.clientSecret()
@@ -131,7 +132,7 @@ class StravaActivity : Activity() {
             val result = runCatching { StravaClient.exchangeCode(secret, code) }
             runOnUiThread {
                 result.onSuccess {
-                    store.saveTokens(it.accessToken, it.refreshToken, it.expiresAt, it.athleteName)
+                    store.saveTokens(it.accessToken, it.refreshToken, it.expiresAt, it.athleteName, granted)
                     refreshUi("Strava 연결 완료${it.athleteName?.let { n -> " · $n" } ?: ""}")
                 }.onFailure { e -> refreshUi("Strava 연결 실패 · ${e.message ?: e.javaClass.simpleName}") }
             }
@@ -345,7 +346,7 @@ class StravaActivity : Activity() {
             if (!extra.isNullOrBlank()) append("\n$extra")
         }
         btnConnect.text = if (connected) "Strava 다시 인증" else "Strava 연결"
-        setUploadButtons(connected && selectedAnalysis != null)
+        setUploadButtons(connected && store.hasActivityWrite() && selectedAnalysis != null)
     }
 
     private fun toast(message: String) { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() }

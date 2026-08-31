@@ -29,7 +29,7 @@
                 <Button android:id="@+id/btnStravaConnect" android:layout_width="0dp" android:layout_height="44dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="Strava 연결" />
             </LinearLayout>
             <Button android:id="@+id/btnStravaDisconnect" android:layout_width="match_parent" android:layout_height="42dp" android:layout_marginTop="5dp" android:text="연결 해제" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Secret·토큰은 채팅이나 로그로 보내지 않고 Android Keystore 암호화 저장소에만 보관합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="ROAD 과거 라이딩 분석을 위해 읽기 권한을 요청합니다. Secret·토큰은 Android Keystore 암호화 저장소에만 보관합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="13dp">

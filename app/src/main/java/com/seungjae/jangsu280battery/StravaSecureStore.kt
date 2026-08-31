@@ -24,25 +24,31 @@ class StravaSecureStore(context: Context) {
         private const val REFRESH = "refresh_token"
         private const val EXPIRES = "expires_at"
         private const val ATHLETE = "athlete_name"
+        private const val SCOPE = "granted_scope"
     }
 
     fun saveClientSecret(value: String) = putEncrypted(SECRET, value.trim())
     fun clientSecret(): String? = getEncrypted(SECRET)
 
-    fun saveTokens(access: String, refresh: String, expiresAt: Long, athleteName: String?) {
+    fun saveTokens(access: String, refresh: String, expiresAt: Long, athleteName: String?, grantedScope: String? = null) {
         putEncrypted(ACCESS, access)
         putEncrypted(REFRESH, refresh)
-        prefs.edit().putLong(EXPIRES, expiresAt).putString(ATHLETE, athleteName.orEmpty()).apply()
+        val editor = prefs.edit().putLong(EXPIRES, expiresAt).putString(ATHLETE, athleteName.orEmpty())
+        if (grantedScope != null) editor.putString(SCOPE, grantedScope)
+        editor.apply()
     }
 
     fun accessToken(): String? = getEncrypted(ACCESS)
     fun refreshToken(): String? = getEncrypted(REFRESH)
     fun expiresAt(): Long = prefs.getLong(EXPIRES, 0L)
     fun athleteName(): String? = prefs.getString(ATHLETE, null)?.takeIf { it.isNotBlank() }
+    fun grantedScope(): String = prefs.getString(SCOPE, "").orEmpty()
+    fun hasActivityRead(): Boolean = grantedScope().contains("activity:read") || grantedScope().contains("activity:read_all")
+    fun hasActivityWrite(): Boolean = grantedScope().contains("activity:write")
     fun isConnected(): Boolean = !accessToken().isNullOrBlank() && !refreshToken().isNullOrBlank()
 
     fun clearTokens() {
-        prefs.edit().remove(ACCESS).remove(REFRESH).remove(EXPIRES).remove(ATHLETE).apply()
+        prefs.edit().remove(ACCESS).remove(REFRESH).remove(EXPIRES).remove(ATHLETE).remove(SCOPE).apply()
     }
 
     fun clearAll() {

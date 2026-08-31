@@ -120,14 +120,14 @@ class RoadRaceSimulationActivity : Activity() {
         val target = field("개인 목표시간 선택 · 예: 06:30")
         val startDelay = field("출발 지연(분) · 동시출발이면 0", true).apply { setText("0") }
         val aidStop = field("보급소 기본 휴식(분) · 모두 패스면 0", true).apply { setText("0") }
-        val p1 = field("1분 파워 W · 선택", true)
-        val p5 = field("5분 파워 W · 선택", true)
-        val p20 = field("20분 파워 W · 선택", true)
-        val p60 = field("60분/FTP 근처 W · 선택", true)
+        val p1 = if (requireFit) field("1분 파워 W · 선택", true) else null
+        val p5 = if (requireFit) field("5분 파워 W · 선택", true) else null
+        val p20 = if (requireFit) field("20분 파워 W · 선택", true) else null
+        val p60 = field(if (requireFit) "60분/FTP 근처 W · 선택" else "FTP W · 필수", true)
 
         AlertDialog.Builder(this)
-            .setTitle(if (requireFit) "참가자 FIT 추가" else "파워 기반 참가자 추가")
-            .setMessage(if (requireFit) "한 참가자의 최근 ROAD FIT 여러 개를 한 번에 선택할 수 있습니다." else "FIT가 없을 때만 사용하세요. 20분 또는 60분 파워가 있으면 더 좋습니다.")
+            .setTitle(if (requireFit) "참가자 FIT 추가" else "FTP로 참가자 추가")
+            .setMessage(if (requireFit) "한 참가자의 최근 ROAD FIT 여러 개를 한 번에 선택할 수 있습니다." else "Strava/FIT 기록이 없는 참가자는 FTP 하나만 입력합니다.")
             .setView(wrap)
             .setPositiveButton(if (requireFit) "FIT 선택" else "추가") { _, _ ->
                 val nickname = name.text.toString().trim().ifBlank { "라이더${riderConfigs.size + 1}" }
@@ -136,14 +136,14 @@ class RoadRaceSimulationActivity : Activity() {
                     targetSec = parseTargetSeconds(target.text.toString().trim()),
                     startOffsetSec = (startDelay.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0,
                     aidStopSec = (aidStop.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0,
-                    power = RoadPowerProfile(p1.num(), p5.num(), p20.num(), p60.num())
+                    power = RoadPowerProfile(oneMinuteW = p1?.num(), fiveMinuteW = p5?.num(), twentyMinuteW = p20?.num(), sixtyMinuteW = p60.num())
                 )
                 if (requireFit) {
                     pendingRider = pending
                     pickRiderFits()
                 } else {
-                    if (pending.power.sustainableW() == null) {
-                        Toast.makeText(this, "파워만 추가할 때는 1/5/20/60분 중 하나 이상 입력해 주세요.", Toast.LENGTH_LONG).show()
+                    if (pending.power.sixtyMinuteW == null) {
+                        Toast.makeText(this, "FTP를 입력해 주세요.", Toast.LENGTH_LONG).show()
                     } else {
                         riderConfigs += SimulationRiderConfig(nickname, RoadSimulationProfileBuilder.fromFits(emptyList(), pending.power), pending.targetSec, pending.startOffsetSec, pending.aidStopSec)
                         refreshRiders(); rebuildPlans()
@@ -297,7 +297,7 @@ class RoadRaceSimulationActivity : Activity() {
 
     private fun refreshRiders() {
         tvRiders.text = if (riderConfigs.isEmpty()) {
-            "참가자 없음 · 한 사람당 최근 ROAD FIT 2~5개 권장"
+            "참가자 없음 · ROAD 기록이 있으면 FIT, 없으면 FTP 하나만 입력"
         } else buildString {
             append("참가자 ${riderConfigs.size}/20")
             riderConfigs.forEach { r ->

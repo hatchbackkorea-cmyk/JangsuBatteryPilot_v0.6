@@ -62,8 +62,11 @@ object RoadGranfondoEngine {
             RoadCheckpoint(name, cpKm, interpolate(kmList, scaled, cpKm))
         }
         val modelLabel = when {
+            profile.stravaActivityCount > 0 && profile.powerSource == "strava" -> "Strava ROAD ${profile.stravaActivityCount}개 + 시간별 PR"
+            profile.stravaActivityCount > 0 -> "Strava ROAD ${profile.stravaActivityCount}개 + GPX 고도"
             profile.fitCount > 0 && profile.power.sustainableW() != null -> "내 FIT ${profile.fitCount}개 + 시간별 파워"
             profile.fitCount > 0 -> "내 FIT ${profile.fitCount}개"
+            profile.powerSource == "ftp" && profile.power.sustainableW() != null -> "FTP ${profile.power.sustainableW()!!.toInt()}W + GPX 고도"
             profile.power.sustainableW() != null -> "시간별 파워 + GPX 고도"
             else -> "GPX 고도 기본 모델"
         }

@@ -24,12 +24,10 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. 내 라이딩 능력" android:textColor="@color/accent" android:textStyle="bold" />
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
-                <Button android:id="@+id/btnRoadImportFit" android:layout_width="0dp" android:layout_height="46dp" android:layout_weight="1" android:text="기존 FIT 추가" />
-                <Button android:id="@+id/btnRoadPower" android:layout_width="0dp" android:layout_height="46dp" android:layout_marginStart="5dp" android:layout_weight="1" android:text="시간별 파워" />
-            </LinearLayout>
-            <TextView android:id="@+id/tvRoadProfile" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="학습 FIT 0개" android:textColor="@color/text_primary" android:textSize="13sp" />
-            <Button android:id="@+id/btnRoadClearFits" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end" android:text="FIT 학습 초기화" android:textSize="11sp" />
+            <Button android:id="@+id/btnRoadStravaAnalyze" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="6dp" android:text="STRAVA 과거 ROAD 라이딩 분석" android:textStyle="bold" />
+            <Button android:id="@+id/btnRoadFtp" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="5dp" android:text="Strava 없음 · FTP 직접 입력" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Strava는 Ride만 분석합니다. MTB · Gravel · e-bike · VirtualRide는 제외합니다. Strava가 없으면 FTP 하나만 입력하면 됩니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:id="@+id/tvRoadProfile" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Strava 분석 또는 FTP 입력" android:textColor="@color/text_primary" android:textSize="13sp" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
