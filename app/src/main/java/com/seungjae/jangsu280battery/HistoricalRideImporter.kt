@@ -52,7 +52,7 @@ data class HistoricalRideAnalysis(
     /** 이동시간. FIT은 total_timer_time, GPX는 GPS 이동 구간으로 계산한다. */
     val durationSec: Long?,
     val avgSpeedKph: Double?,
-    /** 학습은 기존 파워/지형 중심. 심박·e-bike 필드는 Strava/export 검증에도 함께 보존한다. */
+    /** 학습은 기존 파워/지형 중심. 심박·e-bike 필드는 export 검증에도 함께 보존한다. */
     val telemetry: List<HistoricalTelemetryPoint> = emptyList(),
     val dataQualityScore: Int = 0,
     val sourceParts: List<HistoricalRideSourcePart> = emptyList(),
@@ -418,7 +418,7 @@ object HistoricalRideImporter {
         val correctedElevation = elevationTotals(track, hasElevation)
         val officialAscent = summary?.ascentM?.takeIf { it >= 0.0 }
         val officialDescent = summary?.descentM?.takeIf { it >= 0.0 }
-        // Avinox/Strava 계열 FIT은 Session 누적고도와 트랙 고도가 다를 수 있다.
+        // 외부 계열 FIT은 Session 누적고도와 트랙 고도가 다를 수 있다.
         // v0.11.0은 70m 공간창으로 평활화한 실제 트랙 고도를 우선하고 Session 값은 fallback으로만 사용한다.
         val chosenAscent = correctedElevation.ascentM.takeIf { hasElevation && it >= 5.0 } ?: officialAscent ?: 0.0
         val chosenDescent = correctedElevation.descentM.takeIf { hasElevation && it >= 5.0 } ?: officialDescent ?: 0.0

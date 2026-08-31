@@ -227,9 +227,6 @@ class SettingsActivity : Activity() {
         findViewById<Button>(R.id.btnMobileRelease).setOnClickListener {
             startActivity(Intent(this, ReleaseUploaderActivity::class.java))
         }
-        findViewById<Button>(R.id.btnStravaSettings).setOnClickListener {
-            startActivity(Intent(this, StravaActivity::class.java))
-        }
         findViewById<Button>(R.id.btnSettingsVersion).setOnClickListener { showVersionInfo() }
     }
 
@@ -402,11 +399,6 @@ class SettingsActivity : Activity() {
         if (::tvUpdateStatus.isInitialized) {
             refreshUpdateStatus()
             UpdateManager.resumePendingInstall(this)
-        }
-        findViewById<TextView>(R.id.tvStravaSettingsStatus).text = if (StravaSecureStore(this).isConnected()) {
-            "● Strava 연결됨 · 클린 FIT + 전체 텔레메트리 업로드"
-        } else {
-            "○ Strava 연결 안 됨 · Client ID ${StravaSecureStore.CLIENT_ID}"
         }
     }
 

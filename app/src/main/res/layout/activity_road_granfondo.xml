@@ -13,7 +13,7 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
             <Button android:id="@+id/btnRoadBackMode" android:layout_width="wrap_content" android:layout_height="42dp" android:text="← 모드" />
-            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="🚴 ROAD 그란폰도 코치" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="🚴 ROAD 목표시간 코치" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
@@ -23,32 +23,28 @@
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. 내 라이딩 능력" android:textColor="@color/accent" android:textStyle="bold" />
-            <Button android:id="@+id/btnRoadStravaAnalyze" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="6dp" android:text="STRAVA 과거 ROAD 라이딩 분석" android:textStyle="bold" />
-            <Button android:id="@+id/btnRoadFtp" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="5dp" android:text="Strava 없음 · FTP + 체중 직접 입력" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Strava는 Ride만 분석합니다. MTB · Gravel · e-bike · VirtualRide는 제외합니다. Strava가 없으면 FTP와 현재 체중을 입력해 W/kg까지 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
-            <TextView android:id="@+id/tvRoadProfile" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Strava 분석 또는 FTP 입력" android:textColor="@color/text_primary" android:textSize="13sp" />
-        </LinearLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. 목표시간 계획" android:textColor="@color/accent" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="목표 완주시간을 정하면 GPX 경사도에 맞춰 각 구간 통과시간을 배분합니다. 개인 능력 예측은 하지 않습니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <EditText android:id="@+id/etRoadTargetTime" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="7dp" android:gravity="center" android:hint="목표 완주시간 예: 05:00" android:inputType="text" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" android:textSize="18sp" />
 
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3. 완주 계획" android:textColor="@color/accent" android:textStyle="bold" />
-            <TextView android:id="@+id/tvRoadExpectedFinish" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:background="@color/panel2" android:padding="10dp" android:text="완주 예상시간 —" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="목표시간 계획" android:textColor="@color/text_secondary" android:textStyle="bold" />
-            <EditText android:id="@+id/etRoadTargetTime" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="3dp" android:gravity="center" android:hint="목표 완주시간 예: 06:30" android:inputType="text" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
-            <Button android:id="@+id/btnRoadBuildPlan" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="5dp" android:text="🎯 목표시간 계획 만들기" android:textStyle="bold" />
-            <TextView android:id="@+id/tvRoadPlan" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="현재 능력과 GPX로 완주 예상시간을 먼저 계산합니다." android:textColor="@color/text_primary" android:textSize="13sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="보급소 선택 · 정차시간" android:textColor="@color/text_primary" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="실제로 들를 보급소만 체크하세요. 정차시간은 목표 완주시간 안에 포함됩니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <LinearLayout android:id="@+id/llRoadAidStations" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="vertical" />
+
+            <Button android:id="@+id/btnRoadBuildPlan" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="9dp" android:text="🎯 목표시간 일정 만들기" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRoadPlan" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:background="@color/panel2" android:padding="10dp" android:text="목표시간과 보급소 정차시간을 설정해 주세요." android:textColor="@color/text_primary" android:textSize="14sp" />
             <TextView android:id="@+id/tvRoadSchedule" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:textColor="@color/text_secondary" android:textSize="12sp" />
-            <Button android:id="@+id/btnRoadSimulator" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="🎬 참가자 그란폰도 시뮬레이션" android:textStyle="bold" />
+            <Button android:id="@+id/btnRoadSimulator" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="🎬 참가자 목표시간 시뮬레이션" android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel2" android:orientation="vertical" android:padding="12dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4. 실시간 코칭" android:textColor="@color/good" android:textStyle="bold" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3. 실시간 목표 페이스" android:textColor="@color/good" android:textStyle="bold" />
             <Button android:id="@+id/btnRoadRideToggle" android:layout_width="match_parent" android:layout_height="54dp" android:layout_marginTop="6dp" android:text="▶ 주행 시작" android:textSize="17sp" android:textStyle="bold" />
-            <TextView android:id="@+id/tvRoadLive" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="주행 대기" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRoadLive" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="목표 일정 생성 후 주행을 시작하세요." android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="18dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="5. 그룹 라이딩 · 베타" android:textColor="@color/orange" android:textStyle="bold" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4. 그룹 라이딩 · 베타" android:textColor="@color/orange" android:textStyle="bold" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="같은 GPX를 쓰는 팀원이 인터넷으로 위치를 공유하면 코스 진행거리 기준으로 앞/뒤를 표시합니다. 방 최대 20명 · 별도 그룹 릴레이 서버가 필요합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
             <EditText android:id="@+id/etRoadGroupRelay" android:layout_width="match_parent" android:layout_height="44dp" android:hint="릴레이 URL 예: https://..." android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
             <Button android:id="@+id/btnRoadGroupMakeRoom" android:layout_width="match_parent" android:layout_height="42dp" android:text="6자리 방 코드 만들기" />

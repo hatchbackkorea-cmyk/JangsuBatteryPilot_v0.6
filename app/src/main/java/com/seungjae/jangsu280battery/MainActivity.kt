@@ -159,7 +159,6 @@ class MainActivity : Activity() {
     private lateinit var profileView: ElevationProfileView
     private lateinit var btnRideReport: Button
     private lateinit var btnPostRideFit: Button
-    private lateinit var btnFeedbackStrava: Button
     private lateinit var btnPostRideAvinox: Button
     private lateinit var btnPostRideCompare: Button
     private lateinit var btnPostRideLearn: Button
@@ -348,7 +347,6 @@ class MainActivity : Activity() {
         btnAssistProfileEdit.setOnClickListener { showAssistProfilePicker() }
         btnManualBattery.setOnClickListener { showManualBatteryDialog() }
         btnRideReport.setOnClickListener { showRideReport() }
-        btnFeedbackStrava.setOnClickListener { startActivity(Intent(this, StravaActivity::class.java)) }
         btnPostRideFit.setOnClickListener { pickPostRideFit() }
         btnPostRideAvinox.setOnClickListener { showPostRideAvinoxDialog() }
         btnPostRideCompare.setOnClickListener { showPostRideComparison() }
@@ -481,7 +479,6 @@ class MainActivity : Activity() {
         profileView = findViewById(R.id.profileView)
         btnRideReport = findViewById(R.id.btnRideReport)
         btnPostRideFit = findViewById(R.id.btnPostRideFit)
-        btnFeedbackStrava = findViewById(R.id.btnFeedbackStrava)
         btnPostRideAvinox = findViewById(R.id.btnPostRideAvinox)
         btnPostRideCompare = findViewById(R.id.btnPostRideCompare)
         btnPostRideLearn = findViewById(R.id.btnPostRideLearn)

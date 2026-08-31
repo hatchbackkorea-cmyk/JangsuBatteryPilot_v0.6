@@ -29,8 +29,6 @@ data class RideInsightRecord(
     val avgRiderPowerW: Double?,
     val avgMotorPowerW: Double?,
     val avgCadenceRpm: Double?,
-    val estimatedFtpW: Double?,
-    val ftpConfidence: String,
     val powerPeaks: Map<Int, Double>,
     val cadenceWhPerKm: Map<String, Double>
 )
@@ -55,7 +53,6 @@ class RideInsightStore(context: Context) {
         val motorPct = if (combined > 0.1) motorWh / combined * 100.0 else null
         val motorWhKm = if (analysis.distanceKm > 0.1 && motorWh > 0.0) motorWh / analysis.distanceKm else null
         val peaks = powerCurve(analysis.telemetry)
-        val ftp = estimateFtp(peaks)
         val rideStart = analysis.telemetry.mapNotNull { it.timestampMs }.minOrNull() ?: analysis.timestampMs
         val record = RideInsightRecord(
             id = analysis.fileHash,
@@ -73,8 +70,6 @@ class RideInsightStore(context: Context) {
             avgRiderPowerW = stats.avgRiderPowerW,
             avgMotorPowerW = stats.avgMotorPowerW,
             avgCadenceRpm = stats.avgCadenceRpm,
-            estimatedFtpW = ftp.first,
-            ftpConfidence = ftp.second,
             powerPeaks = peaks,
             cadenceWhPerKm = cadenceEfficiency(analysis.telemetry)
         )
@@ -107,8 +102,6 @@ class RideInsightStore(context: Context) {
                     avgRiderPowerW = nullable(o, "avgRiderPowerW"),
                     avgMotorPowerW = nullable(o, "avgMotorPowerW"),
                     avgCadenceRpm = nullable(o, "avgCadenceRpm"),
-                    estimatedFtpW = nullable(o, "estimatedFtpW"),
-                    ftpConfidence = o.optString("ftpConfidence", "데이터 부족"),
                     powerPeaks = jsonMap(o.optJSONObject("powerPeaks")),
                     cadenceWhPerKm = jsonStringMap(o.optJSONObject("cadenceWhPerKm"))
                 )
@@ -125,21 +118,15 @@ class RideInsightStore(context: Context) {
         return combinePeaks(records().filter { it.rideStartMs >= min })
     }
 
-    fun estimatedFtp(): Pair<Double?, String> {
-        val peaks = recent12WeekPeaks().ifEmpty { allTimePeaks() }
-        return estimateFtp(peaks)
-    }
 
     fun summaryText(): String {
         val r = records()
         if (r.isEmpty()) return "라이더 분석 데이터 없음 · FIT을 보조학습하면 자동 누적"
-        val ftp = estimatedFtp()
         val peaks = recent12WeekPeaks().ifEmpty { allTimePeaks() }
         val p5m = peaks[300]?.roundToInt()
         val p20m = peaks[1200]?.roundToInt()
         return buildString {
             append("FIT 분석 ${r.size}개")
-            if (ftp.first != null) append(" · 추정 FTP ${ftp.first!!.roundToInt()}W (${ftp.second})")
             if (p5m != null || p20m != null) {
                 append("\n")
                 if (p5m != null) append("5분 ${p5m}W")
@@ -160,7 +147,6 @@ class RideInsightStore(context: Context) {
         append(" · Motor ${record.motorWh.roundToInt()}Wh")
         record.motorOutputWhPerKm?.let { append(" · ${one(it)} Wh/km") }
         record.avgCadenceRpm?.let { append("\n평균 케이던스 ${it.roundToInt()}rpm") }
-        record.estimatedFtpW?.let { append(" · 추정 FTP ${it.roundToInt()}W (${record.ftpConfidence})") }
         val short = listOf(5 to "5초", 60 to "1분", 300 to "5분", 1200 to "20분", 2400 to "40분")
             .mapNotNull { (s, label) -> record.powerPeaks[s]?.let { "$label ${it.roundToInt()}W" } }
         if (short.isNotEmpty()) append("\n파워커브 · ${short.joinToString(" · ")}")
@@ -211,22 +197,6 @@ class RideInsightStore(context: Context) {
         return out
     }
 
-    private fun estimateFtp(peaks: Map<Int, Double>): Pair<Double?, String> {
-        val p20 = peaks[1200]
-        val p40 = peaks[2400]
-        val p60 = peaks[3600]
-        if (p20 == null) return null to "20분 데이터 부족"
-        val candidates = mutableListOf(p20 * 0.95)
-        if (p40 != null) candidates += p40 * 0.99
-        if (p60 != null) candidates += p60
-        val value = candidates.average().coerceAtLeast(0.0)
-        val confidence = when {
-            p60 != null -> "높음"
-            p40 != null -> "중상"
-            else -> "중"
-        }
-        return value to confidence
-    }
 
     private fun cadenceEfficiency(points: List<HistoricalTelemetryPoint>): Map<String, Double> {
         data class Acc(var km: Double = 0.0, var motorWh: Double = 0.0)
@@ -285,7 +255,6 @@ class RideInsightStore(context: Context) {
                 nput(this, "humanSharePct", r.humanSharePct); nput(this, "motorSharePct", r.motorSharePct)
                 nput(this, "motorOutputWhPerKm", r.motorOutputWhPerKm); nput(this, "avgRiderPowerW", r.avgRiderPowerW)
                 nput(this, "avgMotorPowerW", r.avgMotorPowerW); nput(this, "avgCadenceRpm", r.avgCadenceRpm)
-                nput(this, "estimatedFtpW", r.estimatedFtpW); put("ftpConfidence", r.ftpConfidence)
                 put("powerPeaks", JSONObject().apply { r.powerPeaks.forEach { (k, v) -> put(k.toString(), v) } })
                 put("cadenceWhPerKm", JSONObject().apply { r.cadenceWhPerKm.forEach { (k, v) -> put(k, v) } })
             })

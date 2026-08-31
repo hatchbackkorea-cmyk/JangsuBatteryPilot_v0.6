@@ -1,18 +1,16 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" creator="StravaGPX" version="1.1" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" creator="GPXBatteryCopilot" version="1.1" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>
     <name>V14.1_280장수군_280 K_스테이지1(토요일)</name>
     <desc>장수280 Stage1 기본 코스. v0.11.0부터 배터리 예측은 중립 기본 모델과 사용자가 승인한 실제 학습 데이터만 사용합니다.</desc>
     <author>
       <name>Jason Han</name>
-      <link href="https://www.strava.com/athletes/16220252" />
-    </author>
+</author>
     <copyright author="OpenStreetMap contributors">
       <year>2020</year>
       <license>https://www.openstreetmap.org/copyright</license>
     </copyright>
-    <link href="https://www.strava.com/routes/3524332463456954188" />
-  </metadata>
+</metadata>
   <wpt lat="35.61708" lon="127.49958">
     <name>용개마을 좌회전</name>
     <desc />
@@ -239,8 +237,7 @@
   <trk>
     <name>V14.1_280장수군_280 K_스테이지1(토요일)</name>
     <desc>토요일 분 140K </desc>
-    <link href="https://www.strava.com/routes/3524332463456954188" />
-    <type>cycling</type>
+<type>cycling</type>
     <trkseg>
       <trkpt lat="35.64077" lon="127.52096000000002">
         <ele>437.96</ele>

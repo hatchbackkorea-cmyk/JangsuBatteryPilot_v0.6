@@ -2,8 +2,6 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -15,11 +13,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
-import kotlin.math.abs
 
 class RoadRaceSimulationActivity : Activity() {
     companion object {
-        private const val REQ_RIDER_FITS = 401
         private const val PREFS = "road_granfondo_ui_v1"
         private const val KEY_COURSE_ID = "road_course_id"
         private const val MAX_RIDERS = 20
@@ -28,20 +24,10 @@ class RoadRaceSimulationActivity : Activity() {
         private const val MAX_AUTO_MULTIPLIER = 2400.0
     }
 
-    private data class PendingRider(
-        val nickname: String,
-        val targetSec: Double?,
-        val startOffsetSec: Double,
-        val aidStopSec: Double,
-        val power: RoadPowerProfile,
-        val bodyWeightKg: Double?
-    )
-
     private lateinit var courseRepo: CourseRepository
     private var course: CourseData? = null
     private val riderConfigs = mutableListOf<SimulationRiderConfig>()
     private var riderPlans: List<SimulationRiderPlan> = emptyList()
-    private var pendingRider: PendingRider? = null
 
     private lateinit var tvCourse: TextView
     private lateinit var tvRiders: TextView
@@ -73,8 +59,7 @@ class RoadRaceSimulationActivity : Activity() {
         btnPlay = findViewById(R.id.btnSimPlay)
 
         findViewById<Button>(R.id.btnSimBack).setOnClickListener { finish() }
-        findViewById<Button>(R.id.btnSimAddRider).setOnClickListener { showRiderDialog(requireFit = true) }
-        findViewById<Button>(R.id.btnSimAddPowerRider).setOnClickListener { showRiderDialog(requireFit = false) }
+        findViewById<Button>(R.id.btnSimAddRider).setOnClickListener { showRiderDialog() }
         findViewById<Button>(R.id.btnSimClearRiders).setOnClickListener {
             pauseSimulation(); riderConfigs.clear(); riderPlans = emptyList(); simSec = 0.0; refreshRiders(); renderFrame()
         }
@@ -104,7 +89,7 @@ class RoadRaceSimulationActivity : Activity() {
         liveView.setData(c, emptyList())
     }
 
-    private fun showRiderDialog(requireFit: Boolean) {
+    private fun showRiderDialog() {
         if (riderConfigs.size >= MAX_RIDERS) {
             Toast.makeText(this, "시뮬레이션은 최대 20명입니다.", Toast.LENGTH_LONG).show(); return
         }
@@ -118,85 +103,28 @@ class RoadRaceSimulationActivity : Activity() {
             return e
         }
         val name = field("참가자 이름/닉네임")
-        val target = field("개인 목표시간 선택 · 예: 06:30")
+        val target = field("목표 완주시간 · 예: 05:00")
         val startDelay = field("출발 지연(분) · 동시출발이면 0", true).apply { setText("0") }
-        val aidStop = field("보급소 기본 휴식(분) · 모두 패스면 0", true).apply { setText("0") }
-        val p1 = if (requireFit) field("1분 파워 W · 선택", true) else null
-        val p5 = if (requireFit) field("5분 파워 W · 선택", true) else null
-        val p20 = if (requireFit) field("20분 파워 W · 선택", true) else null
-        val p60 = field(if (requireFit) "60분/FTP 근처 W · 선택" else "FTP W · 필수", true)
-        val weight = field(if (requireFit) "체중 kg · 선택" else "체중 kg · 필수", true)
+        val aidStop = field("각 보급소 휴식(분) · 모두 패스면 0", true).apply { setText("0") }
 
         AlertDialog.Builder(this)
-            .setTitle(if (requireFit) "참가자 FIT 추가" else "FTP로 참가자 추가")
-            .setMessage(if (requireFit) "한 참가자의 최근 ROAD FIT 여러 개를 한 번에 선택할 수 있습니다. 체중을 넣으면 기록이 부족한 업힐 구간 보정에 사용합니다." else "Strava/FIT 기록이 없는 참가자는 FTP와 체중을 입력합니다.")
+            .setTitle("참가자 목표시간 추가")
+            .setMessage("개인 능력값 없이 목표시간과 보급소 휴식만으로 GPX 경사도에 맞춘 진행을 재생합니다.")
             .setView(wrap)
-            .setPositiveButton(if (requireFit) "FIT 선택" else "추가") { _, _ ->
+            .setPositiveButton("추가") { _, _ ->
                 val nickname = name.text.toString().trim().ifBlank { "라이더${riderConfigs.size + 1}" }
-                val pending = PendingRider(
-                    nickname = nickname,
-                    targetSec = parseTargetSeconds(target.text.toString().trim()),
-                    startOffsetSec = (startDelay.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0,
-                    aidStopSec = (aidStop.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0,
-                    power = RoadPowerProfile(oneMinuteW = p1?.num(), fiveMinuteW = p5?.num(), twentyMinuteW = p20?.num(), sixtyMinuteW = p60.num()),
-                    bodyWeightKg = weight.num()?.takeIf { it in 30.0..200.0 }
-                )
-                if (requireFit) {
-                    pendingRider = pending
-                    pickRiderFits()
+                val targetSec = parseTargetSeconds(target.text.toString().trim())
+                val delaySec = (startDelay.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0
+                val stopSec = (aidStop.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0
+                if (targetSec == null) {
+                    Toast.makeText(this, "목표시간을 05:00처럼 입력해 주세요.", Toast.LENGTH_LONG).show()
                 } else {
-                    if (pending.power.sixtyMinuteW == null) {
-                        Toast.makeText(this, "FTP를 입력해 주세요.", Toast.LENGTH_LONG).show()
-                    } else if (pending.bodyWeightKg == null) {
-                        Toast.makeText(this, "체중은 30~200kg 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
-                    } else {
-                        riderConfigs += SimulationRiderConfig(nickname, RoadSimulationProfileBuilder.fromFits(emptyList(), pending.power, pending.bodyWeightKg), pending.targetSec, pending.startOffsetSec, pending.aidStopSec)
-                        refreshRiders(); rebuildPlans()
-                    }
+                    riderConfigs += SimulationRiderConfig(nickname, targetSec, delaySec, stopSec)
+                    refreshRiders(); rebuildPlans()
                 }
             }
             .setNegativeButton("취소", null)
             .show()
-    }
-
-    private fun pickRiderFits() {
-        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-        }
-        startActivityForResult(i, REQ_RIDER_FITS)
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_RIDER_FITS || resultCode != RESULT_OK || data == null) return
-        val pending = pendingRider ?: return
-        val uris = mutableListOf<Uri>()
-        data.data?.let(uris::add)
-        data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris += clip.getItemAt(i).uri }
-        if (uris.isEmpty()) return
-        tvRiders.text = "${pending.nickname} FIT ${uris.size}개 분석 중…"
-        Thread {
-            val analyses = mutableListOf<HistoricalRideAnalysis>()
-            val errors = mutableListOf<String>()
-            uris.distinct().forEach { uri ->
-                runCatching { HistoricalRideImporter.analyze(this, uri, HistoricalSourceType.FIT) }
-                    .onSuccess { analyses += it }
-                    .onFailure { errors += (it.message ?: "FIT 분석 실패") }
-            }
-            runOnUiThread {
-                pendingRider = null
-                if (analyses.isEmpty()) {
-                    tvRiders.text = "FIT 분석 실패 · ${errors.firstOrNull() ?: "파일을 확인해 주세요."}"
-                    return@runOnUiThread
-                }
-                val profile = RoadSimulationProfileBuilder.fromFits(analyses, pending.power, pending.bodyWeightKg)
-                riderConfigs += SimulationRiderConfig(pending.nickname, profile, pending.targetSec, pending.startOffsetSec, pending.aidStopSec)
-                refreshRiders(); rebuildPlans()
-                Toast.makeText(this, "${pending.nickname} · FIT ${analyses.size}개 반영", Toast.LENGTH_LONG).show()
-            }
-        }.start()
     }
 
     private fun rebuildPlans(): Boolean {
@@ -271,7 +199,9 @@ class RoadRaceSimulationActivity : Activity() {
             val standings = RoadRaceSimulationEngine.checkpointStandings(riderPlans)
             if (standings.isNotEmpty()) {
                 append("\n\n포인트별 예상 1위")
-                standings.take(14).forEach { s -> s.riders.firstOrNull()?.let { (name, sec) -> append("\n${s.checkpointName} · $name ${duration(sec)}") } }
+                standings.take(14).forEach { s ->
+                    s.riders.firstOrNull()?.let { (name, sec) -> append("\n${s.checkpointName} · $name ${duration(sec)}") }
+                }
             }
         }
         tvSummary.visibility = View.VISIBLE
@@ -289,8 +219,10 @@ class RoadRaceSimulationActivity : Activity() {
         } else {
             "대회 경과 ${duration(simSec)} · 자동 배속"
         }
-        tvStandings.text = if (states.isEmpty()) "참가자 FIT을 추가하고 재생하세요." else buildString {
-            val order = states.sortedWith(compareByDescending<SimulationRiderState> { it.routeKm }.thenBy { riderPlans.firstOrNull { r -> r.nickname == it.nickname }?.finishRaceSec ?: Double.MAX_VALUE })
+        tvStandings.text = if (states.isEmpty()) "참가자 목표시간을 추가하고 재생하세요." else buildString {
+            val order = states.sortedWith(compareByDescending<SimulationRiderState> { it.routeKm }.thenBy {
+                riderPlans.firstOrNull { r -> r.nickname == it.nickname }?.finishRaceSec ?: Double.MAX_VALUE
+            })
             order.forEachIndexed { i, s ->
                 append("${i + 1}. ${s.nickname} · ${one(s.routeKm)} km · ${s.status}")
                 if (s.aidName != null) append(" ${duration(s.aidElapsedSec)}")
@@ -302,17 +234,13 @@ class RoadRaceSimulationActivity : Activity() {
 
     private fun refreshRiders() {
         tvRiders.text = if (riderConfigs.isEmpty()) {
-            "참가자 없음 · ROAD 기록이 있으면 FIT, 없으면 FTP + 체중 입력"
+            "참가자 없음 · 목표 완주시간만 입력하면 됩니다."
         } else buildString {
             append("참가자 ${riderConfigs.size}/20")
             riderConfigs.forEach { r ->
-                append("\n• ${r.nickname} · FIT ${r.profile.fitCount}개")
-                r.profile.power.sustainableW()?.let { power ->
-                    append(" · 지속파워 ${power.toInt()}W")
-                    r.profile.bodyWeightKg?.let { w -> append(" · ${one(w)}kg · ${String.format(Locale.US, "%.2f", power / w)}W/kg") }
-                }
+                append("\n• ${r.nickname} · 목표 ${duration(r.targetSec)}")
                 if (r.startOffsetSec > 0) append(" · 출발 +${duration(r.startOffsetSec)}")
-                append(if (r.defaultAidStopSec > 0) " · 보급 ${duration(r.defaultAidStopSec)}" else " · 보급 PASS")
+                append(if (r.defaultAidStopSec > 0) " · 보급소당 ${duration(r.defaultAidStopSec)}" else " · 보급 PASS")
             }
         }
     }
@@ -329,7 +257,7 @@ class RoadRaceSimulationActivity : Activity() {
         if (p.size != 2) return null
         val h = p[0].toIntOrNull() ?: return null
         val m = p[1].toIntOrNull() ?: return null
-        return if (h >= 0 && m in 0..59) (h * 3600 + m * 60).toDouble() else null
+        return if (h >= 0 && m in 0..59) (h * 3600 + m * 60).toDouble().takeIf { it >= 600.0 } else null
     }
 
     private fun duration(secRaw: Double): String {
@@ -341,5 +269,4 @@ class RoadRaceSimulationActivity : Activity() {
     }
 
     private fun one(v: Double) = String.format(Locale.US, "%.1f", v)
-    private fun EditText.num(): Double? = text.toString().trim().toDoubleOrNull()?.takeIf { it > 0.0 }
 }

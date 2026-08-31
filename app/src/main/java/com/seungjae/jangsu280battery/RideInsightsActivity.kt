@@ -60,10 +60,6 @@ class RideInsightsActivity : Activity() {
                     append("$label  최근12주 ${r?.roundToInt()?.let { "${it}W" } ?: "—"} · 전체 ${a?.roundToInt()?.let { "${it}W" } ?: "—"}\n")
                 }
             }
-            val ftp = store.estimatedFtp()
-            if (ftp.first != null) append("추정 FTP ${ftp.first!!.roundToInt()}W · 신뢰도 ${ftp.second}\n")
-            else append("추정 FTP — · ${ftp.second}\n")
-            append("20분 이상 유효한 Rider Power가 있어야 FTP를 표시합니다.")
         }.trim()
         list.removeAllViews()
         val records = store.records().take(15)

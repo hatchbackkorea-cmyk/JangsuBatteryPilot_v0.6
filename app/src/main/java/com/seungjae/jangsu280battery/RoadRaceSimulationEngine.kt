@@ -2,15 +2,10 @@ package com.seungjae.jangsu280battery
 
 import kotlin.math.max
 
-/**
- * ROAD 그란폰도 사전 시뮬레이션 전용 모델.
- * 실제 대회 기록을 꾸며내는 용도가 아니라, 참가자별 과거 FIT/파워 + 공통 GPX를 이용해
- * 예상 진행/보급소 체류/체크포인트 통과 순서를 재생하기 위한 계획 모델이다.
- */
+/** 목표시간 기반 ROAD 그란폰도 사전 시뮬레이션. */
 data class SimulationRiderConfig(
     val nickname: String,
-    val profile: RoadTrainingProfile,
-    val targetSec: Double? = null,
+    val targetSec: Double,
     val startOffsetSec: Double = 0.0,
     val defaultAidStopSec: Double = 0.0
 )
@@ -59,20 +54,20 @@ data class SimulationCheckpointStanding(
 
 object RoadRaceSimulationEngine {
     fun buildRiderPlan(course: CourseData, config: SimulationRiderConfig): SimulationRiderPlan {
-        val motion = RoadGranfondoEngine.buildPlan(course, config.targetSec, config.profile)
-        val aids = aidStations(course)
-        var cumulativeStop = 0.0
-        val aidStops = mutableListOf<SimulationAidStop>()
-        aids.forEach { poi ->
-            val arrival = config.startOffsetSec + motion.expectedElapsedSec(poi.routeKm) + cumulativeStop
-            val stop = config.defaultAidStopSec.coerceAtLeast(0.0)
-            val departure = arrival + stop
-            aidStops += SimulationAidStop(poi.name.ifBlank { "보급소" }, poi.routeKm, arrival, departure)
-            cumulativeStop += stop
+        val aidSelections = if (config.defaultAidStopSec > 0.0) {
+            aidStations(course).map { RoadAidSelection(it.name.ifBlank { "보급소" }, it.routeKm, config.defaultAidStopSec) }
+        } else emptyList()
+        val motion = RoadGranfondoEngine.buildTargetPlan(course, config.targetSec, aidSelections)
+        val aidStops = motion.aidStops.map {
+            SimulationAidStop(
+                it.name,
+                it.km,
+                config.startOffsetSec + it.arrivalElapsedSec,
+                config.startOffsetSec + it.departureElapsedSec
+            )
         }
         val cps = motion.checkpoints.map { cp ->
-            val priorStops = aidStops.filter { it.km < cp.km - 0.02 }.sumOf { it.durationSec }
-            SimulationCheckpointPass(cp.name, cp.km, config.startOffsetSec + cp.targetElapsedSec + priorStops)
+            SimulationCheckpointPass(cp.name, cp.km, config.startOffsetSec + cp.targetElapsedSec)
         }
         return SimulationRiderPlan(
             nickname = config.nickname,
@@ -80,7 +75,7 @@ object RoadRaceSimulationEngine {
             motionPlan = motion,
             aidStops = aidStops,
             checkpoints = cps,
-            finishRaceSec = config.startOffsetSec + motion.totalSec + aidStops.sumOf { it.durationSec }
+            finishRaceSec = config.startOffsetSec + config.targetSec
         )
     }
 
@@ -168,59 +163,5 @@ object RoadRaceSimulationEngine {
         val dk = plan.samplesKm[idx] - plan.samplesKm[idx - 1]
         val dt = plan.samplesElapsedSec[idx] - plan.samplesElapsedSec[idx - 1]
         return if (dk > 0.0 && dt > 0.0) (dk / (dt / 3600.0)).coerceIn(0.0, 100.0) else 0.0
-    }
-}
-
-/** 참가자 한 명의 여러 과거 FIT을 시뮬레이션용 ROAD 프로필로 합친다. */
-object RoadSimulationProfileBuilder {
-    private val bins = listOf(-99.0 to -4.0, -4.0 to -1.0, -1.0 to 1.0, 1.0 to 3.0, 3.0 to 6.0, 6.0 to 99.0)
-
-    fun fromFits(analyses: List<HistoricalRideAnalysis>, manualPower: RoadPowerProfile = RoadPowerProfile(), bodyWeightKg: Double? = null): RoadTrainingProfile {
-        val out = bins.map { (a, b) -> RoadGradeBin(a, b, 0.0, 0.0, 0.0, 0.0) }.toMutableList()
-        var totalDistance = 0.0
-        var totalMoving = 0.0
-        analyses.forEach { analysis ->
-            var fitDistance = 0.0
-            var fitMoving = 0.0
-            val points = analysis.telemetry
-            for (i in 1 until points.size) {
-                val a = points[i - 1]
-                val b = points[i]
-                val ta = a.timestampMs ?: continue
-                val tb = b.timestampMs ?: continue
-                val dt = (tb - ta) / 1000.0
-                if (dt !in 0.2..30.0) continue
-                val dk = b.routeKm - a.routeKm
-                if (dk <= 0.00001 || dk > 0.5) continue
-                val speed = listOfNotNull(a.speedKph, b.speedKph).let { if (it.isEmpty()) dk / (dt / 3600.0) else it.average() }
-                if (!speed.isFinite() || speed !in 2.0..100.0) continue
-                val ea = a.elevationM
-                val eb = b.elevationM
-                val grade = if (ea != null && eb != null && dk > 0.005) ((eb - ea) / (dk * 1000.0) * 100.0).coerceIn(-20.0, 25.0) else 0.0
-                val idx = bins.indexOfFirst { grade >= it.first && grade < it.second }.coerceAtLeast(0)
-                val prev = out[idx]
-                val power = listOfNotNull(a.riderPowerW, b.riderPowerW).let { if (it.isEmpty()) null else it.average() }?.takeIf { it in 0.0..2000.0 }
-                out[idx] = prev.copy(
-                    seconds = prev.seconds + dt,
-                    speedWeighted = prev.speedWeighted + speed * dt,
-                    powerSeconds = prev.powerSeconds + if (power != null) dt else 0.0,
-                    powerWeighted = prev.powerWeighted + (power ?: 0.0) * dt
-                )
-                fitMoving += dt
-                fitDistance += dk
-            }
-            totalMoving += max(fitMoving, analysis.durationSec?.toDouble()?.takeIf { fitMoving <= 1.0 } ?: 0.0)
-            totalDistance += max(fitDistance, analysis.distanceKm.takeIf { fitMoving <= 1.0 } ?: 0.0)
-        }
-        return RoadTrainingProfile(
-            fitCount = analyses.size,
-            totalDistanceKm = totalDistance,
-            totalMovingSec = totalMoving,
-            bins = out,
-            importedNames = analyses.map { it.displayName }.takeLast(12),
-            power = manualPower,
-            powerSource = if (analyses.isEmpty() && manualPower.sustainableW() != null) "ftp" else if (manualPower.sustainableW() != null) "manual" else null,
-            bodyWeightKg = bodyWeightKg
-        )
     }
 }

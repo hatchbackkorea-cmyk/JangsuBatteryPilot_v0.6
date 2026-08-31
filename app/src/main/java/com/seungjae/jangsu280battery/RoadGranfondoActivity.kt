@@ -2,7 +2,6 @@ package com.seungjae.jangsu280battery
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -11,11 +10,13 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.text.InputType
 import android.view.WindowManager
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import java.text.SimpleDateFormat
@@ -28,7 +29,6 @@ import kotlin.random.Random
 class RoadGranfondoActivity : Activity(), LocationListener {
     companion object {
         private const val REQ_GPX = 301
-        private const val REQ_FIT = 302
         private const val REQ_LOCATION = 303
         private const val PREFS = "road_granfondo_ui_v1"
         private const val KEY_COURSE_ID = "road_course_id"
@@ -37,17 +37,18 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         private const val KEY_ROOM = "group_room"
         private const val KEY_NICK = "group_nick"
         private const val KEY_RIDER_ID = "group_rider_id"
+        private val STOP_MINUTES = listOf(0, 5, 10, 15, 20, 30)
     }
 
+    private data class AidRow(val poi: RoutePoi, val check: CheckBox, val spinner: Spinner)
+
     private lateinit var courseRepo: CourseRepository
-    private lateinit var profileStore: RoadProfileStore
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
     private lateinit var locationManager: LocationManager
 
     private lateinit var tvCourse: TextView
-    private lateinit var tvProfile: TextView
     private lateinit var etTarget: EditText
-    private lateinit var tvExpectedFinish: TextView
+    private lateinit var aidContainer: LinearLayout
     private lateinit var tvPlan: TextView
     private lateinit var tvSchedule: TextView
     private lateinit var btnRide: Button
@@ -58,8 +59,8 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private lateinit var btnGroup: Button
     private lateinit var tvGroup: TextView
 
+    private val aidRows = mutableListOf<AidRow>()
     private var course: CourseData? = null
-    private var estimatedPlan: RoadPlan? = null
     private var plan: RoadPlan? = null
     private var matcher: RouteMatcher? = null
     private var riding = false
@@ -71,10 +72,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private var groupEnabled = false
     private var lastGroupSyncMs = 0L
     private var groupSyncBusy = false
-    private var pendingStravaAnalysis = false
-    private var stravaAnalysisBusy = false
     private val riderId: String by lazy {
-        prefs.getString(KEY_RIDER_ID, null) ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_RIDER_ID, it).apply() }
+        prefs.getString(KEY_RIDER_ID, null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString(KEY_RIDER_ID, it).apply()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,13 +83,11 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         setContentView(R.layout.activity_road_granfondo)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         courseRepo = CourseRepository(this)
-        profileStore = RoadProfileStore(this)
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
         tvCourse = findViewById(R.id.tvRoadCourse)
-        tvProfile = findViewById(R.id.tvRoadProfile)
         etTarget = findViewById(R.id.etRoadTargetTime)
-        tvExpectedFinish = findViewById(R.id.tvRoadExpectedFinish)
+        aidContainer = findViewById(R.id.llRoadAidStations)
         tvPlan = findViewById(R.id.tvRoadPlan)
         tvSchedule = findViewById(R.id.tvRoadSchedule)
         btnRide = findViewById(R.id.btnRoadRideToggle)
@@ -106,8 +105,6 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
         findViewById<Button>(R.id.btnRoadBackMode).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
-        findViewById<Button>(R.id.btnRoadStravaAnalyze).setOnClickListener { startStravaRoadAnalysis() }
-        findViewById<Button>(R.id.btnRoadFtp).setOnClickListener { showFtpDialog() }
         findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildTargetPlan(showToast = true) }
         findViewById<Button>(R.id.btnRoadSimulator).setOnClickListener {
             startActivity(Intent(this, RoadRaceSimulationActivity::class.java))
@@ -122,24 +119,11 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         btnGroup.setOnClickListener { toggleGroup() }
 
         loadRoadCourse()
-        refreshProfile()
-        if (course != null) buildEstimatedPlan(false)
     }
 
     override fun onPause() {
         if (!riding) runCatching { locationManager.removeUpdates(this) }
         super.onPause()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (pendingStravaAnalysis) {
-            val store = StravaSecureStore(this)
-            if (store.isConnected() && store.hasActivityRead()) {
-                pendingStravaAnalysis = false
-                runStravaRoadAnalysis()
-            }
-        }
     }
 
     private fun pickGpx() {
@@ -151,136 +135,30 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         startActivityForResult(i, REQ_GPX)
     }
 
-    private fun pickFits() {
-        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-        }
-        startActivityForResult(i, REQ_FIT)
-    }
-
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK || data == null) return
-        if (requestCode == REQ_GPX) {
-            val uri = data.data ?: return
-            val oldId = runCatching { courseRepo.activeMeta().id }.getOrNull()
-            Thread {
-                val result = runCatching {
-                    val meta = courseRepo.importGpx(uri, displayName(uri))
-                    if (oldId != null && oldId != meta.id) runCatching { courseRepo.setActive(oldId) }
-                    prefs.edit().putString(KEY_COURSE_ID, meta.id).apply()
-                    courseRepo.loadCourse(meta.id)
-                }
-                runOnUiThread {
-                    result.onSuccess {
-                        course = it; matcher = RouteMatcher(it); refreshCourse(); buildEstimatedPlan(false)
-                        Toast.makeText(this, "로드 GPX를 불러왔습니다.", Toast.LENGTH_SHORT).show()
-                    }.onFailure { Toast.makeText(this, "GPX 오류: ${it.message}", Toast.LENGTH_LONG).show() }
-                }
-            }.start()
-        } else if (requestCode == REQ_FIT) {
-            val uris = mutableListOf<Uri>()
-            data.data?.let(uris::add)
-            data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri) }
-            if (uris.isEmpty()) return
-            tvProfile.text = "FIT ${uris.size}개 분석 중…"
-            Thread {
-                var ok = 0
-                val errors = mutableListOf<String>()
-                uris.distinct().forEach { uri ->
-                    runCatching { HistoricalRideImporter.analyze(this, uri, HistoricalSourceType.FIT) }
-                        .onSuccess { profileStore.addFit(it); ok++ }
-                        .onFailure { errors += (it.message ?: "분석 실패") }
-                }
-                runOnUiThread {
-                    refreshProfile(); buildEstimatedPlan(false)
-                    Toast.makeText(this, "FIT ${ok}개 반영${if (errors.isNotEmpty()) " · 실패 ${errors.size}" else ""}", Toast.LENGTH_LONG).show()
-                }
-            }.start()
-        }
-    }
-
-    private fun showFtpDialog() {
-        val old = profileStore.load()
-        val wrap = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(42, 10, 42, 0)
-        }
-        val ftpInput = EditText(this).apply {
-            hint = "FTP W · 예: 210"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(old.power.sixtyMinuteW?.toInt()?.toString() ?: "")
-        }
-        val weightInput = EditText(this).apply {
-            hint = "현재 체중 kg · 예: 75"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(old.bodyWeightKg?.let { one(it) } ?: "")
-        }
-        wrap.addView(ftpInput, LinearLayout.LayoutParams(-1, -2))
-        wrap.addView(weightInput, LinearLayout.LayoutParams(-1, -2))
-        AlertDialog.Builder(this)
-            .setTitle("FTP + 체중 직접 입력")
-            .setMessage("Strava를 사용하지 않는 경우 FTP와 현재 체중을 입력합니다. W/kg를 계산해 업힐 예상속도와 완주 예상시간에 반영합니다.")
-            .setView(wrap)
-            .setPositiveButton("저장") { _, _ ->
-                val ftp = ftpInput.text.toString().trim().toDoubleOrNull()
-                val weight = weightInput.text.toString().trim().toDoubleOrNull()
-                when {
-                    ftp == null || ftp !in 50.0..700.0 -> Toast.makeText(this, "FTP는 50~700W 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
-                    weight == null || weight !in 30.0..200.0 -> Toast.makeText(this, "체중은 30~200kg 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
-                    else -> {
-                        profileStore.saveFtpOnly(ftp, weight)
-                        refreshProfile(); buildEstimatedPlan(false)
-                        Toast.makeText(this, "FTP ${ftp.toInt()}W · ${one(weight)}kg · ${two(ftp / weight)}W/kg 저장", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .setNegativeButton("취소", null)
-            .show()
-    }
-
-    private fun startStravaRoadAnalysis() {
-        if (stravaAnalysisBusy) return
-        val store = StravaSecureStore(this)
-        if (!store.isConnected() || !store.hasActivityRead()) {
-            pendingStravaAnalysis = true
-            Toast.makeText(this, "Strava 연결 화면에서 ROAD 읽기 권한을 승인해 주세요. 승인 후 자동으로 분석을 시작합니다.", Toast.LENGTH_LONG).show()
-            startActivity(Intent(this, StravaActivity::class.java))
-            return
-        }
-        runStravaRoadAnalysis()
-    }
-
-    private fun runStravaRoadAnalysis() {
-        if (stravaAnalysisBusy) return
-        stravaAnalysisBusy = true
-        tvProfile.text = "Strava ROAD 기록 목록 불러오는 중…"
+        if (requestCode != REQ_GPX || resultCode != RESULT_OK || data == null) return
+        val uri = data.data ?: return
+        val oldId = runCatching { courseRepo.activeMeta().id }.getOrNull()
         Thread {
             val result = runCatching {
-                val store = StravaSecureStore(this)
-                val token = StravaClient.ensureAccessToken(store)
-                StravaRoadAnalyzer.analyze(token) { done, total, name ->
-                    runOnUiThread {
-                        if (stravaAnalysisBusy) tvProfile.text = "Strava ROAD 분석 $done/$total · $name"
-                    }
-                }
+                val meta = courseRepo.importGpx(uri, displayName(uri))
+                if (oldId != null && oldId != meta.id) runCatching { courseRepo.setActive(oldId) }
+                prefs.edit().putString(KEY_COURSE_ID, meta.id).apply()
+                courseRepo.loadCourse(meta.id)
             }
             runOnUiThread {
-                stravaAnalysisBusy = false
-                result.onSuccess { analyzed ->
-                    profileStore.replaceWithStrava(analyzed)
-                    refreshProfile(); buildEstimatedPlan(false)
-                    Toast.makeText(this, "Strava ROAD ${analyzed.activityCount}개 분석 완료", Toast.LENGTH_LONG).show()
-                }.onFailure { e ->
-                    refreshProfile()
-                    val message = e.message ?: e.javaClass.simpleName
-                    Toast.makeText(this, "Strava 분석 실패 · $message", Toast.LENGTH_LONG).show()
-                    if (message.contains("401") || message.contains("403") || message.contains("권한")) {
-                        pendingStravaAnalysis = true
-                        startActivity(Intent(this, StravaActivity::class.java))
-                    }
+                result.onSuccess {
+                    course = it
+                    matcher = RouteMatcher(it)
+                    plan = null
+                    refreshCourse()
+                    renderAidStationRows()
+                    tvPlan.text = "목표시간과 보급소 정차시간을 설정해 주세요."
+                    tvSchedule.text = ""
+                    Toast.makeText(this, "로드 GPX를 불러왔습니다.", Toast.LENGTH_SHORT).show()
+                }.onFailure {
+                    Toast.makeText(this, "GPX 오류: ${it.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -291,123 +169,142 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         course = id?.let { runCatching { courseRepo.loadCourse(it) }.getOrNull() }
         matcher = course?.let { RouteMatcher(it) }
         refreshCourse()
+        renderAidStationRows()
     }
 
     private fun refreshCourse() {
         val c = course
-        tvCourse.text = if (c == null) "로드 코스 없음 · GPX를 선택해 주세요." else buildString {
+        tvCourse.text = if (c == null) {
+            "로드 코스 없음 · GPX를 선택해 주세요."
+        } else buildString {
             append(c.name)
             append("\n거리 ${one(c.totalKm)} km · 획득고도 ${c.totalAscentM.toInt()} m")
-            append(" · 포인트 ${c.pois.size}개")
+            append(" · 보급/급수 ${c.supplyPois.size}곳")
             append("\n코스키 ${RoadGranfondoEngine.courseKey(c)} · 그룹원은 같은 GPX를 사용해야 앞/뒤 비교가 정확합니다.")
         }
     }
 
-    private fun refreshProfile() {
-        val p = profileStore.load()
-        tvProfile.text = buildString {
-            when {
-                p.stravaActivityCount > 0 -> append("Strava ROAD ${p.stravaActivityCount}개 분석")
-                p.fitCount > 0 -> append("학습 FIT ${p.fitCount}개")
-                p.powerSource == "ftp" && p.power.sixtyMinuteW != null -> {
-                    append("FTP 직접 입력 ${p.power.sixtyMinuteW.toInt()}W")
-                    p.bodyWeightKg?.let { w -> append(" · ${one(w)}kg · ${two(p.power.sixtyMinuteW / w)}W/kg") }
-                }
-                else -> append("Strava 분석 또는 FTP 입력")
+    private fun renderAidStationRows() {
+        aidContainer.removeAllViews()
+        aidRows.clear()
+        val c = course
+        if (c == null) {
+            aidContainer.addView(hintText("GPX를 선택하면 보급소 목록이 표시됩니다."))
+            return
+        }
+        val aids = c.supplyPois.sortedBy { it.routeKm }
+        if (aids.isEmpty()) {
+            aidContainer.addView(hintText("GPX에서 보급/급수 포인트를 찾지 못했습니다. 정차 없이 목표시간 계획을 만들 수 있습니다."))
+            return
+        }
+        val courseKey = RoadGranfondoEngine.courseKey(c)
+        aids.forEach { poi ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 4, 0, 4)
             }
-            p.overallSpeedKph()?.let { append(" · 로드 평속 ${one(it)} km/h") }
-            if (p.powerSource == "strava") {
-                val vals = listOfNotNull(
-                    p.power.fiveSecondW?.let { "5초 ${it.toInt()}W" },
-                    p.power.thirtySecondW?.let { "30초 ${it.toInt()}W" },
-                    p.power.oneMinuteW?.let { "1분 ${it.toInt()}W" },
-                    p.power.fiveMinuteW?.let { "5분 ${it.toInt()}W" },
-                    p.power.twentyMinuteW?.let { "20분 ${it.toInt()}W" },
-                    p.power.sixtyMinuteW?.let { "60분 ${it.toInt()}W" }
-                )
-                if (vals.isNotEmpty()) append("\nPR · ${vals.joinToString(" · ")}")
-            } else if (p.power.sixtyMinuteW != null) {
-                append("\nFTP 기준 지속파워 ${p.power.sixtyMinuteW.toInt()}W")
-                p.bodyWeightKg?.let { w -> append(" · 체중 ${one(w)}kg · ${two(p.power.sixtyMinuteW / w)}W/kg") }
+            val suffix = aidPrefSuffix(courseKey, poi)
+            val checked = prefs.getBoolean("aid_${suffix}_checked", false)
+            val savedMin = prefs.getInt("aid_${suffix}_min", 5)
+            val check = CheckBox(this).apply {
+                text = "${one(poi.routeKm)}km  ${poi.name.ifBlank { "보급소" }}"
+                isChecked = checked
+                setTextColor(getColor(R.color.text_primary))
+                textSize = 12f
             }
-            if (p.importedNames.isNotEmpty()) append("\n최근: ${p.importedNames.takeLast(2).joinToString(" · ")}")
+            val spinner = Spinner(this)
+            val labels = STOP_MINUTES.map { if (it == 0) "0분" else "${it}분" }
+            spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+            spinner.setSelection(STOP_MINUTES.indexOf(savedMin).takeIf { it >= 0 } ?: 1)
+            spinner.isEnabled = checked
+            check.setOnCheckedChangeListener { _, isChecked -> spinner.isEnabled = isChecked }
+            row.addView(check, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(spinner, LinearLayout.LayoutParams(dp(92), LinearLayout.LayoutParams.WRAP_CONTENT))
+            aidContainer.addView(row)
+            aidRows += AidRow(poi, check, spinner)
         }
     }
 
-    private fun buildEstimatedPlan(showToast: Boolean): Boolean {
-        val c = course ?: run {
-            tvExpectedFinish.text = "완주 예상시간 — · 먼저 GPX 코스를 넣어 주세요."
-            if (showToast) Toast.makeText(this, "먼저 GPX 코스를 넣어 주세요.", Toast.LENGTH_SHORT).show()
-            return false
+    private fun selectedAids(): List<RoadAidSelection> {
+        val c = course ?: return emptyList()
+        val courseKey = RoadGranfondoEngine.courseKey(c)
+        return aidRows.mapNotNull { row ->
+            val min = STOP_MINUTES.getOrElse(row.spinner.selectedItemPosition) { 0 }
+            val suffix = aidPrefSuffix(courseKey, row.poi)
+            prefs.edit()
+                .putBoolean("aid_${suffix}_checked", row.check.isChecked)
+                .putInt("aid_${suffix}_min", min)
+                .apply()
+            if (!row.check.isChecked || min <= 0) null
+            else RoadAidSelection(row.poi.name.ifBlank { "보급소" }, row.poi.routeKm, min * 60.0)
         }
-        val p = profileStore.load()
-        val built = runCatching { RoadGranfondoEngine.buildPlan(c, null, p) }.getOrElse {
-            if (showToast) Toast.makeText(this, "예상시간 계산 실패: ${it.message}", Toast.LENGTH_LONG).show()
-            return false
-        }
-        estimatedPlan = built
-        plan = built
-        val avg = if (built.totalSec > 1.0) c.totalKm / (built.totalSec / 3600.0) else 0.0
-        tvExpectedFinish.text = buildString {
-            append("완주 예상시간  ${duration(built.totalSec)}")
-            append("\n예상 이동평속 ${one(avg)} km/h · ${built.modelLabel}")
-        }
-        tvPlan.text = "예상 완주 기준 통과 계획입니다. 아래에 목표시간을 입력하면 같은 코스를 목표시간에 맞춘 통과 계획으로 다시 계산합니다."
-        renderSchedule(built, null)
-        if (showToast) Toast.makeText(this, "완주 예상시간을 계산했습니다.", Toast.LENGTH_SHORT).show()
-        return true
     }
 
     private fun buildTargetPlan(showToast: Boolean): Boolean {
-        val c = course ?: run { if (showToast) Toast.makeText(this, "먼저 GPX 코스를 넣어 주세요.", Toast.LENGTH_SHORT).show(); return false }
+        val c = course ?: run {
+            if (showToast) Toast.makeText(this, "먼저 GPX 코스를 넣어 주세요.", Toast.LENGTH_SHORT).show()
+            return false
+        }
         val targetText = etTarget.text.toString().trim()
         val targetSec = parseTargetSeconds(targetText)
         if (targetSec == null) {
-            if (showToast) Toast.makeText(this, "목표시간은 06:30처럼 입력해 주세요.", Toast.LENGTH_SHORT).show()
+            if (showToast) Toast.makeText(this, "목표시간은 05:00처럼 입력해 주세요.", Toast.LENGTH_SHORT).show()
             return false
         }
         prefs.edit().putString(KEY_TARGET, targetText).apply()
-        val p = profileStore.load()
-        val baseline = runCatching { RoadGranfondoEngine.buildPlan(c, null, p) }.getOrElse {
-            if (showToast) Toast.makeText(this, "예상시간 계산 실패: ${it.message}", Toast.LENGTH_LONG).show(); return false
+        val aids = selectedAids()
+        val built = runCatching { RoadGranfondoEngine.buildTargetPlan(c, targetSec, aids) }.getOrElse {
+            if (showToast) Toast.makeText(this, "목표 일정 생성 실패: ${it.message}", Toast.LENGTH_LONG).show()
+            return false
         }
-        val built = runCatching { RoadGranfondoEngine.buildPlan(c, targetSec, p) }.getOrElse {
-            if (showToast) Toast.makeText(this, "목표 계획 생성 실패: ${it.message}", Toast.LENGTH_LONG).show(); return false
-        }
-        estimatedPlan = baseline
         plan = built
-        val expectedAvg = if (baseline.totalSec > 1.0) c.totalKm / (baseline.totalSec / 3600.0) else 0.0
-        val targetAvg = if (targetSec > 1.0) c.totalKm / (targetSec / 3600.0) else 0.0
-        tvExpectedFinish.text = "완주 예상시간  ${duration(baseline.totalSec)}\n예상 이동평속 ${one(expectedAvg)} km/h · ${baseline.modelLabel}"
-        val delta = baseline.totalSec - targetSec
-        val comparison = when {
-            abs(delta) < 60.0 -> "현재 예상과 거의 같은 목표"
-            delta > 0.0 -> "현재 예상보다 ${duration(abs(delta))} 단축 목표"
-            else -> "현재 예상보다 ${duration(abs(delta))} 여유 있는 목표"
-        }
+        val stopSec = built.aidStops.sumOf { it.stopSec }
+        val rideSec = targetSec - stopSec
+        val overallAvg = c.totalKm / (targetSec / 3600.0)
+        val ridingAvg = c.totalKm / (rideSec / 3600.0)
         tvPlan.text = buildString {
-            append("🎯 목표 완주 ${duration(targetSec)} · 목표 이동평속 ${one(targetAvg)} km/h")
-            append("\n$comparison · 아래는 목표시간 기준 통과 계획입니다.")
+            append("🎯 목표 완주 ${duration(targetSec)}")
+            append(" · 전체평균 ${one(overallAvg)} km/h")
+            append("\n실제 주행시간 ${duration(rideSec)} · 주행평균 ${one(ridingAvg)} km/h")
+            if (built.aidStops.isEmpty()) append(" · 정차 없음")
+            else append("\n보급소 ${built.aidStops.size}곳 · 총 정차 ${duration(stopSec)}")
+            append("\nGPX 경사도 비율로 구간별 목표 통과시간을 배분했습니다.")
         }
         renderSchedule(built, null)
-        if (showToast) Toast.makeText(this, "목표시간 통과 계획을 만들었습니다.", Toast.LENGTH_SHORT).show()
+        if (showToast) Toast.makeText(this, "목표시간 일정을 만들었습니다.", Toast.LENGTH_SHORT).show()
         return true
     }
-
 
     private fun renderSchedule(roadPlan: RoadPlan, startMs: Long?) {
         tvSchedule.text = roadPlan.checkpoints.joinToString("\n") { cp ->
             if (startMs == null) {
-                String.format(Locale.US, "%6.1f km  %s  %s", cp.km, duration(cp.targetElapsedSec), cp.name)
+                if (cp.stopSec > 0.0) {
+                    String.format(
+                        Locale.US,
+                        "%6.1f km  %s 도착 → %s 출발  %s",
+                        cp.km,
+                        duration(cp.targetElapsedSec),
+                        duration(cp.targetElapsedSec + cp.stopSec),
+                        cp.name
+                    )
+                } else {
+                    String.format(Locale.US, "%6.1f km  %s  %s", cp.km, duration(cp.targetElapsedSec), cp.name)
+                }
             } else {
-                val at = startMs + (cp.targetElapsedSec * 1000.0).toLong()
-                String.format(Locale.US, "%6.1f km  %s  %s  (+%s)", cp.km, clock(at), cp.name, duration(cp.targetElapsedSec))
+                val arrival = startMs + (cp.targetElapsedSec * 1000.0).toLong()
+                if (cp.stopSec > 0.0) {
+                    val departure = arrival + (cp.stopSec * 1000.0).toLong()
+                    String.format(Locale.US, "%6.1f km  %s 도착 → %s 출발  %s", cp.km, clock(arrival), clock(departure), cp.name)
+                } else {
+                    String.format(Locale.US, "%6.1f km  %s  %s  (+%s)", cp.km, clock(arrival), cp.name, duration(cp.targetElapsedSec))
+                }
             }
         }
     }
 
     private fun startRide() {
-        if (plan == null && !buildEstimatedPlan(true)) return
+        // 입력값이나 보급소 선택이 바뀌었을 수 있으므로 시작 직전에 항상 다시 만든다.
+        if (!buildTargetPlan(true)) return
         if (!hasLocationPermission()) {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOCATION)
             return
@@ -452,29 +349,28 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private fun renderLive(location: Location, match: MatchResult) {
         val p = plan ?: return
         val now = System.currentTimeMillis()
-        val actualSec = ((now - rideStartMs).coerceAtLeast(0L) / 1000.0)
+        val actualSec = (now - rideStartMs).coerceAtLeast(0L) / 1000.0
+        val plannedStop = p.aidStops.firstOrNull {
+            abs(it.km - lastRouteKm) <= 0.15 && actualSec in it.arrivalElapsedSec..it.departureElapsedSec
+        }
         val expectedSec = p.expectedElapsedSec(lastRouteKm)
         val delta = actualSec - expectedSec
         val next = p.nextCheckpoint(lastRouteKm)
-        val predictedFinishMs = rideStartMs + ((p.totalSec + delta) * 1000.0).toLong()
+        val predictedFinishMs = rideStartMs + ((p.totalSec + if (plannedStop == null) delta else 0.0) * 1000.0).toLong()
         tvLive.text = buildString {
             append("현재 ${one(lastRouteKm)} km · ${one(lastSpeedKph)} km/h")
             if (match.gpsHeld) append(" · GPS 진행거리 보류")
             append("\n")
-            if (p.targetSpecified) {
+            if (plannedStop != null) {
+                append("${plannedStop.name} 계획 정차 · 출발까지 ${duration((plannedStop.departureElapsedSec - actualSec).coerceAtLeast(0.0))}")
+            } else {
                 when {
                     abs(delta) < 15 -> append("목표 페이스 정확")
                     delta < 0 -> append("목표보다 ${duration(-delta)} 빠름")
                     else -> append("목표보다 ${duration(delta)} 늦음")
                 }
-            } else {
-                when {
-                    abs(delta) < 15 -> append("예상 페이스 기준")
-                    delta < 0 -> append("예상보다 ${duration(-delta)} 빠름")
-                    else -> append("예상보다 ${duration(delta)} 늦음")
-                }
             }
-            append(" · 예상 FINISH ${clock(predictedFinishMs)}")
+            append(" · FINISH ${clock(predictedFinishMs)}")
             if (next != null) {
                 val targetClock = rideStartMs + (next.targetElapsedSec * 1000).toLong()
                 append("\n다음 ${next.name} ${one(next.km)} km · 통과목표 ${clock(targetClock)}")
@@ -553,17 +449,19 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         if (requestCode == REQ_LOCATION && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) startRide()
     }
 
-    private fun hasLocationPermission(): Boolean = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    private fun hasLocationPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private fun parseTargetSeconds(text: String): Double? {
         if (text.isBlank()) return null
         val parts = text.split(":")
         return when (parts.size) {
-            1 -> parts[0].toDoubleOrNull()?.times(3600.0)
+            1 -> parts[0].toDoubleOrNull()?.times(3600.0)?.takeIf { it >= 600.0 }
             2 -> {
                 val h = parts[0].toIntOrNull() ?: return null
                 val m = parts[1].toIntOrNull() ?: return null
-                if (h < 0 || m !in 0..59) null else (h * 3600 + m * 60).toDouble()
+                if (h < 0 || m !in 0..59) null else (h * 3600 + m * 60).toDouble().takeIf { it >= 600.0 }
             }
             else -> null
         }
@@ -579,8 +477,16 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
     private fun clock(ms: Long): String = SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(Date(ms))
     private fun one(v: Double) = String.format(Locale.US, "%.1f", v)
-    private fun two(v: Double) = String.format(Locale.US, "%.2f", v)
-    private fun EditText.num(): Double? = text.toString().trim().toDoubleOrNull()?.takeIf { it > 0.0 }
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun hintText(textValue: String) = TextView(this).apply {
+        text = textValue
+        setTextColor(getColor(R.color.text_secondary))
+        textSize = 11f
+        setPadding(0, dp(5), 0, dp(5))
+    }
+    private fun aidPrefSuffix(courseKey: String, poi: RoutePoi): String =
+        "${courseKey}_${(poi.routeKm * 1000).toInt()}"
+
     private fun displayName(uri: Uri): String {
         var resolved: String? = null
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
