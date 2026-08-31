@@ -66,7 +66,11 @@ object RoadGranfondoEngine {
             profile.stravaActivityCount > 0 -> "Strava ROAD ${profile.stravaActivityCount}개 + GPX 고도"
             profile.fitCount > 0 && profile.power.sustainableW() != null -> "내 FIT ${profile.fitCount}개 + 시간별 파워"
             profile.fitCount > 0 -> "내 FIT ${profile.fitCount}개"
-            profile.powerSource == "ftp" && profile.power.sustainableW() != null -> "FTP ${profile.power.sustainableW()!!.toInt()}W + GPX 고도"
+            profile.powerSource == "ftp" && profile.power.sustainableW() != null -> {
+                val wkg = profile.bodyWeightKg?.takeIf { it > 0.0 }?.let { profile.power.sustainableW()!! / it }
+                if (wkg != null) "FTP ${profile.power.sustainableW()!!.toInt()}W · ${String.format(Locale.US, "%.2f", wkg)}W/kg + GPX 고도"
+                else "FTP ${profile.power.sustainableW()!!.toInt()}W + GPX 고도"
+            }
             profile.power.sustainableW() != null -> "시간별 파워 + GPX 고도"
             else -> "GPX 고도 기본 모델"
         }
@@ -89,7 +93,8 @@ object RoadGranfondoEngine {
         val baseFromFit = profile.overallSpeedKph()?.takeIf { it in 15.0..50.0 }
         val sustainable = profile.power.sustainableW()
         val base = baseFromFit ?: (28.0 + ((sustainable ?: 180.0) - 180.0) * 0.035).coerceIn(22.0, 40.0)
-        val powerFactor = ((sustainable ?: 180.0) / 180.0).coerceIn(0.65, 1.6)
+        val wattsPerKg = profile.bodyWeightKg?.takeIf { it in 30.0..200.0 }?.let { (sustainable ?: 180.0) / it }
+        val powerFactor = (wattsPerKg?.div(2.4) ?: ((sustainable ?: 180.0) / 180.0)).coerceIn(0.55, 1.8)
         return when {
             grade <= -6.0 -> (base * 1.55).coerceAtMost(70.0)
             grade <= -2.0 -> base * (1.18 + (-grade - 2.0) * 0.045)

@@ -43,7 +43,8 @@ data class RoadTrainingProfile(
     val power: RoadPowerProfile,
     val stravaActivityCount: Int = 0,
     val stravaLastSyncMs: Long = 0L,
-    val powerSource: String? = null
+    val powerSource: String? = null,
+    val bodyWeightKg: Double? = null
 ) {
     fun overallSpeedKph(): Double? = if (totalMovingSec > 60.0) totalDistanceKm / (totalMovingSec / 3600.0) else null
     fun speedForGrade(grade: Double): Double? = bins.firstOrNull { it.contains(grade) }?.avgSpeedKph()
@@ -89,7 +90,8 @@ class RoadProfileStore(context: Context) {
                 ),
                 stravaActivityCount = o.optInt("stravaActivityCount", 0),
                 stravaLastSyncMs = o.optLong("stravaLastSyncMs", 0L),
-                powerSource = o.optString("powerSource").takeIf { it.isNotBlank() }
+                powerSource = o.optString("powerSource").takeIf { it.isNotBlank() },
+                bodyWeightKg = o.optNullableDouble("bodyWeightKg")
             )
         }.getOrElse { emptyProfile() }
     }
@@ -144,13 +146,14 @@ class RoadProfileStore(context: Context) {
         return next
     }
 
-    /** Strava를 쓰지 않는 참가자는 FTP 하나만으로 ROAD 모델을 만든다. */
-    fun saveFtpOnly(ftpW: Double): RoadTrainingProfile {
+    /** Strava를 쓰지 않는 참가자는 FTP + 현재 체중으로 ROAD 모델을 만든다. */
+    fun saveFtpOnly(ftpW: Double, bodyWeightKg: Double): RoadTrainingProfile {
         require(ftpW in 50.0..700.0) { "FTP는 50~700W 범위로 입력해 주세요." }
-        val old = load()
-        val next = old.copy(
+        require(bodyWeightKg in 30.0..200.0) { "체중은 30~200kg 범위로 입력해 주세요." }
+        val next = emptyProfile().copy(
             power = RoadPowerProfile(sixtyMinuteW = ftpW),
-            powerSource = "ftp"
+            powerSource = "ftp",
+            bodyWeightKg = bodyWeightKg
         )
         save(next)
         return next
@@ -171,7 +174,8 @@ class RoadProfileStore(context: Context) {
             power = mergedPower,
             stravaActivityCount = result.activityCount,
             stravaLastSyncMs = result.analyzedAtMs,
-            powerSource = if (stravaPower.sustainableW() != null) "strava" else if (fallbackFtp != null) "ftp" else null
+            powerSource = if (stravaPower.sustainableW() != null) "strava" else if (fallbackFtp != null) "ftp" else null,
+            bodyWeightKg = old.bodyWeightKg
         )
         save(next)
         return next
@@ -179,7 +183,7 @@ class RoadProfileStore(context: Context) {
 
     fun clearFits(): RoadTrainingProfile {
         val old = load()
-        val next = emptyProfile().copy(power = old.power, powerSource = old.powerSource)
+        val next = emptyProfile().copy(power = old.power, powerSource = old.powerSource, bodyWeightKg = old.bodyWeightKg)
         save(next)
         return next
     }
@@ -192,6 +196,7 @@ class RoadProfileStore(context: Context) {
             .put("stravaActivityCount", p.stravaActivityCount)
             .put("stravaLastSyncMs", p.stravaLastSyncMs)
             .put("powerSource", p.powerSource ?: JSONObject.NULL)
+            .put("bodyWeightKg", p.bodyWeightKg ?: JSONObject.NULL)
         val bins = JSONArray()
         p.bins.forEach { b -> bins.put(JSONObject().put("min", b.minGrade).put("max", b.maxGrade).put("seconds", b.seconds).put("speedWeighted", b.speedWeighted).put("powerSeconds", b.powerSeconds).put("powerWeighted", b.powerWeighted)) }
         o.put("bins", bins)

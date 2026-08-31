@@ -47,6 +47,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private lateinit var tvCourse: TextView
     private lateinit var tvProfile: TextView
     private lateinit var etTarget: EditText
+    private lateinit var tvExpectedFinish: TextView
     private lateinit var tvPlan: TextView
     private lateinit var tvSchedule: TextView
     private lateinit var btnRide: Button
@@ -58,6 +59,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private lateinit var tvGroup: TextView
 
     private var course: CourseData? = null
+    private var estimatedPlan: RoadPlan? = null
     private var plan: RoadPlan? = null
     private var matcher: RouteMatcher? = null
     private var riding = false
@@ -86,6 +88,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         tvCourse = findViewById(R.id.tvRoadCourse)
         tvProfile = findViewById(R.id.tvRoadProfile)
         etTarget = findViewById(R.id.etRoadTargetTime)
+        tvExpectedFinish = findViewById(R.id.tvRoadExpectedFinish)
         tvPlan = findViewById(R.id.tvRoadPlan)
         tvSchedule = findViewById(R.id.tvRoadSchedule)
         btnRide = findViewById(R.id.btnRoadRideToggle)
@@ -96,7 +99,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         btnGroup = findViewById(R.id.btnRoadGroupToggle)
         tvGroup = findViewById(R.id.tvRoadGroup)
 
-        etTarget.setText(prefs.getString(KEY_TARGET, "06:00"))
+        etTarget.setText(prefs.getString(KEY_TARGET, ""))
         etRelay.setText(prefs.getString(KEY_RELAY, ""))
         etRoom.setText(prefs.getString(KEY_ROOM, ""))
         etNick.setText(prefs.getString(KEY_NICK, "승재"))
@@ -105,7 +108,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
         findViewById<Button>(R.id.btnRoadStravaAnalyze).setOnClickListener { startStravaRoadAnalysis() }
         findViewById<Button>(R.id.btnRoadFtp).setOnClickListener { showFtpDialog() }
-        findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildPlan(showToast = true) }
+        findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildTargetPlan(showToast = true) }
         findViewById<Button>(R.id.btnRoadSimulator).setOnClickListener {
             startActivity(Intent(this, RoadRaceSimulationActivity::class.java))
         }
@@ -120,7 +123,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
         loadRoadCourse()
         refreshProfile()
-        if (course != null) buildPlan(false)
+        if (course != null) buildEstimatedPlan(false)
     }
 
     override fun onPause() {
@@ -172,7 +175,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                 }
                 runOnUiThread {
                     result.onSuccess {
-                        course = it; matcher = RouteMatcher(it); refreshCourse(); buildPlan(false)
+                        course = it; matcher = RouteMatcher(it); refreshCourse(); buildEstimatedPlan(false)
                         Toast.makeText(this, "로드 GPX를 불러왔습니다.", Toast.LENGTH_SHORT).show()
                     }.onFailure { Toast.makeText(this, "GPX 오류: ${it.message}", Toast.LENGTH_LONG).show() }
                 }
@@ -192,7 +195,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                         .onFailure { errors += (it.message ?: "분석 실패") }
                 }
                 runOnUiThread {
-                    refreshProfile(); buildPlan(false)
+                    refreshProfile(); buildEstimatedPlan(false)
                     Toast.makeText(this, "FIT ${ok}개 반영${if (errors.isNotEmpty()) " · 실패 ${errors.size}" else ""}", Toast.LENGTH_LONG).show()
                 }
             }.start()
@@ -200,25 +203,38 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     }
 
     private fun showFtpDialog() {
-        val oldFtp = profileStore.load().power.sixtyMinuteW
-        val input = EditText(this).apply {
-            hint = "FTP W · 예: 210"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(oldFtp?.toInt()?.toString() ?: "")
+        val old = profileStore.load()
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding(42, 10, 42, 0)
         }
+        val ftpInput = EditText(this).apply {
+            hint = "FTP W · 예: 210"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(old.power.sixtyMinuteW?.toInt()?.toString() ?: "")
+        }
+        val weightInput = EditText(this).apply {
+            hint = "현재 체중 kg · 예: 75"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(old.bodyWeightKg?.let { one(it) } ?: "")
+        }
+        wrap.addView(ftpInput, LinearLayout.LayoutParams(-1, -2))
+        wrap.addView(weightInput, LinearLayout.LayoutParams(-1, -2))
         AlertDialog.Builder(this)
-            .setTitle("FTP 직접 입력")
-            .setMessage("Strava를 사용하지 않는 경우 FTP 하나만 입력합니다. 시뮬레이터는 FTP + GPX 경사로 기본 능력 프로필을 만듭니다.")
-            .setView(input)
+            .setTitle("FTP + 체중 직접 입력")
+            .setMessage("Strava를 사용하지 않는 경우 FTP와 현재 체중을 입력합니다. W/kg를 계산해 업힐 예상속도와 완주 예상시간에 반영합니다.")
+            .setView(wrap)
             .setPositiveButton("저장") { _, _ ->
-                val ftp = input.text.toString().trim().toDoubleOrNull()
-                if (ftp == null || ftp !in 50.0..700.0) {
-                    Toast.makeText(this, "FTP는 50~700W 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
-                } else {
-                    profileStore.saveFtpOnly(ftp)
-                    refreshProfile(); buildPlan(false)
-                    Toast.makeText(this, "FTP ${ftp.toInt()}W 저장", Toast.LENGTH_SHORT).show()
+                val ftp = ftpInput.text.toString().trim().toDoubleOrNull()
+                val weight = weightInput.text.toString().trim().toDoubleOrNull()
+                when {
+                    ftp == null || ftp !in 50.0..700.0 -> Toast.makeText(this, "FTP는 50~700W 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
+                    weight == null || weight !in 30.0..200.0 -> Toast.makeText(this, "체중은 30~200kg 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
+                    else -> {
+                        profileStore.saveFtpOnly(ftp, weight)
+                        refreshProfile(); buildEstimatedPlan(false)
+                        Toast.makeText(this, "FTP ${ftp.toInt()}W · ${one(weight)}kg · ${two(ftp / weight)}W/kg 저장", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             .setNegativeButton("취소", null)
@@ -255,7 +271,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                 stravaAnalysisBusy = false
                 result.onSuccess { analyzed ->
                     profileStore.replaceWithStrava(analyzed)
-                    refreshProfile(); buildPlan(false)
+                    refreshProfile(); buildEstimatedPlan(false)
                     Toast.makeText(this, "Strava ROAD ${analyzed.activityCount}개 분석 완료", Toast.LENGTH_LONG).show()
                 }.onFailure { e ->
                     refreshProfile()
@@ -293,7 +309,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             when {
                 p.stravaActivityCount > 0 -> append("Strava ROAD ${p.stravaActivityCount}개 분석")
                 p.fitCount > 0 -> append("학습 FIT ${p.fitCount}개")
-                p.powerSource == "ftp" && p.power.sixtyMinuteW != null -> append("FTP 직접 입력 ${p.power.sixtyMinuteW.toInt()}W")
+                p.powerSource == "ftp" && p.power.sixtyMinuteW != null -> {
+                    append("FTP 직접 입력 ${p.power.sixtyMinuteW.toInt()}W")
+                    p.bodyWeightKg?.let { w -> append(" · ${one(w)}kg · ${two(p.power.sixtyMinuteW / w)}W/kg") }
+                }
                 else -> append("Strava 분석 또는 FTP 입력")
             }
             p.overallSpeedKph()?.let { append(" · 로드 평속 ${one(it)} km/h") }
@@ -309,32 +328,69 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                 if (vals.isNotEmpty()) append("\nPR · ${vals.joinToString(" · ")}")
             } else if (p.power.sixtyMinuteW != null) {
                 append("\nFTP 기준 지속파워 ${p.power.sixtyMinuteW.toInt()}W")
+                p.bodyWeightKg?.let { w -> append(" · 체중 ${one(w)}kg · ${two(p.power.sixtyMinuteW / w)}W/kg") }
             }
             if (p.importedNames.isNotEmpty()) append("\n최근: ${p.importedNames.takeLast(2).joinToString(" · ")}")
         }
     }
 
-    private fun buildPlan(showToast: Boolean): Boolean {
+    private fun buildEstimatedPlan(showToast: Boolean): Boolean {
+        val c = course ?: run {
+            tvExpectedFinish.text = "완주 예상시간 — · 먼저 GPX 코스를 넣어 주세요."
+            if (showToast) Toast.makeText(this, "먼저 GPX 코스를 넣어 주세요.", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        val p = profileStore.load()
+        val built = runCatching { RoadGranfondoEngine.buildPlan(c, null, p) }.getOrElse {
+            if (showToast) Toast.makeText(this, "예상시간 계산 실패: ${it.message}", Toast.LENGTH_LONG).show()
+            return false
+        }
+        estimatedPlan = built
+        plan = built
+        val avg = if (built.totalSec > 1.0) c.totalKm / (built.totalSec / 3600.0) else 0.0
+        tvExpectedFinish.text = buildString {
+            append("완주 예상시간  ${duration(built.totalSec)}")
+            append("\n예상 이동평속 ${one(avg)} km/h · ${built.modelLabel}")
+        }
+        tvPlan.text = "예상 완주 기준 통과 계획입니다. 아래에 목표시간을 입력하면 같은 코스를 목표시간에 맞춘 통과 계획으로 다시 계산합니다."
+        renderSchedule(built, null)
+        if (showToast) Toast.makeText(this, "완주 예상시간을 계산했습니다.", Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    private fun buildTargetPlan(showToast: Boolean): Boolean {
         val c = course ?: run { if (showToast) Toast.makeText(this, "먼저 GPX 코스를 넣어 주세요.", Toast.LENGTH_SHORT).show(); return false }
         val targetText = etTarget.text.toString().trim()
         val targetSec = parseTargetSeconds(targetText)
-        if (targetText.isNotBlank() && targetSec == null) {
+        if (targetSec == null) {
             if (showToast) Toast.makeText(this, "목표시간은 06:30처럼 입력해 주세요.", Toast.LENGTH_SHORT).show()
             return false
         }
         prefs.edit().putString(KEY_TARGET, targetText).apply()
         val p = profileStore.load()
-        val built = runCatching { RoadGranfondoEngine.buildPlan(c, targetSec, p) }.getOrElse {
-            if (showToast) Toast.makeText(this, "계획 생성 실패: ${it.message}", Toast.LENGTH_LONG).show(); return false
+        val baseline = runCatching { RoadGranfondoEngine.buildPlan(c, null, p) }.getOrElse {
+            if (showToast) Toast.makeText(this, "예상시간 계산 실패: ${it.message}", Toast.LENGTH_LONG).show(); return false
         }
+        val built = runCatching { RoadGranfondoEngine.buildPlan(c, targetSec, p) }.getOrElse {
+            if (showToast) Toast.makeText(this, "목표 계획 생성 실패: ${it.message}", Toast.LENGTH_LONG).show(); return false
+        }
+        estimatedPlan = baseline
         plan = built
+        val expectedAvg = if (baseline.totalSec > 1.0) c.totalKm / (baseline.totalSec / 3600.0) else 0.0
+        val targetAvg = if (targetSec > 1.0) c.totalKm / (targetSec / 3600.0) else 0.0
+        tvExpectedFinish.text = "완주 예상시간  ${duration(baseline.totalSec)}\n예상 이동평속 ${one(expectedAvg)} km/h · ${baseline.modelLabel}"
+        val delta = baseline.totalSec - targetSec
+        val comparison = when {
+            abs(delta) < 60.0 -> "현재 예상과 거의 같은 목표"
+            delta > 0.0 -> "현재 예상보다 ${duration(abs(delta))} 단축 목표"
+            else -> "현재 예상보다 ${duration(abs(delta))} 여유 있는 목표"
+        }
         tvPlan.text = buildString {
-            append(if (built.targetSpecified) "목표 완주 ${duration(built.totalSec)}" else "예상 완주 ${duration(built.totalSec)}")
-            append(" · ${built.modelLabel}")
-            append("\nGPX 고도와 내 기록으로 구간 난이도를 배분한 뒤${if (built.targetSpecified) " 전체 시간을 목표 완주시간에 맞춰 스케일" else " 예상시간 계산"}합니다.")
+            append("🎯 목표 완주 ${duration(targetSec)} · 목표 이동평속 ${one(targetAvg)} km/h")
+            append("\n$comparison · 아래는 목표시간 기준 통과 계획입니다.")
         }
         renderSchedule(built, null)
-        if (showToast) Toast.makeText(this, "그란폰도 통과 계획을 만들었습니다.", Toast.LENGTH_SHORT).show()
+        if (showToast) Toast.makeText(this, "목표시간 통과 계획을 만들었습니다.", Toast.LENGTH_SHORT).show()
         return true
     }
 
@@ -351,7 +407,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     }
 
     private fun startRide() {
-        if (plan == null && !buildPlan(true)) return
+        if (plan == null && !buildEstimatedPlan(true)) return
         if (!hasLocationPermission()) {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOCATION)
             return
@@ -405,10 +461,18 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             append("현재 ${one(lastRouteKm)} km · ${one(lastSpeedKph)} km/h")
             if (match.gpsHeld) append(" · GPS 진행거리 보류")
             append("\n")
-            when {
-                abs(delta) < 15 -> append("목표 페이스 정확")
-                delta < 0 -> append("목표보다 ${duration(-delta)} 빠름")
-                else -> append("목표보다 ${duration(delta)} 늦음")
+            if (p.targetSpecified) {
+                when {
+                    abs(delta) < 15 -> append("목표 페이스 정확")
+                    delta < 0 -> append("목표보다 ${duration(-delta)} 빠름")
+                    else -> append("목표보다 ${duration(delta)} 늦음")
+                }
+            } else {
+                when {
+                    abs(delta) < 15 -> append("예상 페이스 기준")
+                    delta < 0 -> append("예상보다 ${duration(-delta)} 빠름")
+                    else -> append("예상보다 ${duration(delta)} 늦음")
+                }
             }
             append(" · 예상 FINISH ${clock(predictedFinishMs)}")
             if (next != null) {
@@ -515,6 +579,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
     private fun clock(ms: Long): String = SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(Date(ms))
     private fun one(v: Double) = String.format(Locale.US, "%.1f", v)
+    private fun two(v: Double) = String.format(Locale.US, "%.2f", v)
     private fun EditText.num(): Double? = text.toString().trim().toDoubleOrNull()?.takeIf { it > 0.0 }
     private fun displayName(uri: Uri): String {
         var resolved: String? = null

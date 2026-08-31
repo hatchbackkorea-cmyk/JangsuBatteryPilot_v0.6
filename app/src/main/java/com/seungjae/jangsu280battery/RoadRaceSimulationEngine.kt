@@ -175,7 +175,7 @@ object RoadRaceSimulationEngine {
 object RoadSimulationProfileBuilder {
     private val bins = listOf(-99.0 to -4.0, -4.0 to -1.0, -1.0 to 1.0, 1.0 to 3.0, 3.0 to 6.0, 6.0 to 99.0)
 
-    fun fromFits(analyses: List<HistoricalRideAnalysis>, manualPower: RoadPowerProfile = RoadPowerProfile()): RoadTrainingProfile {
+    fun fromFits(analyses: List<HistoricalRideAnalysis>, manualPower: RoadPowerProfile = RoadPowerProfile(), bodyWeightKg: Double? = null): RoadTrainingProfile {
         val out = bins.map { (a, b) -> RoadGradeBin(a, b, 0.0, 0.0, 0.0, 0.0) }.toMutableList()
         var totalDistance = 0.0
         var totalMoving = 0.0
@@ -218,7 +218,9 @@ object RoadSimulationProfileBuilder {
             totalMovingSec = totalMoving,
             bins = out,
             importedNames = analyses.map { it.displayName }.takeLast(12),
-            power = manualPower
+            power = manualPower,
+            powerSource = if (analyses.isEmpty() && manualPower.sustainableW() != null) "ftp" else if (manualPower.sustainableW() != null) "manual" else null,
+            bodyWeightKg = bodyWeightKg
         )
     }
 }

@@ -33,7 +33,8 @@ class RoadRaceSimulationActivity : Activity() {
         val targetSec: Double?,
         val startOffsetSec: Double,
         val aidStopSec: Double,
-        val power: RoadPowerProfile
+        val power: RoadPowerProfile,
+        val bodyWeightKg: Double?
     )
 
     private lateinit var courseRepo: CourseRepository
@@ -124,10 +125,11 @@ class RoadRaceSimulationActivity : Activity() {
         val p5 = if (requireFit) field("5분 파워 W · 선택", true) else null
         val p20 = if (requireFit) field("20분 파워 W · 선택", true) else null
         val p60 = field(if (requireFit) "60분/FTP 근처 W · 선택" else "FTP W · 필수", true)
+        val weight = field(if (requireFit) "체중 kg · 선택" else "체중 kg · 필수", true)
 
         AlertDialog.Builder(this)
             .setTitle(if (requireFit) "참가자 FIT 추가" else "FTP로 참가자 추가")
-            .setMessage(if (requireFit) "한 참가자의 최근 ROAD FIT 여러 개를 한 번에 선택할 수 있습니다." else "Strava/FIT 기록이 없는 참가자는 FTP 하나만 입력합니다.")
+            .setMessage(if (requireFit) "한 참가자의 최근 ROAD FIT 여러 개를 한 번에 선택할 수 있습니다. 체중을 넣으면 기록이 부족한 업힐 구간 보정에 사용합니다." else "Strava/FIT 기록이 없는 참가자는 FTP와 체중을 입력합니다.")
             .setView(wrap)
             .setPositiveButton(if (requireFit) "FIT 선택" else "추가") { _, _ ->
                 val nickname = name.text.toString().trim().ifBlank { "라이더${riderConfigs.size + 1}" }
@@ -136,7 +138,8 @@ class RoadRaceSimulationActivity : Activity() {
                     targetSec = parseTargetSeconds(target.text.toString().trim()),
                     startOffsetSec = (startDelay.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0,
                     aidStopSec = (aidStop.text.toString().toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0) * 60.0,
-                    power = RoadPowerProfile(oneMinuteW = p1?.num(), fiveMinuteW = p5?.num(), twentyMinuteW = p20?.num(), sixtyMinuteW = p60.num())
+                    power = RoadPowerProfile(oneMinuteW = p1?.num(), fiveMinuteW = p5?.num(), twentyMinuteW = p20?.num(), sixtyMinuteW = p60.num()),
+                    bodyWeightKg = weight.num()?.takeIf { it in 30.0..200.0 }
                 )
                 if (requireFit) {
                     pendingRider = pending
@@ -144,8 +147,10 @@ class RoadRaceSimulationActivity : Activity() {
                 } else {
                     if (pending.power.sixtyMinuteW == null) {
                         Toast.makeText(this, "FTP를 입력해 주세요.", Toast.LENGTH_LONG).show()
+                    } else if (pending.bodyWeightKg == null) {
+                        Toast.makeText(this, "체중은 30~200kg 범위로 입력해 주세요.", Toast.LENGTH_LONG).show()
                     } else {
-                        riderConfigs += SimulationRiderConfig(nickname, RoadSimulationProfileBuilder.fromFits(emptyList(), pending.power), pending.targetSec, pending.startOffsetSec, pending.aidStopSec)
+                        riderConfigs += SimulationRiderConfig(nickname, RoadSimulationProfileBuilder.fromFits(emptyList(), pending.power, pending.bodyWeightKg), pending.targetSec, pending.startOffsetSec, pending.aidStopSec)
                         refreshRiders(); rebuildPlans()
                     }
                 }
@@ -186,7 +191,7 @@ class RoadRaceSimulationActivity : Activity() {
                     tvRiders.text = "FIT 분석 실패 · ${errors.firstOrNull() ?: "파일을 확인해 주세요."}"
                     return@runOnUiThread
                 }
-                val profile = RoadSimulationProfileBuilder.fromFits(analyses, pending.power)
+                val profile = RoadSimulationProfileBuilder.fromFits(analyses, pending.power, pending.bodyWeightKg)
                 riderConfigs += SimulationRiderConfig(pending.nickname, profile, pending.targetSec, pending.startOffsetSec, pending.aidStopSec)
                 refreshRiders(); rebuildPlans()
                 Toast.makeText(this, "${pending.nickname} · FIT ${analyses.size}개 반영", Toast.LENGTH_LONG).show()
@@ -297,12 +302,15 @@ class RoadRaceSimulationActivity : Activity() {
 
     private fun refreshRiders() {
         tvRiders.text = if (riderConfigs.isEmpty()) {
-            "참가자 없음 · ROAD 기록이 있으면 FIT, 없으면 FTP 하나만 입력"
+            "참가자 없음 · ROAD 기록이 있으면 FIT, 없으면 FTP + 체중 입력"
         } else buildString {
             append("참가자 ${riderConfigs.size}/20")
             riderConfigs.forEach { r ->
                 append("\n• ${r.nickname} · FIT ${r.profile.fitCount}개")
-                r.profile.power.sustainableW()?.let { append(" · 지속파워 ${it.toInt()}W") }
+                r.profile.power.sustainableW()?.let { power ->
+                    append(" · 지속파워 ${power.toInt()}W")
+                    r.profile.bodyWeightKg?.let { w -> append(" · ${one(w)}kg · ${String.format(Locale.US, "%.2f", power / w)}W/kg") }
+                }
                 if (r.startOffsetSec > 0) append(" · 출발 +${duration(r.startOffsetSec)}")
                 append(if (r.defaultAidStopSec > 0) " · 보급 ${duration(r.defaultAidStopSec)}" else " · 보급 PASS")
             }

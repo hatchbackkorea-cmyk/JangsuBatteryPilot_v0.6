@@ -91,7 +91,7 @@
                     android:layout_height="46dp"
                     android:layout_marginStart="5dp"
                     android:layout_weight="1"
-                    android:text="+ FTP만" />
+                    android:text="+ FTP+체중" />
                 <Button
                     android:id="@+id/btnSimClearRiders"
                     android:layout_width="wrap_content"
