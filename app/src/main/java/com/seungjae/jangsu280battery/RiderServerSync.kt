@@ -29,6 +29,8 @@ class RiderServerSync(context: Context) {
         private const val KEY_LAST_OK = "last_ok_ms"
         private const val KEY_LAST_ERROR = "last_error"
         private const val KEY_REMOTE_PLANS = "remote_plans"
+        private const val KEY_PROFILE_SOURCE = "profile_source"
+        private const val KEY_ADMIN_DEVICE = "admin_device_paired"
     }
 
     private val app = context.applicationContext
@@ -47,6 +49,62 @@ class RiderServerSync(context: Context) {
     fun configured(): Boolean = serverUrl().startsWith("http") && token().isNotBlank()
     fun pendingCount(): Int = synchronized(lock) { readQueue().length() }
     fun remotePlans(): JSONArray = runCatching { JSONArray(prefs.getString(KEY_REMOTE_PLANS, "[]")) }.getOrDefault(JSONArray())
+    fun profileSource(): String = prefs.getString(KEY_PROFILE_SOURCE, "수동") ?: "수동"
+    fun isAdminDeviceCached(): Boolean = prefs.getBoolean(KEY_ADMIN_DEVICE, false)
+
+    private fun setAdminDeviceCached(value: Boolean) {
+        prefs.edit().putBoolean(KEY_ADMIN_DEVICE, value).apply()
+    }
+
+    fun pairAdminPhoneAsync(server: String, pairCode: String, callback: (Result) -> Unit) {
+        Thread {
+            val result = runCatching {
+                val url = server.trim().trimEnd('/')
+                val code = pairCode.filter { it.isDigit() }
+                require(url.startsWith("http://") || url.startsWith("https://")) { "서버 주소를 확인해 주세요." }
+                require(code.length == 8) { "8자리 관리자폰 등록 코드를 입력해 주세요." }
+                val body = JSONObject().apply {
+                    put("pair_code", code)
+                    put("device_name", "${Build.MANUFACTURER} ${Build.MODEL}")
+                }
+                val x = publicJsonRequest(url, "/api/mobile/admin/pair", "POST", body)
+                val newToken = x.getString("device_token")
+                secure.saveToken(newToken)
+                val rider = x.optJSONObject("rider")
+                val edit = prefs.edit().putString(KEY_URL, url).putBoolean(KEY_ADMIN_DEVICE, true)
+                rider?.optString("name")?.takeIf { it.isNotBlank() }?.let { edit.putString(KEY_NAME, it) }
+                rider?.optDouble("weight_kg")?.takeIf { it > 0.0 }?.let { edit.putString(KEY_WEIGHT, String.format(Locale.US, "%.2f", it)) }
+                rider?.optDouble("ftp_w")?.takeIf { it > 0.0 }?.let { edit.putString(KEY_FTP, String.format(Locale.US, "%.1f", it)) }
+                edit.apply()
+                Result(true, "관리자폰 등록 완료 · 이제 관리자 메뉴가 표시됩니다.")
+            }.getOrElse { Result(false, "관리자폰 등록 실패 · ${it.message ?: "서버 연결 확인"}") }
+            callback(result)
+        }.start()
+    }
+
+    fun checkAdminStatusAsync(callback: ((Result) -> Unit)? = null) {
+        Thread {
+            if (!configured()) {
+                setAdminDeviceCached(false)
+                callback?.invoke(Result(false, "Rider Server 미연결"))
+                return@Thread
+            }
+            val result = try {
+                val x = getJson("/api/mobile/admin/status")
+                val ok = x.optBoolean("is_admin", false)
+                setAdminDeviceCached(ok)
+                Result(ok, if (ok) "관리자폰 인증됨" else "관리자폰 권한 없음")
+            } catch (e: HttpFailure) {
+                if (e.code == 401 || e.code == 403) setAdminDeviceCached(false)
+                Result(false, if (e.code == 401 || e.code == 403) "관리자폰 권한 없음" else "관리자폰 상태 확인 실패 · ${e.message}")
+            } catch (e: Exception) {
+                // Network failure does not erase a previously paired admin state. Server-side auth still protects admin APIs.
+                Result(false, "관리자폰 상태 확인 보류 · ${e.message ?: "네트워크 확인"}")
+            }
+            callback?.invoke(result)
+        }.start()
+    }
+
 
     fun configure(url: String, deviceToken: String, name: String, weightKg: Double, ftpW: Double, auto: Boolean) {
         prefs.edit()
@@ -59,16 +117,30 @@ class RiderServerSync(context: Context) {
         if (deviceToken.isNotBlank()) secure.saveToken(deviceToken)
     }
 
+
+    fun updatePerformanceProfile(weightKg: Double, ftpW: Double, source: String) {
+        prefs.edit()
+            .putString(KEY_WEIGHT, String.format(Locale.US, "%.2f", weightKg.coerceIn(30.0, 200.0)))
+            .putString(KEY_FTP, String.format(Locale.US, "%.1f", ftpW.coerceIn(50.0, 600.0)))
+            .putString(KEY_PROFILE_SOURCE, source)
+            .apply()
+        triggerIfAuto()
+    }
+
+    /** Backward-compatible helper. Password is intentionally ignored in v0.32.1; paired admin-device token is the credential. */
     fun verifyAdminAsync(password: String, serverOverride: String? = null, tokenOverride: String? = null, callback: (Result) -> Unit) {
         Thread {
             val result = runCatching {
                 val url = (serverOverride ?: serverUrl()).trim().trimEnd('/')
                 val tok = (tokenOverride?.takeIf { it.isNotBlank() } ?: token()).trim()
                 require(url.startsWith("http")) { "서버 주소를 확인해 주세요." }
-                require(tok.isNotBlank()) { "연결 토큰을 입력해 주세요." }
-                explicitJsonRequest(url, tok, "/api/mobile/admin/verify", "POST", JSONObject().put("password", password))
-                Result(true, "관리자 인증 성공")
-            }.getOrElse { Result(false, "관리자 인증 실패 · ${it.message ?: "서버 연결 확인"}") }
+                require(tok.isNotBlank()) { "연결 토큰이 없습니다." }
+                val x = explicitJsonRequest(url, tok, "/api/mobile/admin/status", "GET", null)
+                val ok = x.optBoolean("is_admin", false)
+                setAdminDeviceCached(ok)
+                if (!ok) error("관리자폰이 아닙니다.")
+                Result(true, "관리자폰 인증 성공")
+            }.getOrElse { Result(false, "관리자폰 인증 실패 · ${it.message ?: "서버 연결 확인"}") }
             callback(result)
         }.start()
     }
@@ -196,7 +268,7 @@ class RiderServerSync(context: Context) {
         val curve = roadPowerCurve()
         return JSONObject().apply {
             if (riderName().isNotBlank()) put("name", riderName())
-            put("weight_kg", weightKg()); put("ftp_w", ftpW()); put("power_curve", curve)
+            put("weight_kg", weightKg()); put("ftp_w", ftpW()); put("watts_per_kg", ftpW() / weightKg()); put("profile_source", profileSource()); put("power_curve", curve)
         }
     }
 
@@ -255,10 +327,20 @@ class RiderServerSync(context: Context) {
     }
 
     private class HttpFailure(val code:Int, message:String): RuntimeException(message)
-    private fun explicitJsonRequest(baseUrl:String, bearer:String, path:String, method:String, body:JSONObject):JSONObject {
+    private fun explicitJsonRequest(baseUrl:String, bearer:String, path:String, method:String, body:JSONObject?):JSONObject {
+        val c=(URL(baseUrl.trimEnd('/')+path).openConnection() as HttpURLConnection).apply {
+            requestMethod=method; connectTimeout=8000; readTimeout=15000
+            setRequestProperty("Authorization","Bearer $bearer")
+            setRequestProperty("Accept","application/json")
+            if (body != null) { doOutput=true; setRequestProperty("Content-Type","application/json; charset=utf-8") }
+        }
+        if (body != null) c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        return readResponse(c)
+    }
+
+    private fun publicJsonRequest(baseUrl:String, path:String, method:String, body:JSONObject):JSONObject {
         val c=(URL(baseUrl.trimEnd('/')+path).openConnection() as HttpURLConnection).apply {
             requestMethod=method; connectTimeout=8000; readTimeout=15000; doOutput=true
-            setRequestProperty("Authorization","Bearer $bearer")
             setRequestProperty("Accept","application/json")
             setRequestProperty("Content-Type","application/json; charset=utf-8")
         }

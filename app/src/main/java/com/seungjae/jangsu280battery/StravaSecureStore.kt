@@ -30,6 +30,9 @@ class StravaSecureStore(context: Context) {
         private const val EXPIRES = "expires_at"
         private const val ATHLETE = "athlete_name"
         private const val SCOPE = "granted_scope"
+        private const val ATHLETE_WEIGHT = "athlete_weight_kg"
+        private const val ATHLETE_FTP = "athlete_ftp_w"
+        private const val ATHLETE_PROFILE_AT = "athlete_profile_at"
     }
 
     fun saveClientSecret(value: String) = putEncrypted(SECRET, value.trim())
@@ -49,10 +52,21 @@ class StravaSecureStore(context: Context) {
     fun athleteName(): String? = prefs.getString(ATHLETE, null)?.takeIf { it.isNotBlank() }
     fun grantedScope(): String = prefs.getString(SCOPE, "").orEmpty()
     fun hasActivityRead(): Boolean = grantedScope().contains("activity:read")
+    fun hasProfileRead(): Boolean = grantedScope().contains("profile:read_all")
+    fun athleteWeightKg(): Double? = prefs.getString(ATHLETE_WEIGHT, null)?.toDoubleOrNull()?.takeIf { it in 30.0..200.0 }
+    fun athleteFtpW(): Double? = prefs.getString(ATHLETE_FTP, null)?.toDoubleOrNull()?.takeIf { it in 50.0..600.0 }
+    fun athleteProfileAtMs(): Long = prefs.getLong(ATHLETE_PROFILE_AT, 0L)
+    fun saveAthleteProfile(weightKg: Double?, ftpW: Double?) {
+        val e = prefs.edit()
+        if (weightKg != null && weightKg in 30.0..200.0) e.putString(ATHLETE_WEIGHT, weightKg.toString()) else e.remove(ATHLETE_WEIGHT)
+        if (ftpW != null && ftpW in 50.0..600.0) e.putString(ATHLETE_FTP, ftpW.toString()) else e.remove(ATHLETE_FTP)
+        e.putLong(ATHLETE_PROFILE_AT, System.currentTimeMillis()).apply()
+    }
     fun isConnected(): Boolean = !accessToken().isNullOrBlank() && !refreshToken().isNullOrBlank()
 
     fun clearTokens() {
-        prefs.edit().remove(ACCESS).remove(REFRESH).remove(EXPIRES).remove(ATHLETE).remove(SCOPE).apply()
+        prefs.edit().remove(ACCESS).remove(REFRESH).remove(EXPIRES).remove(ATHLETE).remove(SCOPE)
+            .remove(ATHLETE_WEIGHT).remove(ATHLETE_FTP).remove(ATHLETE_PROFILE_AT).apply()
     }
 
     private fun putEncrypted(name: String, plain: String) {

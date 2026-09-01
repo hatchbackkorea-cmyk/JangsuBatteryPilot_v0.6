@@ -13,7 +13,7 @@
             <Button android:id="@+id/btnAdminBack" android:layout_width="wrap_content" android:layout_height="44dp" android:text="←" />
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🔐 관리자" android:textColor="@color/text_primary" android:textSize="25sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tvAdminAuthStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="관리자 인증 필요" android:textColor="@color/text_secondary" android:textSize="11sp" />
+                <TextView android:id="@+id/tvAdminAuthStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="관리자폰 확인 중…" android:textColor="@color/text_secondary" android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -28,21 +28,22 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="14dp">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📡 Rider Control Center" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold" />
             <TextView android:id="@+id/tvAdminSyncStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="서버 연결 상태" android:textColor="@color/text_secondary" android:textSize="12sp" />
-            <EditText android:id="@+id/etAdminServerUrl" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="7dp" android:hint="서버 주소 예: http://192.168.0.10:8000" android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
-            <EditText android:id="@+id/etAdminDeviceToken" android:layout_width="match_parent" android:layout_height="48dp" android:hint="새 연결 토큰 · 비워두면 기존 토큰 유지" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <EditText android:id="@+id/etAdminServerUrl" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="7dp" android:hint="관리자폰에 등록된 Rider Control Center 주소" android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <EditText android:id="@+id/etAdminDeviceToken" android:layout_width="match_parent" android:layout_height="48dp" android:hint="관리자폰 보안 토큰" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
                 <EditText android:id="@+id/etAdminRiderName" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1.4" android:hint="라이더 이름" android:inputType="textPersonName" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
                 <EditText android:id="@+id/etAdminWeight" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="체중 kg" android:inputType="numberDecimal" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
                 <EditText android:id="@+id/etAdminFtp" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="FTP W" android:inputType="numberDecimal" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
             </LinearLayout>
+            <TextView android:id="@+id/tvAdminWkg" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="W/kg -" android:textColor="@color/text_secondary" android:textSize="11sp" />
             <Switch android:id="@+id/switchAdminAutoSync" android:layout_width="match_parent" android:layout_height="46dp" android:text="변경 데이터 자동 업로드" android:textColor="@color/text_primary" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <Button android:id="@+id/btnAdminSaveConnection" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="연결 저장/검증" />
+                <Button android:id="@+id/btnAdminSaveConnection" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="설정 저장" />
                 <Button android:id="@+id/btnAdminSyncNow" android:layout_width="0dp" android:layout_height="50dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="지금 동기화" />
             </LinearLayout>
         </LinearLayout>
 
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_marginBottom="24dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp">
+        <LinearLayout android:id="@+id/panelAdminPassword" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_marginBottom="24dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp" android:visibility="gone">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🔑 관리자 암호 변경" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="여기서 바꾸면 PC Rider Control Center 관리자 로그인 암호도 즉시 같이 바뀝니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
             <EditText android:id="@+id/etAdminCurrentPassword" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:hint="현재 관리자 암호" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />

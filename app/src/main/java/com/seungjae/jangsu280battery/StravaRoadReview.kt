@@ -176,7 +176,12 @@ class StravaReviewStore(context: Context) {
         require(c.resolvedYear() > 0) { "연동할 연도를 선택해 주세요." }
         val linked = c.copy(selectedYear = c.resolvedYear(), linkedAtMs = System.currentTimeMillis())
         prefs.edit().putString(ACTIVE, toJson(linked).toString()).apply()
-        RiderServerSync(app).syncAllAsync()
+        val snap = StravaPerformanceEstimator.snapshot(app, linked.resolvedYear())
+        val weight = snap?.weightKg
+        val ftp = snap?.effectiveFtpW
+        val sync = RiderServerSync(app)
+        if (weight != null && ftp != null) sync.updatePerformanceProfile(weight, ftp, "Strava ${linked.resolvedYear()}년")
+        sync.syncAllAsync()
         return linked
     }
 

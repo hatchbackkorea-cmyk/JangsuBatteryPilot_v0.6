@@ -2,9 +2,13 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -35,6 +39,9 @@ class RoadRaceSimulationActivity : Activity() {
         private const val BASIS_TIME = "time"
         private const val BASIS_SPEED = "speed"
         private const val BASIS_CUTOFF = "cutoff"
+        private const val BASIS_FTP = "ftp"
+        private const val BASIS_WKG = "wkg"
+        private const val BASIS_STRAVA = "strava"
         private const val AUTO_TARGET_REAL_SEC = 50.0
         private const val MIN_AUTO_MULTIPLIER = 1.0
         private const val MAX_AUTO_MULTIPLIER = 2400.0
@@ -134,9 +141,11 @@ class RoadRaceSimulationActivity : Activity() {
         val targetBasis = when (prefs.getString(KEY_PLAN_BASIS, BASIS_TIME)) {
             BASIS_SPEED -> BASIS_SPEED
             BASIS_CUTOFF -> BASIS_CUTOFF
+            BASIS_STRAVA -> BASIS_STRAVA
             else -> BASIS_TIME
         }
         val nickname = prefs.getString(KEY_NICK, null)?.trim().orEmpty().ifBlank { "나" }
+        val selfStrava = if (targetBasis == BASIS_STRAVA) StravaPerformanceEstimator.snapshot(this) else null
         val self = SimulationRiderConfig(
             nickname = nickname,
             targetSec = targetSec,
@@ -144,7 +153,13 @@ class RoadRaceSimulationActivity : Activity() {
             startOffsetSec = 0.0,
             aidSelections = savedSelfAidSelections(c),
             cutoffSelections = savedRaceCutoffs(c),
-            isSelf = true
+            isSelf = true,
+            weightKg = selfStrava?.weightKg,
+            ftpW = selfStrava?.effectiveFtpW,
+            wattsPerKg = selfStrava?.wattsPerKg,
+            stravaYear = selfStrava?.year,
+            powerCurve = selfStrava?.powerCurve,
+            performanceSource = selfStrava?.sourceLabel.orEmpty()
         )
         riderConfigs.add(0, self)
     }
@@ -165,6 +180,12 @@ class RoadRaceSimulationActivity : Activity() {
                     savedSelfAidSelections(c)
                 ).ridingTargetSec
             }.getOrElse { prefs.getLong(KEY_CUTOFF_DERIVED_SEC, 0L).toDouble() }
+            BASIS_STRAVA -> {
+                val snap = StravaPerformanceEstimator.snapshot(this) ?: return 0.0
+                val w = snap.weightKg ?: return 0.0
+                val f = snap.effectiveFtpW ?: return 0.0
+                runCatching { RoadPowerPaceEstimator.estimate(c, w, f, snap.powerCurve).ridingTargetSec }.getOrDefault(0.0)
+            }
             else -> {
                 val h = prefs.getInt(KEY_TARGET_HOUR, 5).coerceIn(0, 20)
                 val m = prefs.getInt(KEY_TARGET_MINUTE, 0).coerceIn(0, 59)
@@ -207,15 +228,30 @@ class RoadRaceSimulationActivity : Activity() {
         }
 
         wrap.addView(TextView(this).apply {
-            text = "참가자마다 목표시간·목표평속·컷오프 페이스 중 하나를 고르고, 보급소 방문 여부와 정차시간도 따로 설정합니다."
+            text = "목표시간·평속·컷오프뿐 아니라 FTP·W/kg·Strava 기준으로도 참가자 페이스를 자동 추정합니다. 체중/FTP/Wkg는 서로 연동됩니다."
             setPadding(0, 0, 0, dp(4))
         })
 
         label("목표 기준 · 보급시간은 별도")
         val existingTarget = existing?.targetSec ?: 5.0 * 3600.0
         val existingBasis = existing?.targetBasis ?: BASIS_TIME
-        val basis = spinner(listOf("목표 주행시간", "목표 평속", "컷오프 페이스 · 자동 평속")).apply {
-            setSelection(when (existingBasis) { BASIS_SPEED -> 1; BASIS_CUTOFF -> 2; else -> 0 })
+        val basisValues = listOf(
+            "목표 주행시간",
+            "목표 평속",
+            "컷오프 페이스 · 자동 평속",
+            "FTP 기준 · 체중 포함 자동추정",
+            "W/kg 기준 · FTP 자동계산",
+            "Strava 기준 · 선택연도 자동분석"
+        )
+        val basis = spinner(basisValues).apply {
+            setSelection(when (existingBasis) {
+                BASIS_SPEED -> 1
+                BASIS_CUTOFF -> 2
+                BASIS_FTP -> 3
+                BASIS_WKG -> 4
+                BASIS_STRAVA -> 5
+                else -> 0
+            })
         }
         wrap.addView(basis, LinearLayout.LayoutParams(-1, -2))
 
@@ -235,10 +271,144 @@ class RoadRaceSimulationActivity : Activity() {
         val speed = spinner(TARGET_SPEEDS.map { "${one(it)} km/h" }).apply { setSelection(speedIndex) }
         wrap.addView(speed, LinearLayout.LayoutParams(-1, -2))
 
-        val cutoffPreview = TextView(this).apply {
-            setPadding(0, dp(5), 0, dp(3))
-        }
+        val cutoffPreview = TextView(this).apply { setPadding(0, dp(5), 0, dp(3)) }
         wrap.addView(cutoffPreview, LinearLayout.LayoutParams(-1, -2))
+
+        // FTP / Wkg / Strava 능력 입력 영역
+        val powerBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(2))
+        }
+        label("라이더 능력 · FTP/Wkg/Strava 기준에서 사용")
+        val metricRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        // 새 참가자에게 관리자 자신의 FTP/체중이 자동 복사되면 잘못된 시뮬레이션이 되므로 비워 둔다.
+        // 기본 '나' 참가자를 수정할 때는 Rider Control Center에 동기화된 내 값까지 fallback으로 사용한다.
+        val syncProfile = RiderServerSync(this)
+        val defaultWeight = existing?.weightKg ?: if (existing?.isSelf == true) syncProfile.weightKg() else null
+        val defaultFtp = existing?.ftpW ?: if (existing?.isSelf == true) syncProfile.ftpW() else null
+        val defaultWkg = existing?.wattsPerKg ?: if (defaultWeight != null && defaultFtp != null && defaultWeight > 0.0) defaultFtp / defaultWeight else null
+        val weight = EditText(this).apply {
+            hint = "체중 kg"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(defaultWeight?.let { String.format(Locale.US, "%.1f", it) }.orEmpty())
+        }
+        val ftp = EditText(this).apply {
+            hint = "FTP W"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(defaultFtp?.let { String.format(Locale.US, "%.0f", it) }.orEmpty())
+        }
+        val wkg = EditText(this).apply {
+            hint = "W/kg"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(defaultWkg?.let { String.format(Locale.US, "%.2f", it) }.orEmpty())
+        }
+        metricRow.addView(weight, LinearLayout.LayoutParams(0, -2, 1f))
+        metricRow.addView(ftp, LinearLayout.LayoutParams(0, -2, 1f))
+        metricRow.addView(wkg, LinearLayout.LayoutParams(0, -2, 1f))
+        powerBox.addView(metricRow, LinearLayout.LayoutParams(-1, -2))
+
+        val stravaStore = StravaReviewStore(this)
+        val stravaSecure = StravaSecureStore(this)
+        val activeStrava = stravaStore.loadActive()
+        val stravaYears = activeStrava?.availableYears.orEmpty()
+        val stravaYearRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+        val stravaYear = spinner(if (stravaYears.isEmpty()) listOf("연도 없음") else stravaYears.map { "${it}년" }).apply {
+            isEnabled = stravaYears.isNotEmpty()
+            val wanted = existing?.stravaYear ?: activeStrava?.resolvedYear()
+            if (wanted != null && wanted in stravaYears) setSelection(stravaYears.indexOf(wanted))
+        }
+        val stravaManage = Button(this).apply {
+            text = if (stravaSecure.isConnected()) "Strava 관리" else "Strava 연결"
+            setOnClickListener { startActivity(Intent(this@RoadRaceSimulationActivity, StravaReviewActivity::class.java)) }
+        }
+        stravaYearRow.addView(stravaYear, LinearLayout.LayoutParams(0, -2, 1f))
+        stravaYearRow.addView(stravaManage, LinearLayout.LayoutParams(dp(122), -2))
+        powerBox.addView(stravaYearRow, LinearLayout.LayoutParams(-1, -2))
+
+        val powerPreview = TextView(this).apply {
+            setPadding(0, dp(4), 0, dp(4))
+            textSize = 12f
+        }
+        powerBox.addView(powerPreview, LinearLayout.LayoutParams(-1, -2))
+        wrap.addView(powerBox, LinearLayout.LayoutParams(-1, -2))
+
+        var syncingMetrics = false
+        fun metricDouble(e: EditText): Double? = e.text.toString().trim().toDoubleOrNull()
+        fun setMetric(e: EditText, text: String) {
+            if (e.text.toString() != text) e.setText(text)
+        }
+        fun syncFromFtp() {
+            if (syncingMetrics) return
+            val ww = metricDouble(weight) ?: return
+            val ff = metricDouble(ftp) ?: return
+            if (ww <= 0.0) return
+            syncingMetrics = true
+            setMetric(wkg, String.format(Locale.US, "%.2f", ff / ww))
+            syncingMetrics = false
+        }
+        fun syncFromWkg() {
+            if (syncingMetrics) return
+            val ww = metricDouble(weight) ?: return
+            val ratio = metricDouble(wkg) ?: return
+            if (ww <= 0.0) return
+            syncingMetrics = true
+            setMetric(ftp, String.format(Locale.US, "%.0f", ww * ratio))
+            syncingMetrics = false
+        }
+        fun addWatcher(e: EditText, action: () -> Unit) {
+            e.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { if (!syncingMetrics) action() }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        addWatcher(ftp) { syncFromFtp() }
+        addWatcher(wkg) { syncFromWkg() }
+        addWatcher(weight) {
+            if (wkg.hasFocus()) syncFromWkg() else syncFromFtp()
+        }
+
+        fun selectedStravaYear(): Int? = if (stravaYears.isEmpty()) null else stravaYears.getOrNull(stravaYear.selectedItemPosition)
+
+        fun applyStravaSnapshot(refreshNetwork: Boolean = false) {
+            val year = selectedStravaYear() ?: activeStrava?.resolvedYear()
+            val snap = StravaPerformanceEstimator.snapshot(this, year)
+            if (snap == null) {
+                powerPreview.text = "Strava 연동 프로필이 없습니다. 'Strava 연결'에서 전체 ROAD 분석 후 기준연도를 적용해 주세요."
+                return
+            }
+            syncingMetrics = true
+            snap.weightKg?.let { setMetric(weight, String.format(Locale.US, "%.1f", it)) }
+            snap.effectiveFtpW?.let { setMetric(ftp, String.format(Locale.US, "%.0f", it)) }
+            if (snap.weightKg != null && snap.effectiveFtpW != null) setMetric(wkg, String.format(Locale.US, "%.2f", snap.effectiveFtpW / snap.weightKg))
+            syncingMetrics = false
+            powerPreview.text = buildString {
+                append("${snap.sourceLabel}")
+                snap.yearEstimatedFtpW?.let { append(" · 연도추정 ${it.toInt()}W") }
+                snap.currentProfileFtpW?.let { append(" · 현재프로필 ${it.toInt()}W") }
+                snap.weightKg?.let { append(" · ${one(it)}kg") }
+                snap.wattsPerKg?.let { append(" · ${String.format(Locale.US, "%.2f", it)} W/kg") }
+                if (!stravaSecure.hasProfileRead()) append("\n※ Strava 체중/현재 FTP 자동갱신은 profile:read_all 권한 재연결이 필요합니다.")
+            }
+            if (refreshNetwork && stravaSecure.isConnected() && stravaSecure.hasProfileRead()) {
+                Thread {
+                    val result = runCatching {
+                        val token = StravaClient.ensureAccessToken(stravaSecure)
+                        StravaClient.getAuthenticatedAthlete(token)
+                    }
+                    runOnUiThread {
+                        result.onSuccess { athlete ->
+                            stravaSecure.saveAthleteProfile(athlete.weightKg, athlete.ftpW)
+                            if (basis.selectedItemPosition == 5) applyStravaSnapshot(false)
+                        }
+                    }
+                }.start()
+            }
+        }
+
+        stravaYear.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (basis.selectedItemPosition == 5) applyStravaSnapshot(false)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
 
         label("출발 지연")
         val startDelay = spinner((0..60).map { "${it}분" }).apply {
@@ -293,9 +463,7 @@ class RoadRaceSimulationActivity : Activity() {
             }
             val delayMin = startDelay.selectedItemPosition.coerceIn(0, 60)
             val participantStart = (savedRaceStartMinuteOfDay() + delayMin) % 1440
-            val result = runCatching {
-                RoadGranfondoEngine.solveCutoffTarget(c, participantStart, raceCutoffs, currentAids())
-            }
+            val result = runCatching { RoadGranfondoEngine.solveCutoffTarget(c, participantStart, raceCutoffs, currentAids()) }
             cutoffPreview.text = result.fold(
                 onSuccess = { sol ->
                     "컷오프 ${raceCutoffs.size}곳 적용 · 출발 ${clockMinuteOfDay(participantStart)} · 필요 최소 평속 ${one(sol.requiredAvgKph)} km/h · 순수주행 ${duration(sol.ridingTargetSec)} · 기준 ${sol.controlling.name}"
@@ -307,11 +475,18 @@ class RoadRaceSimulationActivity : Activity() {
         fun applyBasisUi() {
             val byTime = basis.selectedItemPosition == 0
             val bySpeed = basis.selectedItemPosition == 1
+            val byPower = basis.selectedItemPosition in 3..5
+            val byStrava = basis.selectedItemPosition == 5
             hour.isEnabled = byTime
             minute.isEnabled = byTime
             speed.isEnabled = bySpeed
             timeRow.alpha = if (byTime) 1.0f else 0.42f
             speed.alpha = if (bySpeed) 1.0f else 0.42f
+            powerBox.visibility = if (byPower) View.VISIBLE else View.GONE
+            stravaYear.isEnabled = byStrava && stravaYears.isNotEmpty()
+            stravaManage.visibility = if (byStrava) View.VISIBLE else View.GONE
+            if (byStrava) applyStravaSnapshot(true)
+            else if (byPower) powerPreview.text = "체중 + FTP/Wkg를 GPX 경사 물리모델에 넣어 예상 순수 주행시간을 자동 계산합니다."
             updateCutoffPreview()
         }
         basis.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -335,14 +510,8 @@ class RoadRaceSimulationActivity : Activity() {
         applyBasisUi()
 
         val title = if (existing == null) "참가자 추가" else if (existing.isSelf) "내 시뮬레이션 설정" else "참가자 수정"
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, dp(4))
-        }
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(wrap)
-        }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(4)) }
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(wrap) }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val buttonBar = LinearLayout(this).apply {
@@ -350,10 +519,7 @@ class RoadRaceSimulationActivity : Activity() {
             gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(5), dp(8), dp(5))
         }
-        val deleteButton = Button(this).apply {
-            text = "삭제"
-            visibility = if (existing != null) View.VISIBLE else View.GONE
-        }
+        val deleteButton = Button(this).apply { text = "삭제"; visibility = if (existing != null) View.VISIBLE else View.GONE }
         val cancelButton = Button(this).apply { text = "취소" }
         val saveButton = Button(this).apply { text = if (existing == null) "참가자 추가" else "저장" }
         if (existing != null) buttonBar.addView(deleteButton, LinearLayout.LayoutParams(0, -2, 1f))
@@ -362,10 +528,7 @@ class RoadRaceSimulationActivity : Activity() {
         buttonBar.addView(saveButton, LinearLayout.LayoutParams(-2, -2))
         root.addView(buttonBar, LinearLayout.LayoutParams(-1, -2))
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(root)
-            .create()
+        val dialog = AlertDialog.Builder(this).setTitle(title).setView(root).create()
 
         cancelButton.setOnClickListener { dialog.dismiss() }
         deleteButton.setOnClickListener {
@@ -376,12 +539,7 @@ class RoadRaceSimulationActivity : Activity() {
                     riderConfigs.getOrNull(it)?.let(expandedRiderCards::remove)
                     riderConfigs.removeAt(it)
                 }
-                pauseSimulation()
-                simSec = 0.0
-                refreshRiders()
-                rebuildPlans()
-                renderFrame()
-                dialog.dismiss()
+                pauseSimulation(); simSec = 0.0; refreshRiders(); rebuildPlans(); renderFrame(); dialog.dismiss()
             }
         }
         saveButton.setOnClickListener {
@@ -391,12 +549,23 @@ class RoadRaceSimulationActivity : Activity() {
             val targetBasis = when (basis.selectedItemPosition) {
                 1 -> BASIS_SPEED
                 2 -> BASIS_CUTOFF
+                3 -> BASIS_FTP
+                4 -> BASIS_WKG
+                5 -> BASIS_STRAVA
                 else -> BASIS_TIME
             }
             val riderAids = currentAids()
             val delaySec = startDelay.selectedItemPosition * 60.0
             val raceCutoffs = savedRaceCutoffs(c)
             val selectedSpeed = TARGET_SPEEDS.getOrElse(speed.selectedItemPosition) { 25.0 }
+
+            var storedWeight: Double? = existing?.weightKg
+            var storedFtp: Double? = existing?.ftpW
+            var storedWkg: Double? = existing?.wattsPerKg
+            var storedYear: Int? = existing?.stravaYear
+            var storedCurve: StravaPowerCurve? = existing?.powerCurve
+            var source = existing?.performanceSource.orEmpty()
+
             val targetSec = when (targetBasis) {
                 BASIS_SPEED -> c.totalKm / selectedSpeed.coerceAtLeast(1.0) * 3600.0
                 BASIS_CUTOFF -> {
@@ -405,17 +574,53 @@ class RoadRaceSimulationActivity : Activity() {
                         return@setOnClickListener
                     }
                     val participantStart = (savedRaceStartMinuteOfDay() + startDelay.selectedItemPosition) % 1440
-                    runCatching {
-                        RoadGranfondoEngine.solveCutoffTarget(c, participantStart, raceCutoffs, riderAids).ridingTargetSec
-                    }.getOrElse {
-                        Toast.makeText(this, "컷오프 페이스 계산 실패: ${it.message}", Toast.LENGTH_LONG).show()
+                    runCatching { RoadGranfondoEngine.solveCutoffTarget(c, participantStart, raceCutoffs, riderAids).ridingTargetSec }
+                        .getOrElse {
+                            Toast.makeText(this, "컷오프 페이스 계산 실패: ${it.message}", Toast.LENGTH_LONG).show()
+                            return@setOnClickListener
+                        }
+                }
+                BASIS_FTP, BASIS_WKG, BASIS_STRAVA -> {
+                    if (targetBasis == BASIS_STRAVA) applyStravaSnapshot(false)
+                    val ww = metricDouble(weight)
+                    val ratio = metricDouble(wkg)
+                    val ff = when (targetBasis) {
+                        BASIS_WKG -> if (ww != null && ratio != null) ww * ratio else null
+                        else -> metricDouble(ftp)
+                    }
+                    if (ww == null || ww !in 30.0..200.0 || ff == null || ff !in 50.0..600.0) {
+                        Toast.makeText(this, "체중/FTP/Wkg 값을 확인해 주세요.", Toast.LENGTH_LONG).show()
                         return@setOnClickListener
                     }
+                    if (targetBasis == BASIS_STRAVA) {
+                        val year = selectedStravaYear()
+                        val snap = StravaPerformanceEstimator.snapshot(this, year)
+                        if (snap == null || year == null) {
+                            Toast.makeText(this, "Strava ROAD 분석에서 기준연도를 먼저 연동해 주세요.", Toast.LENGTH_LONG).show()
+                            return@setOnClickListener
+                        }
+                        storedYear = year
+                        storedCurve = snap.powerCurve
+                        source = snap.sourceLabel
+                    } else {
+                        storedYear = null
+                        storedCurve = null
+                        source = if (targetBasis == BASIS_WKG) "W/kg 직접입력" else "FTP 직접입력"
+                    }
+                    storedWeight = ww
+                    storedFtp = ff
+                    storedWkg = ff / ww
+                    val estimate = runCatching { RoadPowerPaceEstimator.estimate(c, ww, ff, storedCurve) }.getOrElse {
+                        Toast.makeText(this, "파워 페이스 계산 실패: ${it.message}", Toast.LENGTH_LONG).show()
+                        return@setOnClickListener
+                    }
+                    Toast.makeText(this, "${source} · 예상 순수주행 ${duration(estimate.ridingTargetSec)} · ${one(estimate.averageKph)} km/h", Toast.LENGTH_LONG).show()
+                    estimate.ridingTargetSec
                 }
                 else -> hour.selectedItemPosition * 3600.0 + minute.selectedItemPosition * 60.0
             }
             if (targetSec < 600.0) {
-                Toast.makeText(this, "목표 주행시간/평속/컷오프 조건을 확인해 주세요.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "목표 주행시간/평속/컷오프/파워 조건을 확인해 주세요.", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
             val updated = SimulationRiderConfig(
@@ -425,23 +630,23 @@ class RoadRaceSimulationActivity : Activity() {
                 startOffsetSec = delaySec,
                 aidSelections = riderAids,
                 cutoffSelections = if (targetBasis == BASIS_CUTOFF) raceCutoffs else emptyList(),
-                isSelf = existing?.isSelf == true
+                isSelf = existing?.isSelf == true,
+                weightKg = storedWeight,
+                ftpW = storedFtp,
+                wattsPerKg = storedWkg,
+                stravaYear = storedYear,
+                powerCurve = storedCurve,
+                performanceSource = source
             )
-            if (editIndex == null) {
-                riderConfigs += updated
-            } else {
+            if (editIndex == null) riderConfigs += updated
+            else {
                 val wasExpanded = existing?.let { it in expandedRiderCards } == true
                 existing?.let(expandedRiderCards::remove)
                 riderConfigs[editIndex] = updated
                 if (wasExpanded) expandedRiderCards.add(updated)
             }
             if (updated.isSelf) prefs.edit().putString(KEY_NICK, nickname).apply()
-            pauseSimulation()
-            simSec = 0.0
-            refreshRiders()
-            rebuildPlans()
-            renderFrame()
-            dialog.dismiss()
+            pauseSimulation(); simSec = 0.0; refreshRiders(); rebuildPlans(); renderFrame(); dialog.dismiss()
         }
 
         dialog.setOnShowListener {
@@ -628,12 +833,20 @@ class RoadRaceSimulationActivity : Activity() {
             val targetLabel = when (rider.targetBasis) {
                 BASIS_SPEED -> "목표평속 ${one(avg)} km/h · 주행 ${duration(rider.targetSec)}"
                 BASIS_CUTOFF -> "컷오프 기준 · 필요 ${one(avg)} km/h · 주행 ${duration(rider.targetSec)}"
+                BASIS_FTP -> "FTP 기준 · 주행 ${duration(rider.targetSec)} · ${one(avg)} km/h"
+                BASIS_WKG -> "W/kg 기준 · 주행 ${duration(rider.targetSec)} · ${one(avg)} km/h"
+                BASIS_STRAVA -> "Strava ${rider.stravaYear ?: "-"}년 기준 · 주행 ${duration(rider.targetSec)} · ${one(avg)} km/h"
                 else -> "목표시간 ${duration(rider.targetSec)} · 환산 ${one(avg)} km/h"
             }
             card.addView(TextView(this).apply {
                 text = buildString {
                     append(targetLabel)
                     if (rider.startOffsetSec > 0) append(" · 출발 +${duration(rider.startOffsetSec)}")
+                    if (rider.weightKg != null && rider.ftpW != null) {
+                        append("\n${one(rider.weightKg)}kg · FTP ${rider.ftpW.toInt()}W")
+                        rider.wattsPerKg?.let { append(" · ${String.format(Locale.US, "%.2f", it)} W/kg") }
+                        if (rider.performanceSource.isNotBlank()) append(" · ${rider.performanceSource}")
+                    }
                 }
                 textSize = 13f
                 setTextColor(getColor(R.color.text_secondary))

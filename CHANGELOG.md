@@ -1,3 +1,26 @@
+# v0.32.0 — Google Cloud 실시간 그룹 라이딩
+
+- 그룹 위치 공유를 10초 REST 폴링에서 WebSocket 실시간 push로 변경했습니다.
+- GPS 갱신마다 최대 약 1초 간격으로 위치를 전송하고, Rider Control Center에서 즉시 참가자 순위/진행거리를 받습니다.
+- 기존 Rider Control Center 서버 URL과 Device Token을 그대로 사용하므로 별도 릴레이 URL/토큰이 필요 없습니다.
+- Cloud Run의 WebSocket 시간 제한이나 LTE/5G 순간 끊김 후 자동 재연결합니다.
+- OkHttp WebSocket ping으로 모바일/NAT 연결을 유지합니다.
+- PC 관리자 실시간 그룹 관제 화면과 연동됩니다.
+
+# v0.31.8 — Strava FTP/Wkg 풀연동 + 참가자 파워기준
+
+- ROAD 참가자 목표기준에 `FTP`, `W/kg`, `Strava`를 추가했습니다.
+- FTP 기준은 체중과 함께 사용하며 `W/kg = FTP ÷ 체중`을 자동 계산합니다.
+- W/kg 기준은 `FTP = W/kg × 체중`으로 자동 추론합니다.
+- Strava 기준은 선택한 기준연도의 파워 PR을 바탕으로 FTP를 추정하고, Strava 현재 체중/현재 FTP를 보조값으로 사용합니다.
+- Strava 연도 FTP 추정은 20분×0.95, 40분×0.98, 1시간 기록 중 유효한 최대 후보를 사용합니다. 공식 Strava 과거 FTP 값이 아니라 앱의 연도별 PR 추정값입니다.
+- Strava OAuth에 `profile:read_all`을 추가해 현재 체중과 현재 FTP를 자동 갱신합니다. 기존 연결 사용자는 한 번 재승인이 필요할 수 있습니다.
+- 선택 연도의 15초~4시간 파워커브, 체중, FTP, W/kg가 Rider Control Center 프로필 동기화에 반영됩니다.
+- ROAD 메인 목표 페이스 계획에도 `Strava 기준`을 추가해 GPX 경사 + 체중 + FTP + 파워커브로 예상 순수주행시간을 계산합니다.
+- 참가자 카드에 체중, FTP, W/kg, 성능 데이터 출처를 표시합니다.
+- 신규 다른 참가자에는 관리자 자신의 체중/FTP를 자동 복사하지 않아 오입력을 방지합니다.
+- 기존 관리자 토큰/IP/서버 0.3 데이터 구조와 호환됩니다.
+
 # v0.31.7 — 관리자 통합 센터
 - 앱 첫 화면(eMTB / ROAD 선택)에 `🔐 관리자 · 업데이트 / Rider Control Center` 메뉴를 추가했습니다.
 - 관리자 메뉴 진입 시 PC Rider Control Center와 동일한 관리자 암호를 서버에서 검증합니다.

@@ -8,6 +8,12 @@ import java.net.URL
 import java.net.URLEncoder
 
 object StravaClient {
+    data class AthleteProfile(
+        val name: String?,
+        val weightKg: Double?,
+        val ftpW: Double?
+    )
+
     data class TokenResult(
         val accessToken: String,
         val refreshToken: String,
@@ -41,6 +47,18 @@ object StravaClient {
         )
     }
 
+
+    fun getAuthenticatedAthlete(accessToken: String): AthleteProfile {
+        val json = requestGetJson("https://www.strava.com/api/v3/athlete", accessToken)
+        val name = listOfNotNull(
+            json.optString("firstname").takeIf { it.isNotBlank() },
+            json.optString("lastname").takeIf { it.isNotBlank() }
+        ).joinToString(" ").takeIf { it.isNotBlank() }
+        val weight = json.optDouble("weight", Double.NaN).takeIf { it.isFinite() && it in 30.0..200.0 }
+        val ftp = if (json.isNull("ftp")) null else json.optDouble("ftp", Double.NaN).takeIf { it.isFinite() && it in 50.0..600.0 }
+        return AthleteProfile(name, weight, ftp)
+    }
+
     fun ensureAccessToken(store: StravaSecureStore): String {
         val access = store.accessToken() ?: error("Strava 연결이 필요합니다.")
         val now = System.currentTimeMillis() / 1000L
@@ -64,6 +82,25 @@ object StravaClient {
             expiresAt = json.getLong("expires_at"),
             athleteName = name
         )
+    }
+
+
+    private fun requestGetJson(url: String, bearer: String): JSONObject {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15000
+            readTimeout = 20000
+            setRequestProperty("Authorization", "Bearer $bearer")
+            setRequestProperty("Accept", "application/json")
+        }
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val text = stream?.use { BufferedReader(InputStreamReader(it)).readText() }.orEmpty()
+        if (code !in 200..299) {
+            val message = runCatching { JSONObject(text).optString("message") }.getOrNull().orEmpty()
+            error("Strava HTTP $code${if (message.isNotBlank()) " · $message" else ""}")
+        }
+        return JSONObject(text)
     }
 
     private fun requestJson(url: String, body: String): JSONObject {

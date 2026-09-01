@@ -1,14 +1,11 @@
 package com.seungjae.jangsu280battery
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
-import android.text.InputType
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
-import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -24,13 +21,13 @@ class AdminCenterActivity : Activity() {
     private lateinit var etName: EditText
     private lateinit var etWeight: EditText
     private lateinit var etFtp: EditText
+    private lateinit var tvWkg: TextView
     private lateinit var switchAuto: Switch
     private lateinit var switchBeta: Switch
     private lateinit var btnSyncNow: Button
     private lateinit var btnSave: Button
     private lateinit var btnCheckUpdate: Button
     private var authenticated = false
-    private var activePassword = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,7 +36,21 @@ class AdminCenterActivity : Activity() {
         bindViews()
         populate()
         wire()
-        requireAdminLogin()
+        checkAdminPhone()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (authenticated) {
+            sync.checkAdminStatusAsync { result ->
+                runOnUiThread {
+                    if (!result.ok && !sync.isAdminDeviceCached()) {
+                        Toast.makeText(this, "관리자폰 권한이 해제되었습니다.", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                }
+            }
+        }
     }
 
     private fun bindViews() {
@@ -52,6 +63,7 @@ class AdminCenterActivity : Activity() {
         etName = findViewById(R.id.etAdminRiderName)
         etWeight = findViewById(R.id.etAdminWeight)
         etFtp = findViewById(R.id.etAdminFtp)
+        tvWkg = findViewById(R.id.tvAdminWkg)
         switchAuto = findViewById(R.id.switchAdminAutoSync)
         switchBeta = findViewById(R.id.switchAdminBetaUpdates)
         btnSyncNow = findViewById(R.id.btnAdminSyncNow)
@@ -67,9 +79,11 @@ class AdminCenterActivity : Activity() {
         etFtp.setText(String.format(Locale.US, "%.0f", sync.ftpW()))
         switchAuto.isChecked = sync.autoEnabled()
         switchBeta.isChecked = AppSettings.betaUpdates(this)
+        refreshWkg()
         refreshUpdate()
         refreshSync()
         setAdminUiEnabled(false)
+        tvAuth.text = "관리자폰 확인 중…"
     }
 
     private fun wire() {
@@ -79,115 +93,93 @@ class AdminCenterActivity : Activity() {
             refreshUpdate()
         }
         btnCheckUpdate.setOnClickListener { checkUpdate() }
+        val metricWatcher = object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = refreshWkg()
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        }
+        etWeight.addTextChangedListener(metricWatcher)
+        etFtp.addTextChangedListener(metricWatcher)
         findViewById<Button>(R.id.btnAdminMobileRelease).setOnClickListener {
             if (authenticated) startActivity(Intent(this, ReleaseUploaderActivity::class.java))
         }
-        btnSave.setOnClickListener { verifyAndSaveConnection() }
+        btnSave.setOnClickListener { saveAdminSettings() }
         btnSyncNow.setOnClickListener { runSync() }
-        findViewById<Button>(R.id.btnAdminChangePassword).setOnClickListener { changePassword() }
     }
 
-    private fun requireAdminLogin() {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(36, 8, 36, 0)
+    private fun checkAdminPhone() {
+        if (!sync.isAdminDeviceCached() || !sync.configured()) {
+            Toast.makeText(this, "이 휴대폰은 관리자폰으로 등록되어 있지 않습니다.", Toast.LENGTH_LONG).show()
+            finish()
+            return
         }
-        val server = EditText(this).apply {
-            hint = "Rider Server 주소"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setText(sync.serverUrl())
-        }
-        val token = EditText(this).apply {
-            hint = if (sync.token().isNotBlank()) "연결 토큰 · 비우면 저장된 토큰 사용" else "PC에서 발급한 연결 토큰"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        val password = EditText(this).apply {
-            hint = "관리자 암호"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        box.addView(server); box.addView(token); box.addView(password)
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("🔐 관리자 인증")
-            .setMessage("앱 업데이트와 Rider Control Center는 관리자만 사용할 수 있습니다.")
-            .setView(box)
-            .setPositiveButton("확인", null)
-            .setNegativeButton("취소") { _, _ -> finish() }
-            .setOnCancelListener { finish() }
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val url = server.text.toString().trim()
-                val enteredToken = token.text.toString().trim()
-                val pw = password.text.toString()
-                if (url.isBlank() || (enteredToken.isBlank() && sync.token().isBlank()) || pw.isBlank()) {
-                    Toast.makeText(this, "서버 주소 · 연결 토큰 · 관리자 암호를 확인해 주세요.", Toast.LENGTH_LONG).show()
-                    return@setOnClickListener
-                }
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-                tvAuth.text = "관리자 인증 중…"
-                sync.verifyAdminAsync(pw, url, enteredToken.ifBlank { null }) { result ->
-                    runOnUiThread {
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                        if (!result.ok) {
-                            tvAuth.text = result.message
-                            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-                        } else {
-                            sync.configure(url, enteredToken, sync.riderName(), sync.weightKg(), sync.ftpW(), sync.autoEnabled())
-                            activePassword = pw
-                            authenticated = true
-                            tvAuth.text = "관리자 인증됨 · PC 관리자 암호와 연동"
-                            etServer.setText(sync.serverUrl())
-                            setAdminUiEnabled(true)
-                            refreshSync("인증 성공")
-                            dialog.dismiss()
-                        }
-                    }
+        sync.checkAdminStatusAsync { result ->
+            runOnUiThread {
+                if (result.ok && sync.isAdminDeviceCached()) {
+                    authenticated = true
+                    tvAuth.text = "관리자폰 인증됨 · 비밀번호 입력 없음"
+                    etServer.setText(sync.serverUrl())
+                    setAdminUiEnabled(true)
+                    refreshSync("관리자폰 연결 정상")
+                } else if (!sync.isAdminDeviceCached()) {
+                    Toast.makeText(this, "관리자폰 권한이 없거나 해제되었습니다.", Toast.LENGTH_LONG).show()
+                    finish()
+                } else {
+                    // Offline: cached role can keep the local update menu visible; network actions will fail safely.
+                    authenticated = true
+                    tvAuth.text = "관리자폰 · 서버 상태 확인 보류"
+                    setAdminUiEnabled(true)
+                    refreshSync(result.message)
                 }
             }
         }
-        dialog.show()
     }
 
     private fun setAdminUiEnabled(enabled: Boolean) {
-        listOf<View>(etServer, etToken, etName, etWeight, etFtp, switchAuto, switchBeta,
-            btnSyncNow, btnSave, btnCheckUpdate,
-            findViewById(R.id.btnAdminMobileRelease), findViewById(R.id.btnAdminChangePassword),
-            findViewById(R.id.etAdminCurrentPassword), findViewById(R.id.etAdminNewPassword), findViewById(R.id.etAdminConfirmPassword)
+        listOf<View>(etName, etWeight, etFtp, switchAuto, switchBeta,
+            btnSyncNow, btnSave, btnCheckUpdate, findViewById(R.id.btnAdminMobileRelease)
         ).forEach { it.isEnabled = enabled }
+        // Server address/token are assigned only by the hidden one-time admin-phone pairing flow.
+        etServer.isEnabled = false
+        etToken.visibility = View.GONE
     }
 
-    private fun verifyAndSaveConnection() {
+    private fun refreshWkg() {
+        val w = etWeight.text.toString().toDoubleOrNull()
+        val f = etFtp.text.toString().toDoubleOrNull()
+        tvWkg.text = if (w != null && w > 0.0 && f != null) {
+            "W/kg ${String.format(Locale.US, "%.2f", f / w)} · 기준 ${sync.profileSource()}"
+        } else "W/kg -"
+    }
+
+    private fun saveAdminSettings() {
+        if (!authenticated) return
         val weight = etWeight.text.toString().toDoubleOrNull()
         val ftp = etFtp.text.toString().toDoubleOrNull()
         if (weight == null || ftp == null) {
-            Toast.makeText(this, "체중/FTP 숫자를 확인해 주세요.", Toast.LENGTH_SHORT).show(); return
+            Toast.makeText(this, "체중/FTP 숫자를 확인해 주세요.", Toast.LENGTH_SHORT).show()
+            return
         }
-        val url = etServer.text.toString().trim()
-        val enteredToken = etToken.text.toString().trim()
-        btnSave.isEnabled = false
-        sync.verifyAdminAsync(activePassword, url, enteredToken.ifBlank { null }) { result ->
-            runOnUiThread {
-                btnSave.isEnabled = true
-                if (!result.ok) {
-                    Toast.makeText(this, result.message, Toast.LENGTH_LONG).show(); refreshSync(result.message); return@runOnUiThread
-                }
-                sync.configure(url, enteredToken, etName.text.toString(), weight, ftp, switchAuto.isChecked)
-                etToken.setText("")
-                refreshSync("연결 저장 + 관리자 검증 완료")
-                if (sync.configured()) runSync()
-            }
-        }
+        sync.configure(sync.serverUrl(), "", etName.text.toString(), weight, ftp, switchAuto.isChecked)
+        refreshSync("설정 저장 완료")
+        Toast.makeText(this, "관리자폰 설정을 저장했습니다.", Toast.LENGTH_SHORT).show()
+        if (sync.configured()) runSync()
     }
 
     private fun runSync() {
-        if (!sync.configured()) { refreshSync("서버 주소/연결 토큰을 먼저 저장하세요."); return }
+        if (!sync.configured()) {
+            refreshSync("관리자폰 등록이 필요합니다.")
+            return
+        }
         btnSyncNow.isEnabled = false
         refreshSync("서버 동기화 중…")
-        sync.syncAllAsync { result -> runOnUiThread {
-            btnSyncNow.isEnabled = true
-            refreshSync(result.message)
-            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-        } }
+        sync.syncAllAsync { result ->
+            runOnUiThread {
+                btnSyncNow.isEnabled = true
+                refreshSync(result.message)
+                Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun refreshSync(extra: String? = null) {
@@ -211,29 +203,16 @@ class AdminCenterActivity : Activity() {
         btnCheckUpdate.isEnabled = false
         refreshUpdate("GitHub에서 최신 릴리스 확인 중…")
         UpdateManager.checkAsync(this) { result ->
-            btnCheckUpdate.isEnabled = true
-            result.onSuccess { info ->
-                if (info == null) refreshUpdate("최신 버전입니다.")
-                else { refreshUpdate("새 버전 v${info.versionName} 사용 가능"); UpdateManager.showUpdateDialog(this, info) }
-            }.onFailure { refreshUpdate("업데이트 확인 실패 · ${it.message ?: "네트워크 확인"}") }
-        }
-    }
-
-    private fun changePassword() {
-        val current = findViewById<EditText>(R.id.etAdminCurrentPassword).text.toString().ifBlank { activePassword }
-        val fresh = findViewById<EditText>(R.id.etAdminNewPassword).text.toString()
-        val confirm = findViewById<EditText>(R.id.etAdminConfirmPassword).text.toString()
-        if (fresh.length < 6) { Toast.makeText(this, "새 관리자 암호는 6자 이상으로 입력해 주세요.", Toast.LENGTH_LONG).show(); return }
-        if (fresh != confirm) { Toast.makeText(this, "새 암호 확인이 일치하지 않습니다.", Toast.LENGTH_LONG).show(); return }
-        sync.changeAdminPasswordAsync(current, fresh) { result -> runOnUiThread {
-            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-            if (result.ok) {
-                activePassword = fresh
-                findViewById<EditText>(R.id.etAdminCurrentPassword).setText("")
-                findViewById<EditText>(R.id.etAdminNewPassword).setText("")
-                findViewById<EditText>(R.id.etAdminConfirmPassword).setText("")
-                tvAuth.text = "관리자 인증됨 · 암호 변경 완료 · PC 세션 로그아웃됨"
+            runOnUiThread {
+                btnCheckUpdate.isEnabled = true
+                result.onSuccess { info ->
+                    if (info == null) refreshUpdate("최신 버전입니다.")
+                    else {
+                        refreshUpdate("새 버전 v${info.versionName} 사용 가능")
+                        UpdateManager.showUpdateDialog(this, info)
+                    }
+                }.onFailure { refreshUpdate("업데이트 확인 실패 · ${it.message ?: "네트워크 확인"}") }
             }
-        } }
+        }
     }
 }

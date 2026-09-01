@@ -49,7 +49,8 @@
         android:layout_marginTop="18dp"
         android:text="🔐 관리자 · 업데이트 / Rider Control Center"
         android:textSize="15sp"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <TextView
         android:layout_width="match_parent"

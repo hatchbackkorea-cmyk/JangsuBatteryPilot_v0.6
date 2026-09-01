@@ -74,6 +74,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private lateinit var rbTargetTime: RadioButton
     private lateinit var rbTargetSpeed: RadioButton
     private lateinit var rbCutoff: RadioButton
+    private lateinit var rbStrava: RadioButton
     private lateinit var llTargetTimeInput: LinearLayout
     private lateinit var llTargetSpeedInput: LinearLayout
     private lateinit var llCutoffInput: LinearLayout
@@ -109,6 +110,8 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private var groupEnabled = false
     private var lastGroupSyncMs = 0L
     private var groupSyncBusy = false
+    private var realtimeGroup: GroupRideRealtimeClient? = null
+    private var lastGpsAccuracyM = 0.0
     private var syncingInputs = false
     private var pendingPdfPlan: RoadPlan? = null
     private val riderId: String by lazy {
@@ -130,6 +133,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         rbTargetTime = findViewById(R.id.rbRoadTargetTime)
         rbTargetSpeed = findViewById(R.id.rbRoadTargetSpeed)
         rbCutoff = findViewById(R.id.rbRoadCutoff)
+        rbStrava = findViewById(R.id.rbRoadStrava)
         llTargetTimeInput = findViewById(R.id.llRoadTargetTimeInput)
         llTargetSpeedInput = findViewById(R.id.llRoadTargetSpeedInput)
         llCutoffInput = findViewById(R.id.llRoadCutoffInput)
@@ -152,9 +156,16 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         tvGroup = findViewById(R.id.tvRoadGroup)
 
         setupPlanInputSpinners()
-        etRelay.setText(prefs.getString(KEY_RELAY, ""))
+        val riderServer = RiderServerSync(this)
+        if (riderServer.configured()) {
+            etRelay.setText(riderServer.serverUrl())
+            etRelay.isEnabled = false
+            etRelay.hint = "Rider Control Center 서버 자동 사용"
+        } else {
+            etRelay.setText(prefs.getString(KEY_RELAY, ""))
+        }
         etRoom.setText(prefs.getString(KEY_ROOM, ""))
-        etNick.setText(prefs.getString(KEY_NICK, "승재"))
+        etNick.setText(prefs.getString(KEY_NICK, riderServer.riderName().ifBlank { "승재" }))
 
         findViewById<Button>(R.id.btnRoadBackMode).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
@@ -186,11 +197,36 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     override fun onResume() {
         super.onResume()
         refreshStravaProfileStatus()
+        refreshStravaAthleteIfStale()
     }
 
     override fun onPause() {
         if (!riding) runCatching { locationManager.removeUpdates(this) }
         super.onPause()
+    }
+
+    private fun refreshStravaAthleteIfStale() {
+        val secure = StravaSecureStore(this)
+        val staleMs = 6L * 60L * 60L * 1000L
+        if (!secure.isConnected() || !secure.hasProfileRead()) return
+        if (System.currentTimeMillis() - secure.athleteProfileAtMs() <= staleMs) return
+        Thread {
+            val result = runCatching {
+                val token = StravaClient.ensureAccessToken(secure)
+                StravaClient.getAuthenticatedAthlete(token)
+            }
+            runOnUiThread {
+                result.onSuccess { athlete ->
+                    secure.saveAthleteProfile(athlete.weightKg, athlete.ftpW)
+                    val snap = StravaPerformanceEstimator.snapshot(this)
+                    if (snap?.weightKg != null && snap.effectiveFtpW != null) {
+                        RiderServerSync(this).updatePerformanceProfile(snap.weightKg, snap.effectiveFtpW, "Strava ${snap.year}년")
+                    }
+                    refreshStravaProfileStatus()
+                    if (rbStrava.isChecked) updateBasisPreview()
+                }
+            }
+        }.start()
     }
 
     private fun refreshStravaProfileStatus() {
@@ -204,9 +240,15 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                 append(" · ROAD ${active.selectedRides.size}개")
                 append(" · 연속장거리 ${active.enduranceRides.size}개")
                 active.referenceMovingSpeedKph()?.let { append(" · 참고 ${one(it)} km/h") }
+                val snap = StravaPerformanceEstimator.snapshot(this@RoadGranfondoActivity, active.resolvedYear())
+                if (snap?.effectiveFtpW != null) {
+                    append("\nFTP ${snap.effectiveFtpW.toInt()}W")
+                    snap.weightKg?.let { append(" · ${one(it)}kg · ${String.format(Locale.US, "%.2f", snap.effectiveFtpW / it)} W/kg") }
+                    append(" · ${snap.sourceLabel}")
+                }
                 append("\n전체 스캔 ${active.analyzedActivityCount}/${active.totalRoadActivities}개")
                 if (candidate != null && (candidate.analyzedAtMs > active.analyzedAtMs || candidate.resolvedYear() != active.resolvedYear())) append("\n새 분석 후보 있음 · 아직 미적용")
-                append("\n현재 목표시간·평속·컷오프 값은 자동으로 바꾸지 않습니다.")
+                append("\n목표기준에서 Strava를 선택하면 이 기준연도를 자동 적용합니다.")
             }
             candidate != null -> buildString {
                 append(if (candidate.scanComplete) "○ Strava 전체 분석 완료" else "◐ Strava 전체 분석 진행 중")
@@ -477,7 +519,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         }
         plan = built
         val syncCourseKey = prefs.getString(KEY_COURSE_ID, null).orEmpty()
-        val syncBasis = when { rbCutoff.isChecked -> "cutoff"; rbTargetSpeed.isChecked -> "speed"; else -> "time" }
+        val syncBasis = when { rbCutoff.isChecked -> "cutoff"; rbStrava.isChecked -> "strava"; rbTargetSpeed.isChecked -> "speed"; else -> "time" }
         courseRepo.listCourses().firstOrNull { it.id == syncCourseKey }?.let { meta ->
             courseRepo.sourceFile(meta.id)?.let { file -> RiderServerSync(this).enqueueCourse(meta, file) }
         }
@@ -490,6 +532,9 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         val overallAvg = c.totalKm / (built.totalSec / 3600.0)
         val basis = when {
             rbCutoff.isChecked -> "컷오프 기준 · 자동 목표평속 ${one(ridingAvg)} km/h"
+            rbStrava.isChecked -> StravaPerformanceEstimator.snapshot(this)?.let { snap ->
+                "Strava ${snap.year}년 기준 · FTP ${snap.effectiveFtpW?.toInt() ?: 0}W · ${snap.wattsPerKg?.let { String.format(Locale.US, "%.2f", it) } ?: "-"} W/kg"
+            } ?: "Strava 기준"
             rbTargetSpeed.isChecked -> "목표 평속 ${one(ridingAvg)} km/h"
             else -> "목표 주행시간 ${duration(built.ridingTargetSec)}"
         }
@@ -556,6 +601,8 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private fun stopRide() {
         riding = false
         groupEnabled = false
+        realtimeGroup?.close()
+        realtimeGroup = null
         runCatching { locationManager.removeUpdates(this) }
         btnRide.text = "▶ 주행 시작"
         btnGroup.text = "그룹 연결"
@@ -576,6 +623,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         lastLat = location.latitude
         lastLon = location.longitude
         lastSpeedKph = (location.speed * 3.6).coerceAtLeast(0.0)
+        lastGpsAccuracyM = location.accuracy.toDouble()
         renderLive(location, m)
         maybeSyncGroup()
     }
@@ -619,48 +667,59 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         }
     }
 
+    private fun currentGroupSelf(now: Long = System.currentTimeMillis()): GroupRider? {
+        val c = course ?: return null
+        val nick = etNick.text.toString().trim().ifBlank { "라이더" }
+        return GroupRider(riderId, nick, RoadGranfondoEngine.courseKey(c), lastRouteKm, lastLat, lastLon, lastSpeedKph, now)
+    }
+
     private fun toggleGroup() {
-        val relay = etRelay.text.toString().trim()
+        val sync = RiderServerSync(this)
+        val relay = sync.serverUrl().ifBlank { etRelay.text.toString().trim() }
         val room = etRoom.text.toString().trim()
         val nick = etNick.text.toString().trim().ifBlank { "라이더" }
         if (!groupEnabled) {
+            if (!sync.configured()) {
+                Toast.makeText(this, "먼저 관리자 메뉴에서 Rider Control Center 서버와 연결 토큰을 설정해 주세요.", Toast.LENGTH_LONG).show(); return
+            }
             if (relay.isBlank() || room.isBlank()) {
-                Toast.makeText(this, "그룹 릴레이 URL과 방 코드를 입력해 주세요.", Toast.LENGTH_LONG).show(); return
+                Toast.makeText(this, "Rider Control Center 서버와 방 코드를 확인해 주세요.", Toast.LENGTH_LONG).show(); return
             }
             if (!riding) {
                 Toast.makeText(this, "먼저 로드 주행을 시작해 주세요.", Toast.LENGTH_SHORT).show(); return
             }
+            etRelay.setText(relay)
             prefs.edit().putString(KEY_RELAY, relay).putString(KEY_ROOM, room).putString(KEY_NICK, nick).apply()
             groupEnabled = true
             btnGroup.text = "그룹 끄기"
-            tvGroup.text = "그룹 연결 시작 · 약 10초 간격 위치 공유"
+            tvGroup.text = "실시간 그룹 연결 시작…"
+            realtimeGroup?.close()
+            realtimeGroup = GroupRideRealtimeClient(
+                baseUrl = relay,
+                deviceToken = sync.token(),
+                room = room,
+                onSnapshot = { riders, _ ->
+                    runOnUiThread { currentGroupSelf()?.let { renderGroup(riders, it) } }
+                },
+                onState = { state -> runOnUiThread { if (groupEnabled) tvGroup.text = state } }
+            ).also { it.connect() }
             maybeSyncGroup(force = true)
         } else {
             groupEnabled = false
+            realtimeGroup?.close()
+            realtimeGroup = null
             btnGroup.text = "그룹 연결"
             tvGroup.text = "그룹 위치 공유 중지"
         }
     }
 
     private fun maybeSyncGroup(force: Boolean = false) {
-        if (!groupEnabled || groupSyncBusy) return
+        if (!groupEnabled) return
         val now = System.currentTimeMillis()
-        if (!force && now - lastGroupSyncMs < 10_000L) return
-        val c = course ?: return
-        val relay = etRelay.text.toString().trim()
-        val room = etRoom.text.toString().trim()
-        val nick = etNick.text.toString().trim().ifBlank { "라이더" }
-        if (relay.isBlank() || room.isBlank()) return
-        groupSyncBusy = true
+        if (!force && now - lastGroupSyncMs < 1_000L) return
+        val self = currentGroupSelf(now) ?: return
         lastGroupSyncMs = now
-        val self = GroupRider(riderId, nick, RoadGranfondoEngine.courseKey(c), lastRouteKm, lastLat, lastLon, lastSpeedKph, now)
-        Thread {
-            val result = runCatching { GroupRideClient(relay).sync(room, self) }
-            runOnUiThread {
-                groupSyncBusy = false
-                result.onSuccess { renderGroup(it, self) }.onFailure { tvGroup.text = "그룹 연결 오류: ${it.message}" }
-            }
-        }.start()
+        realtimeGroup?.sendPosition(self, lastGpsAccuracyM)
     }
 
     private fun renderGroup(riders: List<GroupRider>, self: GroupRider) {
@@ -676,6 +735,12 @@ class RoadGranfondoActivity : Activity(), LocationListener {
                 if (i < same.lastIndex) append("\n")
             }
         }
+    }
+
+    override fun onDestroy() {
+        realtimeGroup?.close()
+        realtimeGroup = null
+        super.onDestroy()
     }
 
     override fun onProviderEnabled(provider: String) {}
@@ -715,6 +780,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         when (basis) {
             "speed" -> rbTargetSpeed.isChecked = true
             "cutoff" -> rbCutoff.isChecked = true
+            "strava" -> rbStrava.isChecked = true
             else -> rbTargetTime.isChecked = true
         }
         updateBasisVisibility()
@@ -743,6 +809,27 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             tvBasisPreview.text = "코스를 선택하면 목표시간·평속을 환산하고 컷오프 기준 페이스도 계산합니다."
             return
         }
+        if (rbStrava.isChecked) {
+            val snap = StravaPerformanceEstimator.snapshot(this)
+            if (snap == null || snap.weightKg == null || snap.effectiveFtpW == null) {
+                tvBasisPreview.text = "Strava 기준: 위의 Strava 분석에서 ROAD 전체 스캔 → 기준연도 선택 → 이 분석을 연동해 주세요."
+                return
+            }
+            val estimate = runCatching { RoadPowerPaceEstimator.estimate(c, snap.weightKg, snap.effectiveFtpW, snap.powerCurve) }.getOrElse {
+                tvBasisPreview.text = "Strava 페이스 계산 확인: ${it.message}"
+                return
+            }
+            syncingInputs = true
+            val idx = TARGET_SPEEDS.indices.minByOrNull { kotlin.math.abs(TARGET_SPEEDS[it] - estimate.averageKph) } ?: 0
+            spTargetSpeed.setSelection(idx)
+            val h = (estimate.ridingTargetSec / 3600.0).toInt().coerceIn(0, 20)
+            val m = ((estimate.ridingTargetSec.toLong() % 3600L) / 60L).toInt().coerceIn(0, 59)
+            spTargetHour.setSelection(h); spTargetMinute.setSelection(m)
+            syncingInputs = false
+            tvBasisPreview.text = "Strava ${snap.year}년 · ${snap.sourceLabel} ${snap.effectiveFtpW.toInt()}W · ${one(snap.weightKg)}kg · ${String.format(Locale.US, "%.2f", snap.effectiveFtpW / snap.weightKg)} W/kg → 예상 순수주행 ${duration(estimate.ridingTargetSec)} · ${one(estimate.averageKph)} km/h"
+            return
+        }
+
         if (rbCutoff.isChecked) {
             val cutoffs = selectedCutoffs()
             if (cutoffs.isEmpty()) {
@@ -790,14 +877,24 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     }
 
     private fun selectedRidingTargetSeconds(c: CourseData): Double? {
-        return if (rbTargetSpeed.isChecked) {
-            val speed = TARGET_SPEEDS.getOrNull(spTargetSpeed.selectedItemPosition) ?: return null
-            if (speed <= 1.0) null else (c.totalKm / speed * 3600.0).takeIf { it >= 600.0 }
-        } else if (rbTargetTime.isChecked) {
-            val h = TARGET_HOURS.getOrNull(spTargetHour.selectedItemPosition) ?: 0
-            val m = MINUTES.getOrNull(spTargetMinute.selectedItemPosition) ?: 0
-            (h * 3600.0 + m * 60.0).takeIf { it >= 600.0 }
-        } else null
+        return when {
+            rbStrava.isChecked -> {
+                val snap = StravaPerformanceEstimator.snapshot(this) ?: return null
+                val w = snap.weightKg ?: return null
+                val f = snap.effectiveFtpW ?: return null
+                runCatching { RoadPowerPaceEstimator.estimate(c, w, f, snap.powerCurve).ridingTargetSec }.getOrNull()
+            }
+            rbTargetSpeed.isChecked -> {
+                val speed = TARGET_SPEEDS.getOrNull(spTargetSpeed.selectedItemPosition) ?: return null
+                if (speed <= 1.0) null else (c.totalKm / speed * 3600.0).takeIf { it >= 600.0 }
+            }
+            rbTargetTime.isChecked -> {
+                val h = TARGET_HOURS.getOrNull(spTargetHour.selectedItemPosition) ?: 0
+                val m = MINUTES.getOrNull(spTargetMinute.selectedItemPosition) ?: 0
+                (h * 3600.0 + m * 60.0).takeIf { it >= 600.0 }
+            }
+            else -> null
+        }
     }
 
     private fun selectedStartMinuteOfDay(): Int {
@@ -821,7 +918,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             .putInt(KEY_TARGET_HOUR, spTargetHour.selectedItemPosition)
             .putInt(KEY_TARGET_MINUTE, spTargetMinute.selectedItemPosition)
             .putInt(KEY_TARGET_SPEED_INDEX, spTargetSpeed.selectedItemPosition)
-            .putString(KEY_PLAN_BASIS, when { rbCutoff.isChecked -> "cutoff"; rbTargetSpeed.isChecked -> "speed"; else -> "time" })
+            .putString(KEY_PLAN_BASIS, when { rbCutoff.isChecked -> "cutoff"; rbStrava.isChecked -> "strava"; rbTargetSpeed.isChecked -> "speed"; else -> "time" })
             .putInt(KEY_START_HOUR, spStartHour.selectedItemPosition)
             .putInt(KEY_START_MINUTE, spStartMinute.selectedItemPosition)
             .apply()
@@ -848,6 +945,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         val p = pendingPdfPlan ?: plan ?: return
         val basis = when {
             rbCutoff.isChecked -> "컷오프 기준 · 자동 목표평속 ${one(c.totalKm / (p.ridingTargetSec / 3600.0))} km/h"
+            rbStrava.isChecked -> StravaPerformanceEstimator.snapshot(this)?.let { "Strava ${it.year}년 기준 · FTP ${it.effectiveFtpW?.toInt() ?: 0}W" } ?: "Strava 기준"
             rbTargetSpeed.isChecked -> "목표 평속 ${one(c.totalKm / (p.ridingTargetSec / 3600.0))} km/h"
             else -> "목표 주행시간 ${duration(p.ridingTargetSec)}"
         }

@@ -101,6 +101,10 @@ class StravaReviewActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refreshAll()
+        val staleMs = 6L * 60L * 60L * 1000L
+        if (secure.isConnected() && secure.hasProfileRead() && System.currentTimeMillis() - secure.athleteProfileAtMs() > staleMs) {
+            refreshAthleteProfileAsync("Strava 체중/FTP 자동 확인")
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -138,7 +142,7 @@ class StravaReviewActivity : Activity() {
     private fun startOAuth() {
         if (secure.clientSecret().isNullOrBlank() && !saveSecret()) return
         val redirect = URLEncoder.encode(StravaSecureStore.REDIRECT_URI, "UTF-8")
-        val scope = URLEncoder.encode("activity:read_all", "UTF-8")
+        val scope = URLEncoder.encode("activity:read_all,profile:read_all", "UTF-8")
         val url = "https://www.strava.com/oauth/mobile/authorize" +
             "?client_id=${StravaSecureStore.CLIENT_ID}" +
             "&redirect_uri=$redirect&response_type=code&approval_prompt=force&scope=$scope&state=road_review"
@@ -161,8 +165,35 @@ class StravaReviewActivity : Activity() {
             runOnUiThread {
                 result.onSuccess {
                     secure.saveTokens(it.accessToken, it.refreshToken, it.expiresAt, it.athleteName, granted)
-                    refreshAll("Strava 연결 완료${it.athleteName?.let { n -> " · $n" } ?: ""}")
+                    refreshAthleteProfileAsync("Strava 연결 완료${it.athleteName?.let { n -> " · $n" } ?: ""}")
                 }.onFailure { e -> refreshAll("Strava 연결 실패 · ${e.message ?: e.javaClass.simpleName}") }
+            }
+        }.start()
+    }
+
+    private fun refreshAthleteProfileAsync(prefix: String? = null) {
+        if (!secure.isConnected()) { refreshAll(prefix); return }
+        if (!secure.hasProfileRead()) {
+            refreshAll(listOfNotNull(prefix, "체중/FTP 자동연동을 위해 Strava 재연결 후 profile:read_all 권한을 허용해 주세요.").joinToString(" · "))
+            return
+        }
+        Thread {
+            val result = runCatching {
+                val token = StravaClient.ensureAccessToken(secure)
+                StravaClient.getAuthenticatedAthlete(token)
+            }
+            runOnUiThread {
+                result.onSuccess { athlete ->
+                    secure.saveAthleteProfile(athlete.weightKg, athlete.ftpW)
+                    val active = reviewStore.loadActive()
+                    if (active != null) {
+                        val snap = StravaPerformanceEstimator.snapshot(this, active.resolvedYear())
+                        val weight = snap?.weightKg
+                        val ftp = snap?.effectiveFtpW
+                        if (weight != null && ftp != null) RiderServerSync(this).updatePerformanceProfile(weight, ftp, "Strava ${snap.year}년")
+                    }
+                    refreshAll(listOfNotNull(prefix, "프로필 동기화 완료").joinToString(" · "))
+                }.onFailure { e -> refreshAll(listOfNotNull(prefix, "프로필 동기화 실패 · ${e.message ?: e.javaClass.simpleName}").joinToString(" · ")) }
             }
         }.start()
     }
@@ -206,7 +237,19 @@ class StravaReviewActivity : Activity() {
 
     private fun refreshAll(message: String? = null) {
         tvStatus.text = if (secure.isConnected()) {
-            "● Strava 연결됨${secure.athleteName()?.let { " · $it" } ?: ""} · 읽기권한 ${if (secure.hasActivityRead()) "OK" else "확인필요"}"
+            buildString {
+                append("● Strava 연결됨")
+                secure.athleteName()?.let { append(" · $it") }
+                append(" · 활동권한 ${if (secure.hasActivityRead()) "OK" else "확인필요"}")
+                append(" · 프로필권한 ${if (secure.hasProfileRead()) "OK" else "재연결 필요"}")
+                val w = secure.athleteWeightKg(); val f = secure.athleteFtpW()
+                if (w != null || f != null) {
+                    append("\n프로필")
+                    w?.let { append(" · ${one(it)}kg") }
+                    f?.let { append(" · FTP ${it.roundToInt()}W") }
+                    if (w != null && f != null) append(" · ${one(f / w)} W/kg")
+                }
+            }
         } else "○ Strava 연결 안 됨"
         message?.let { tvProgress.text = it }
         val candidate = reviewStore.loadCandidate()
@@ -254,7 +297,13 @@ class StravaReviewActivity : Activity() {
         if (!p.scanComplete) append("\n${p.stopReason ?: "전체 분석을 계속 진행해 주세요."}")
         append("\n분석 ${dateTime(p.analyzedAtMs)}")
         if (active && p.linkedAtMs > 0) append(" · 연동 ${dateTime(p.linkedAtMs)}")
-        if (active) append("\n※ ${year}년 프로필이 활성화되어 있으며 목표시간/평속/컷오프 값을 자동 덮어쓰지는 않습니다.")
+        if (active) {
+            val snap = StravaPerformanceEstimator.snapshot(this@StravaReviewActivity, year)
+            snap?.yearEstimatedFtpW?.let { append("\n${year}년 PR 추정 FTP ${it.roundToInt()}W") }
+            snap?.currentProfileFtpW?.let { append(" · Strava 현재 FTP ${it.roundToInt()}W") }
+            if (snap?.weightKg != null && snap.effectiveFtpW != null) append(" · ${one(snap.effectiveFtpW / snap.weightKg)} W/kg")
+            append("\n※ ${year}년 프로필을 참가자/페이스 계획의 Strava 기준으로 사용할 수 있습니다.")
+        }
     }
 
     private fun renderYear(p: StravaRiderReviewProfile?) {

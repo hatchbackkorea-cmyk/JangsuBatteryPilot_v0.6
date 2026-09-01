@@ -10,7 +10,13 @@ data class SimulationRiderConfig(
     val startOffsetSec: Double = 0.0,
     val aidSelections: List<RoadAidSelection> = emptyList(),
     val cutoffSelections: List<RoadCutoffSelection> = emptyList(),
-    val isSelf: Boolean = false
+    val isSelf: Boolean = false,
+    val weightKg: Double? = null,
+    val ftpW: Double? = null,
+    val wattsPerKg: Double? = null,
+    val stravaYear: Int? = null,
+    val powerCurve: StravaPowerCurve? = null,
+    val performanceSource: String = ""
 )
 
 data class SimulationAidStop(
