@@ -646,6 +646,9 @@ class RoadRaceSimulationActivity : Activity() {
                 if (wasExpanded) expandedRiderCards.add(updated)
             }
             if (updated.isSelf) prefs.edit().putString(KEY_NICK, nickname).apply()
+            else RiderServerSync(this).syncSimulationParticipantAsync(updated) { result ->
+                if (!result.ok) runOnUiThread { Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show() }
+            }
             pauseSimulation(); simSec = 0.0; refreshRiders(); rebuildPlans(); renderFrame(); dialog.dismiss()
         }
 

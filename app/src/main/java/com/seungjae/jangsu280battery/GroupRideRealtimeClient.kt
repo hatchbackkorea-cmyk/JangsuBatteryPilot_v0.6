@@ -93,7 +93,7 @@ class GroupRideRealtimeClient(
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             reconnectAttempt = 0
-            onState("● 실시간 WebSocket 연결됨 · 약 1~2초 위치 공유")
+            onState("● 실시간 연결됨 · 주행 1초 / 정차 5초 저비용 위치 공유")
             lastSelf?.let { sendPosition(it, lastAccuracyM) }
         }
 

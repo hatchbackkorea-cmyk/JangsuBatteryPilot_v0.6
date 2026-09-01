@@ -1,0 +1,7 @@
+v0.32.3 source validation
+- VERSION.txt = 0.32.3
+- moving group update interval = 1,000 ms
+- stopped (<1 km/h) update interval = 5,000 ms
+- administrator simulator participant upload endpoint wired to /api/mobile/admin/sim-participants/upsert
+- existing pre-ride room UX retained
+- Gradle compile could not run here because services.gradle.org is unavailable and the Gradle distribution is not cached. Build with the existing GitHub Actions workflow.

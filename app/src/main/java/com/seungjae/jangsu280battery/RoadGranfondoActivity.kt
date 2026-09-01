@@ -724,7 +724,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private fun maybeSyncGroup(force: Boolean = false) {
         if (!groupEnabled || !riding) return
         val now = System.currentTimeMillis()
-        if (!force && now - lastGroupSyncMs < 1_000L) return
+        // Low-cost realtime: keep 1 s updates while moving, but only 5 s while
+        // essentially stopped. The first movement update is still sent immediately.
+        val groupIntervalMs = if (lastSpeedKph < 1.0) 5_000L else 1_000L
+        if (!force && now - lastGroupSyncMs < groupIntervalMs) return
         val self = currentGroupSelf(now) ?: return
         lastGroupSyncMs = now
         realtimeGroup?.sendPosition(self, lastGpsAccuracyM)

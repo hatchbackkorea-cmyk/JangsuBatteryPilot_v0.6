@@ -160,6 +160,37 @@ class RiderServerSync(context: Context) {
         }.start()
     }
 
+    fun syncSimulationParticipantAsync(config: SimulationRiderConfig, callback: ((Result) -> Unit)? = null) {
+        Thread {
+            val result = runCatching {
+                require(configured()) { "Rider Server 미연결" }
+                val curve = JSONObject().apply {
+                    config.powerCurve?.let { c ->
+                        listOf(
+                            "15s" to c.p15s, "1m" to c.p1m, "2m" to c.p2m, "5m" to c.p5m,
+                            "10m" to c.p10m, "20m" to c.p20m, "40m" to c.p40m, "1h" to c.p1h,
+                            "2h" to c.p2h, "4h" to c.p4h
+                        ).forEach { (k, v) -> if (v != null) put(k, v) }
+                    }
+                }
+                val weight = config.weightKg ?: weightKg()
+                val ftp = config.ftpW ?: ftpW()
+                val key = "road-sim:" + config.nickname.trim().lowercase(Locale.KOREA)
+                postJson("/api/mobile/admin/sim-participants/upsert", JSONObject().apply {
+                    put("client_key", key)
+                    put("name", config.nickname)
+                    put("weight_kg", weight)
+                    put("ftp_w", ftp)
+                    put("bike_weight_kg", 9.0)
+                    put("power_curve", curve)
+                    put("notes", "앱 ROAD 참가자 시뮬레이터 자동동기화")
+                })
+                Result(true, "PC 가상 라이더 보관함 동기화 완료")
+            }.getOrElse { Result(false, "시뮬 참가자 동기화 보류 · ${it.message ?: "서버 확인"}") }
+            callback?.invoke(result)
+        }.start()
+    }
+
     fun statusText(): String = buildString {
         append(if (configured()) "Rider Server 연결 설정됨" else "Rider Server 미연결")
         append(" · 자동동기화 ").append(if (autoEnabled()) "ON" else "OFF")
