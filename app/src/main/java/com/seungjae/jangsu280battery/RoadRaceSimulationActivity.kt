@@ -53,6 +53,7 @@ class RoadRaceSimulationActivity : Activity() {
 
     private lateinit var tvCourse: TextView
     private lateinit var tvRiders: TextView
+    private lateinit var riderCards: LinearLayout
     private lateinit var tvClock: TextView
     private lateinit var tvStandings: TextView
     private lateinit var liveView: RoadRaceSimulationView
@@ -65,6 +66,7 @@ class RoadRaceSimulationActivity : Activity() {
     private var simSec = 0.0
     private var multiplier = 60.0
     private var lastTickMs = 0L
+    private val expandedRiderCards = mutableSetOf<SimulationRiderConfig>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +75,7 @@ class RoadRaceSimulationActivity : Activity() {
 
         tvCourse = findViewById(R.id.tvSimCourse)
         tvRiders = findViewById(R.id.tvSimRiders)
+        riderCards = findViewById(R.id.simRiderCards)
         tvClock = findViewById(R.id.tvSimClock)
         tvStandings = findViewById(R.id.tvSimStandings)
         liveView = findViewById(R.id.roadSimulationView)
@@ -82,10 +85,10 @@ class RoadRaceSimulationActivity : Activity() {
 
         findViewById<Button>(R.id.btnSimBack).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnSimAddRider).setOnClickListener { showRiderDialog() }
-        findViewById<Button>(R.id.btnSimEditRider).setOnClickListener { showEditRiderPicker() }
         findViewById<Button>(R.id.btnSimClearRiders).setOnClickListener {
             pauseSimulation()
             riderConfigs.clear()
+            expandedRiderCards.clear()
             riderPlans = emptyList()
             simSec = 0.0
             ensureDefaultSelfRider(force = true)
@@ -369,7 +372,10 @@ class RoadRaceSimulationActivity : Activity() {
             if (existing?.isSelf == true) {
                 Toast.makeText(this, "내 참가자는 기본 참가자라 삭제되지 않습니다.", Toast.LENGTH_LONG).show()
             } else {
-                editIndex?.let { riderConfigs.removeAt(it) }
+                editIndex?.let {
+                    riderConfigs.getOrNull(it)?.let(expandedRiderCards::remove)
+                    riderConfigs.removeAt(it)
+                }
                 pauseSimulation()
                 simSec = 0.0
                 refreshRiders()
@@ -421,7 +427,14 @@ class RoadRaceSimulationActivity : Activity() {
                 cutoffSelections = if (targetBasis == BASIS_CUTOFF) raceCutoffs else emptyList(),
                 isSelf = existing?.isSelf == true
             )
-            if (editIndex == null) riderConfigs += updated else riderConfigs[editIndex] = updated
+            if (editIndex == null) {
+                riderConfigs += updated
+            } else {
+                val wasExpanded = existing?.let { it in expandedRiderCards } == true
+                existing?.let(expandedRiderCards::remove)
+                riderConfigs[editIndex] = updated
+                if (wasExpanded) expandedRiderCards.add(updated)
+            }
             if (updated.isSelf) prefs.edit().putString(KEY_NICK, nickname).apply()
             pauseSimulation()
             simSec = 0.0
@@ -561,32 +574,127 @@ class RoadRaceSimulationActivity : Activity() {
     }
 
     private fun refreshRiders() {
-        tvRiders.text = if (riderConfigs.isEmpty()) {
-            "참가자 없음"
-        } else buildString {
-            append("참가자 ${riderConfigs.size}/20 · 각 참가자 보급설정 독립")
-            riderConfigs.forEach { r ->
-                append("\n• ")
-                if (r.isSelf) append("⭐ ")
-                append("${r.nickname}")
-                if (r.isSelf) append(" (나)")
-                val avg = course?.let { courseData -> if (r.targetSec > 0.0) courseData.totalKm / (r.targetSec / 3600.0) else 0.0 } ?: 0.0
-                when (r.targetBasis) {
-                    BASIS_SPEED -> append(" · 목표평속 ${one(avg)}km/h · 주행 ${duration(r.targetSec)}")
-                    BASIS_CUTOFF -> append(" · 컷오프환산 ${one(avg)}km/h · 주행 ${duration(r.targetSec)}")
-                    else -> append(" · 목표시간 ${duration(r.targetSec)} · 환산 ${one(avg)}km/h")
+        tvRiders.text = "참가자 ${riderConfigs.size}/20 · 참가자별 카드 · 보급설정 독립"
+        riderCards.removeAllViews()
+        if (riderConfigs.isEmpty()) {
+            riderCards.addView(TextView(this).apply {
+                text = "참가자 없음"
+                textSize = 14f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, dp(8), 0, dp(8))
+            }, LinearLayout.LayoutParams(-1, -2))
+            return
+        }
+
+        riderConfigs.forEachIndexed { index, rider ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.bg_sim_rider_card)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            val cardLp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
+
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val name = TextView(this).apply {
+                text = buildString {
+                    if (rider.isSelf) append("⭐ ")
+                    append(rider.nickname)
+                    if (rider.isSelf) append(" (나)")
                 }
-                if (r.startOffsetSec > 0) append(" · 출발 +${duration(r.startOffsetSec)}")
-                if (r.aidSelections.isEmpty()) {
-                    append(" · 보급 PASS")
-                } else {
-                    val total = r.aidSelections.sumOf { it.stopSec }
-                    append(" · 보급 ${r.aidSelections.size}곳/${duration(total)}")
-                    append("\n   ↳ ")
-                    append(r.aidSelections.joinToString(" · ") { "${it.name} ${duration(it.stopSec)}" })
+                textSize = 19f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(getColor(if (rider.isSelf) R.color.warn else R.color.text_primary))
+                setSingleLine(true)
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            val edit = Button(this).apply {
+                text = "수정"
+                textSize = 12f
+                minHeight = 0
+                minimumHeight = 0
+                minWidth = 0
+                minimumWidth = 0
+                setPadding(dp(12), 0, dp(12), 0)
+                setOnClickListener { showRiderDialog(index) }
+            }
+            header.addView(name, LinearLayout.LayoutParams(0, dp(42), 1f))
+            header.addView(edit, LinearLayout.LayoutParams(dp(72), dp(40)))
+            card.addView(header, LinearLayout.LayoutParams(-1, -2))
+
+            val avg = course?.let { c -> if (rider.targetSec > 0.0) c.totalKm / (rider.targetSec / 3600.0) else 0.0 } ?: 0.0
+            val targetLabel = when (rider.targetBasis) {
+                BASIS_SPEED -> "목표평속 ${one(avg)} km/h · 주행 ${duration(rider.targetSec)}"
+                BASIS_CUTOFF -> "컷오프 기준 · 필요 ${one(avg)} km/h · 주행 ${duration(rider.targetSec)}"
+                else -> "목표시간 ${duration(rider.targetSec)} · 환산 ${one(avg)} km/h"
+            }
+            card.addView(TextView(this).apply {
+                text = buildString {
+                    append(targetLabel)
+                    if (rider.startOffsetSec > 0) append(" · 출발 +${duration(rider.startOffsetSec)}")
+                }
+                textSize = 13f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, dp(2), 0, dp(7))
+            }, LinearLayout.LayoutParams(-1, -2))
+
+            if (rider.aidSelections.isEmpty()) {
+                card.addView(TextView(this).apply {
+                    text = "보급 PASS"
+                    textSize = 13f
+                    setTextColor(getColor(R.color.text_secondary))
+                    setBackgroundResource(R.drawable.bg_sim_aid_row)
+                    setPadding(dp(9), dp(7), dp(9), dp(7))
+                }, LinearLayout.LayoutParams(-1, -2))
+            } else {
+                val total = rider.aidSelections.sumOf { it.stopSec }
+                val expanded = rider in expandedRiderCards
+                val toggle = TextView(this).apply {
+                    text = "보급 ${rider.aidSelections.size}곳 · 총 ${duration(total)}   ${if (expanded) "▲" else "▼"}"
+                    textSize = 13f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setTextColor(getColor(R.color.accent))
+                    setBackgroundResource(R.drawable.bg_sim_aid_row)
+                    setPadding(dp(9), dp(8), dp(9), dp(8))
+                    setOnClickListener {
+                        if (rider in expandedRiderCards) expandedRiderCards.remove(rider) else expandedRiderCards.add(rider)
+                        refreshRiders()
+                    }
+                }
+                card.addView(toggle, LinearLayout.LayoutParams(-1, -2))
+
+                if (expanded) {
+                    rider.aidSelections.sortedBy { it.km }.forEach { aid ->
+                        val row = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = android.view.Gravity.CENTER_VERTICAL
+                            setBackgroundResource(R.drawable.bg_sim_aid_row)
+                            setPadding(dp(9), dp(6), dp(9), dp(6))
+                        }
+                        val left = TextView(this).apply {
+                            text = "${one(aid.km)}km  ${aid.name}"
+                            textSize = 12f
+                            setTextColor(getColor(R.color.text_primary))
+                            setSingleLine(true)
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                        }
+                        val right = TextView(this).apply {
+                            text = duration(aid.stopSec)
+                            textSize = 12f
+                            setTypeface(typeface, android.graphics.Typeface.BOLD)
+                            setTextColor(getColor(R.color.good))
+                            gravity = android.view.Gravity.END
+                            setPadding(dp(8), 0, 0, 0)
+                        }
+                        row.addView(left, LinearLayout.LayoutParams(0, -2, 1f))
+                        row.addView(right, LinearLayout.LayoutParams(dp(58), -2))
+                        card.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+                    }
                 }
             }
-            append("\n목록의 [참가자 수정]에서 사람별 보급소와 시간을 바꿀 수 있습니다.")
+            riderCards.addView(card, cardLp)
         }
     }
 

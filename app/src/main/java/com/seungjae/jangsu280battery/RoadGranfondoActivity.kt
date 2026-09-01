@@ -69,6 +69,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private lateinit var locationManager: LocationManager
 
     private lateinit var tvCourse: TextView
+    private lateinit var tvStravaProfile: TextView
     private lateinit var rgBasis: RadioGroup
     private lateinit var rbTargetTime: RadioButton
     private lateinit var rbTargetSpeed: RadioButton
@@ -124,6 +125,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
         tvCourse = findViewById(R.id.tvRoadCourse)
+        tvStravaProfile = findViewById(R.id.tvRoadStravaProfile)
         rgBasis = findViewById(R.id.rgRoadPlanBasis)
         rbTargetTime = findViewById(R.id.rbRoadTargetTime)
         rbTargetSpeed = findViewById(R.id.rbRoadTargetSpeed)
@@ -156,6 +158,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
         findViewById<Button>(R.id.btnRoadBackMode).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
+        findViewById<Button>(R.id.btnRoadStravaReview).setOnClickListener { startActivity(Intent(this, StravaReviewActivity::class.java)) }
         findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildTargetPlan(showToast = true) }
         findViewById<Button>(R.id.btnRoadSavePdf).setOnClickListener { savePlanPdf() }
         findViewById<Button>(R.id.btnRoadSimulator).setOnClickListener {
@@ -177,11 +180,42 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         btnGroup.setOnClickListener { toggleGroup() }
 
         loadRoadCourse()
+        refreshStravaProfileStatus()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshStravaProfileStatus()
     }
 
     override fun onPause() {
         if (!riding) runCatching { locationManager.removeUpdates(this) }
         super.onPause()
+    }
+
+    private fun refreshStravaProfileStatus() {
+        val store = StravaReviewStore(this)
+        val active = store.loadActive()
+        val candidate = store.loadCandidate()
+        tvStravaProfile.text = when {
+            active != null -> buildString {
+                append("● Strava ${active.resolvedYear()}년 프로필 연동됨")
+                active.athleteName?.let { append(" · $it") }
+                append(" · ROAD ${active.selectedRides.size}개")
+                append(" · 연속장거리 ${active.enduranceRides.size}개")
+                active.referenceMovingSpeedKph()?.let { append(" · 참고 ${one(it)} km/h") }
+                append("\n전체 스캔 ${active.analyzedActivityCount}/${active.totalRoadActivities}개")
+                if (candidate != null && (candidate.analyzedAtMs > active.analyzedAtMs || candidate.resolvedYear() != active.resolvedYear())) append("\n새 분석 후보 있음 · 아직 미적용")
+                append("\n현재 목표시간·평속·컷오프 값은 자동으로 바꾸지 않습니다.")
+            }
+            candidate != null -> buildString {
+                append(if (candidate.scanComplete) "○ Strava 전체 분석 완료" else "◐ Strava 전체 분석 진행 중")
+                append(" · ${candidate.analyzedActivityCount}/${candidate.totalRoadActivities}개")
+                if (candidate.resolvedYear() > 0) append(" · 선택 ${candidate.resolvedYear()}년")
+                append("\n분석 화면에서 연도별 PR을 확인한 뒤 연동할 수 있습니다.")
+            }
+            else -> "Strava 분석 미연동 · 현재 페이스 계획에는 Strava 데이터가 적용되지 않습니다."
+        }
     }
 
     private fun pickGpx() {

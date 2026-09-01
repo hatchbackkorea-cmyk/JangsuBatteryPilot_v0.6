@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/stravaReviewRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnStravaReviewBack"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="← ROAD" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="STRAVA · 연도별 PR 분석"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@color/panel"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="1. Strava 연결"
+                android:textColor="@color/accent"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvStravaReviewClientId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tvStravaReviewStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="○ 연결 안 됨"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+            <EditText
+                android:id="@+id/etStravaReviewSecret"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="7dp"
+                android:hint="Client Secret · 기존 설정이 있으면 비워도 됨"
+                android:inputType="textPassword"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnStravaReviewSaveSecret"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="Secret 저장" />
+                <Button
+                    android:id="@+id/btnStravaReviewConnect"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="Strava 연결" />
+            </LinearLayout>
+            <Button
+                android:id="@+id/btnStravaReviewDisconnect"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="5dp"
+                android:text="Strava 인증 연결 해제" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Client Secret은 APK에 포함하지 않고 이 휴대폰 Android Keystore에 암호화 저장합니다. 읽기 권한(activity:read_all)만 요청합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel2"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="2. 전체 ROAD 기록 스캔"
+                android:textColor="@color/good"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="최근 30개 제한 없이 Strava의 전체 sport_type=Ride 기록을 페이지 끝까지 확인합니다. MTB · Gravel · e-bike · VirtualRide는 제외합니다. 각 활동의 파워 스트림에서 PR을 계산하고 연도별로 분리합니다."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="긴 휴식 기록은 1시간 이상 지속 PR/장거리 지속능력에서 제외합니다. API 한도에 걸리면 분석 결과를 저장하고 다음 실행에서 미분석 활동부터 이어서 진행합니다."
+                android:textColor="@color/warn"
+                android:textSize="10sp" />
+            <Button
+                android:id="@+id/btnStravaReviewAnalyze"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="8dp"
+                android:text="전체 ROAD 기록 스캔"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvStravaReviewProgress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:text="아직 분석하지 않았습니다."
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="3. 분석 후보 · 연도 선택"
+                android:textColor="@color/orange"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvStravaReviewCandidateSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="불러온 분석 후보가 없습니다."
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="연동 기준 연도"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+            <Spinner
+                android:id="@+id/spinnerStravaReviewYear"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="3dp" />
+            <TextView
+                android:id="@+id/tvStravaReviewYearSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="연도별 PR 분석 결과가 없습니다."
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:id="@+id/llStravaReviewPr"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="선택 연도 활동 판정"
+                android:textColor="@color/text_secondary"
+                android:textStyle="bold" />
+            <LinearLayout
+                android:id="@+id/llStravaReviewRides"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:orientation="vertical" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnStravaReviewDiscard"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:text="분석 폐기" />
+                <Button
+                    android:id="@+id/btnStravaReviewApply"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="선택 연도 연동"
+                    android:textStyle="bold" />
+            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="전체 활동 분석이 끝난 뒤에만 연동할 수 있습니다. 연도를 선택해 PR과 원본 활동을 검토한 다음 ‘선택 연도 연동’을 눌러야 실제 라이더 프로필로 활성화됩니다. 목표시간·평속·컷오프 값은 자동으로 덮어쓰지 않습니다."
+                android:textColor="@color/warn"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="20dp"
+            android:background="@color/panel2"
+            android:orientation="vertical"
+            android:padding="12dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="4. 현재 앱 연동 상태"
+                android:textColor="@color/accent"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvStravaReviewActive"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Strava 분석 미연동"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+            <Button
+                android:id="@+id/btnStravaReviewUnlink"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="7dp"
+                android:text="활성 Strava 분석 연동 해제" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

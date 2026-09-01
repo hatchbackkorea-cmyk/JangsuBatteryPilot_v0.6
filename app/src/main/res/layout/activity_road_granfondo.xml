@@ -22,6 +22,15 @@
             <TextView android:id="@+id/tvRoadCourse" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="로드 코스 없음" android:textColor="@color/text_primary" android:textSize="13sp" />
         </LinearLayout>
 
+
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel2" android:orientation="vertical" android:padding="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="내 Strava ROAD 분석 · 선택 연동" android:textColor="@color/good" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRoadStravaProfile" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Strava 분석 미연동" android:textColor="@color/text_primary" android:textSize="12sp" />
+            <Button android:id="@+id/btnRoadStravaReview" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="7dp" android:text="Strava 기록 불러오기 · 분석 · 연동 검토" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="기록을 불러와도 자동 적용되지 않습니다. 분석 결과를 확인한 뒤 직접 ‘이 분석을 연동’을 눌러야 활성화됩니다." android:textColor="@color/text_secondary" android:textSize="10sp" />
+        </LinearLayout>
+
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="@color/panel" android:orientation="vertical" android:padding="12dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. 목표 페이스 계획" android:textColor="@color/accent" android:textStyle="bold" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="목표 주행시간 / 목표 평속 / 컷오프 기준 중 하나를 선택합니다. 컷오프 기준은 평속을 직접 정하지 않고 컷오프 시각과 보급 정차시간으로 필요한 페이스를 자동 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />

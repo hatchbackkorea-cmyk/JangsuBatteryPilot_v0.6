@@ -51,6 +51,23 @@
 
 
         <activity
+            android:name=".StravaReviewActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="jangsubatterypilot"
+                    android:host="localhost"
+                    android:pathPrefix="/strava" />
+            </intent-filter>
+        </activity>
+
+
+        <activity
             android:name=".CourseActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
