@@ -19,6 +19,7 @@
 
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:icon="@drawable/ic_battery_pilot"
         android:label="GPX 배터리 코파일럿"
         android:supportsRtl="true"

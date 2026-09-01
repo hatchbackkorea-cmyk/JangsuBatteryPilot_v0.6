@@ -144,6 +144,7 @@ data class StravaRiderReviewProfile(
 }
 
 class StravaReviewStore(context: Context) {
+    private val app = context.applicationContext
     companion object {
         private const val PREFS = "strava_review_profile_v1"
         private const val CANDIDATE = "candidate_json"
@@ -175,6 +176,7 @@ class StravaReviewStore(context: Context) {
         require(c.resolvedYear() > 0) { "연동할 연도를 선택해 주세요." }
         val linked = c.copy(selectedYear = c.resolvedYear(), linkedAtMs = System.currentTimeMillis())
         prefs.edit().putString(ACTIVE, toJson(linked).toString()).apply()
+        RiderServerSync(app).syncAllAsync()
         return linked
     }
 

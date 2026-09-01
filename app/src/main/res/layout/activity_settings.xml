@@ -36,6 +36,30 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:background="@drawable/panel_hero_bg"
+            android:orientation="vertical"
+            android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📡 Rider Control Center 자동동기화" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvSyncStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Rider Server 미연결" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <EditText android:id="@+id/etSyncServerUrl" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:hint="서버 주소 예: http://192.168.0.10:8000" android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <EditText android:id="@+id/etSyncToken" android:layout_width="match_parent" android:layout_height="48dp" android:hint="PC 관리자에서 발급한 연결 토큰 (최초 1회)" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <EditText android:id="@+id/etSyncName" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1.4" android:hint="라이더 이름" android:inputType="textPersonName" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <EditText android:id="@+id/etSyncWeight" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="체중 kg" android:inputType="numberDecimal" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <EditText android:id="@+id/etSyncFtp" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="FTP W" android:inputType="numberDecimal" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            </LinearLayout>
+            <Switch android:id="@+id/switchSyncAuto" android:layout_width="match_parent" android:layout_height="48dp" android:checked="true" android:text="변경 데이터 자동 업로드" android:textColor="@color/text_primary" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/btnSyncSave" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="연결 저장" />
+                <Button android:id="@+id/btnSyncNow" android:layout_width="0dp" android:layout_height="50dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="지금 동기화" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="로드 Strava 파워커브, 라이더 분석 요약, GPX, 페이스 계획, 주행 ZIP을 서버에 자동 반영합니다. 인터넷이 끊기면 폰에 대기했다가 다음 연결 때 재전송합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:background="@drawable/panel_accent_bg"
             android:orientation="vertical"
             android:padding="15dp">

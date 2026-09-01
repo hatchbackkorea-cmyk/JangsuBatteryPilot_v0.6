@@ -52,6 +52,11 @@ class CourseRepository(context: Context) {
 
     fun loadActiveCourse(): CourseData = loadCourse(activeMeta().id)
 
+    fun sourceFile(id: String): File? {
+        val meta = listCourses().firstOrNull { it.id == id } ?: return null
+        return File(dir, meta.fileName).takeIf { it.exists() }
+    }
+
     fun loadCourse(id: String): CourseData {
         val meta = listCourses().firstOrNull { it.id == id } ?: error("코스를 찾을 수 없습니다.")
         val file = File(dir, meta.fileName)
@@ -85,6 +90,7 @@ class CourseRepository(context: Context) {
             val list = readIndex().toMutableList().apply { add(meta) }
             writeIndex(list)
             setActive(meta.id)
+            RiderServerSync(app).enqueueCourse(meta, target)
             return meta
         } catch (e: Exception) {
             target.delete()

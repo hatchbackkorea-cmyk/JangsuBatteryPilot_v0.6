@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
@@ -35,6 +36,16 @@ class SettingsActivity : Activity() {
     private lateinit var btnAutoFitScan: Button
     private lateinit var tvHistoricalLearningSummary: TextView
     private lateinit var tvRideInsightSummary: TextView
+    private lateinit var syncManager: RiderServerSync
+    private lateinit var etSyncServerUrl: EditText
+    private lateinit var etSyncToken: EditText
+    private lateinit var etSyncName: EditText
+    private lateinit var etSyncWeight: EditText
+    private lateinit var etSyncFtp: EditText
+    private lateinit var switchSyncAuto: Switch
+    private lateinit var tvSyncStatus: TextView
+    private lateinit var btnSyncSave: Button
+    private lateinit var btnSyncNow: Button
 
     private lateinit var switchVoice: Switch
     private lateinit var switchKeepScreen: Switch
@@ -76,6 +87,7 @@ class SettingsActivity : Activity() {
         rideInsightStore = RideInsightStore(this)
         autoFitManager = AutoFitImportManager(this)
         protoSyncManager = AvinoxProtoSyncManager(this)
+        syncManager = RiderServerSync(this)
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         findViewById<Button>(R.id.btnSettingsBack).setOnClickListener { finish() }
@@ -101,6 +113,15 @@ class SettingsActivity : Activity() {
         tvAutoFitStatus = findViewById(R.id.tvAutoFitStatus)
         btnAutoFitFolder = findViewById(R.id.btnAutoFitFolder)
         btnAutoFitScan = findViewById(R.id.btnAutoFitScan)
+        etSyncServerUrl = findViewById(R.id.etSyncServerUrl)
+        etSyncToken = findViewById(R.id.etSyncToken)
+        etSyncName = findViewById(R.id.etSyncName)
+        etSyncWeight = findViewById(R.id.etSyncWeight)
+        etSyncFtp = findViewById(R.id.etSyncFtp)
+        switchSyncAuto = findViewById(R.id.switchSyncAuto)
+        tvSyncStatus = findViewById(R.id.tvSyncStatus)
+        btnSyncSave = findViewById(R.id.btnSyncSave)
+        btnSyncNow = findViewById(R.id.btnSyncNow)
         tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
         switchBetaUpdates = findViewById(R.id.switchBetaUpdates)
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
@@ -109,6 +130,7 @@ class SettingsActivity : Activity() {
         seekChargeAlertTarget = findViewById(R.id.seekChargeAlertTarget)
         refreshLearningSummary()
         tvRideInsightSummary.text = rideInsightStore.summaryText()
+        setupSyncUi()
         setupUpdateUi()
         refreshProtoSyncUi()
         refreshAutoFitUi()
@@ -312,6 +334,57 @@ class SettingsActivity : Activity() {
         }
     }
 
+    private fun setupSyncUi() {
+        etSyncServerUrl.setText(syncManager.serverUrl())
+        etSyncToken.setText("")
+        etSyncName.setText(syncManager.riderName())
+        etSyncWeight.setText(String.format(java.util.Locale.US, "%.1f", syncManager.weightKg()))
+        etSyncFtp.setText(String.format(java.util.Locale.US, "%.0f", syncManager.ftpW()))
+        switchSyncAuto.isChecked = syncManager.autoEnabled()
+        refreshSyncUi()
+        btnSyncSave.setOnClickListener {
+            val weight = etSyncWeight.text.toString().toDoubleOrNull()
+            val ftp = etSyncFtp.text.toString().toDoubleOrNull()
+            if (weight == null || ftp == null) {
+                Toast.makeText(this, "체중/FTP 숫자를 확인해 주세요.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            syncManager.configure(
+                etSyncServerUrl.text.toString(), etSyncToken.text.toString(), etSyncName.text.toString(),
+                weight, ftp, switchSyncAuto.isChecked
+            )
+            etSyncToken.setText("")
+            refreshSyncUi("설정 저장됨")
+            if (syncManager.configured()) runServerSync(showToast = true)
+        }
+        btnSyncNow.setOnClickListener { runServerSync(showToast = true) }
+    }
+
+    private fun refreshSyncUi(extra: String? = null) {
+        tvSyncStatus.text = buildString {
+            append(syncManager.statusText())
+            if (!extra.isNullOrBlank()) append("\n").append(extra)
+        }
+        btnSyncNow.isEnabled = syncManager.configured()
+    }
+
+    private fun runServerSync(showToast: Boolean) {
+        if (!syncManager.configured()) {
+            if (showToast) Toast.makeText(this, "서버 주소와 연결 토큰을 먼저 저장해 주세요.", Toast.LENGTH_LONG).show()
+            refreshSyncUi()
+            return
+        }
+        btnSyncNow.isEnabled = false
+        refreshSyncUi("서버 동기화 중…")
+        syncManager.syncAllAsync { result ->
+            runOnUiThread {
+                btnSyncNow.isEnabled = true
+                refreshSyncUi(result.message)
+                if (showToast) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun setupUpdateUi() {
         switchBetaUpdates.isChecked = AppSettings.betaUpdates(this)
         refreshUpdateStatus()
@@ -396,6 +469,10 @@ class SettingsActivity : Activity() {
         if (::autoFitManager.isInitialized) refreshAutoFitUi()
         if (::tvLearningSummary.isInitialized) refreshLearningSummary()
         if (::tvRideInsightSummary.isInitialized) tvRideInsightSummary.text = rideInsightStore.summaryText()
+        if (::syncManager.isInitialized && ::tvSyncStatus.isInitialized) {
+            refreshSyncUi()
+            if (syncManager.autoEnabled() && syncManager.configured()) runServerSync(showToast = false)
+        }
         if (::tvUpdateStatus.isInitialized) {
             refreshUpdateStatus()
             UpdateManager.resumePendingInstall(this)

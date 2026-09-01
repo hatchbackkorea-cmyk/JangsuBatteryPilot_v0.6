@@ -449,7 +449,9 @@ class RideLogManager(context: Context) {
             .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT)
             .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ACTIVE_ASSIST_SOURCE).remove(ACTIVE_ASSIST_CONFIDENCE).remove(ACTIVE_ASSIST_RAW_CODE).remove(ASSIST_PROBE_UNTIL).apply()
         sessionDir.deleteRecursively()
-        return RideArchive(ride.sessionId, ride.courseName, ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, learned, ride.mode)
+        val archive = RideArchive(ride.sessionId, ride.courseName, ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, learned, ride.mode)
+        RiderServerSync(app).enqueueRide(archive)
+        return archive
     }
 
     fun finalizeFreeRide(
@@ -518,7 +520,9 @@ class RideLogManager(context: Context) {
             .remove(ACTIVE_MAX_KM).remove(ACTIVE_ASCENT_M).remove(ACTIVE_MODE).remove(ACTIVE_SPEED_SUM).remove(ACTIVE_SPEED_COUNT)
             .remove(ACTIVE_ASSIST_MODE).remove(ACTIVE_ASSIST_PROFILE_ID).remove(ACTIVE_ASSIST_PROFILE_JSON).remove(ACTIVE_ASSIST_SOURCE).remove(ACTIVE_ASSIST_CONFIDENCE).remove(ACTIVE_ASSIST_RAW_CODE).remove(ASSIST_PROBE_UNTIL).apply()
         sessionDir.deleteRecursively()
-        return RideArchive(ride.sessionId, "임의주행", ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, 0, RideMode.FREE)
+        val archive = RideArchive(ride.sessionId, "임의주행", ride.startMs, end, maxKm, avgSpeed, csv, gpx, json, zip, 0, RideMode.FREE)
+        RiderServerSync(app).enqueueRide(archive)
+        return archive
     }
 
     fun attachFitToLastRide(uri: android.net.Uri, learning: BatteryLearningStore): String {

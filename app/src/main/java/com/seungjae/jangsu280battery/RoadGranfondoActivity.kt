@@ -476,6 +476,12 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             return false
         }
         plan = built
+        val syncCourseKey = prefs.getString(KEY_COURSE_ID, null).orEmpty()
+        val syncBasis = when { rbCutoff.isChecked -> "cutoff"; rbTargetSpeed.isChecked -> "speed"; else -> "time" }
+        courseRepo.listCourses().firstOrNull { it.id == syncCourseKey }?.let { meta ->
+            courseRepo.sourceFile(meta.id)?.let { file -> RiderServerSync(this).enqueueCourse(meta, file) }
+        }
+        RiderServerSync(this).enqueuePlan(syncCourseKey, built, "${c.name} · 모바일 완주계획", syncBasis, aids)
         if (rbCutoff.isChecked) {
             prefs.edit().putLong(KEY_CUTOFF_DERIVED_SEC, built.ridingTargetSec.toLong()).apply()
         }

@@ -19,4 +19,10 @@ class BikeModeChooserActivity : Activity() {
             startActivity(Intent(this, RoadGranfondoActivity::class.java))
         }
     }
+    override fun onResume() {
+        super.onResume()
+        val sync = RiderServerSync(this)
+        if (sync.autoEnabled() && sync.configured()) sync.syncAllAsync()
+    }
+
 }
