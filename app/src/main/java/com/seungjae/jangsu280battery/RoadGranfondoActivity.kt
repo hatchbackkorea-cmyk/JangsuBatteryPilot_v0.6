@@ -186,9 +186,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             val code = String.format(Locale.US, "%06d", Random.nextInt(0, 1_000_000))
             etRoom.setText(code)
             prefs.edit().putString(KEY_ROOM, code).apply()
-            tvGroup.text = "방 코드 $code 생성 · 최대 20명 · 팀원에게 같은 코드를 알려주세요."
+            if (groupEnabled) disconnectGroup("새 방으로 전환")
+            connectGroup(autoCreated = true)
         }
-        btnGroup.setOnClickListener { toggleGroup() }
+        btnGroup.setOnClickListener { if (groupEnabled) disconnectGroup("그룹 위치 공유 중지") else connectGroup(autoCreated = false) }
 
         loadRoadCourse()
         refreshStravaProfileStatus()
@@ -595,18 +596,18 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         btnRide.text = "■ 주행 종료"
         plan?.let { renderSchedule(it, selectedStartMinuteOfDay()) }
         tvLive.text = "GPS 대기 · 목표 시각표를 시작했습니다."
+        if (groupEnabled) tvGroup.text = "● 방 연결 유지 · GPS 수신 후 실시간 위치 송신 시작"
         requestLocation()
     }
 
     private fun stopRide() {
         riding = false
-        groupEnabled = false
-        realtimeGroup?.close()
-        realtimeGroup = null
         runCatching { locationManager.removeUpdates(this) }
         btnRide.text = "▶ 주행 시작"
-        btnGroup.text = "그룹 연결"
         tvLive.append("\n주행 종료")
+        if (groupEnabled) {
+            tvGroup.text = "● 방 연결 유지 · 주행 시작 대기"
+        }
     }
 
     private fun requestLocation() {
@@ -673,48 +674,55 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         return GroupRider(riderId, nick, RoadGranfondoEngine.courseKey(c), lastRouteKm, lastLat, lastLon, lastSpeedKph, now)
     }
 
-    private fun toggleGroup() {
+    private fun connectGroup(autoCreated: Boolean) {
         val sync = RiderServerSync(this)
         val relay = sync.serverUrl().ifBlank { etRelay.text.toString().trim() }
         val room = etRoom.text.toString().trim()
         val nick = etNick.text.toString().trim().ifBlank { "라이더" }
-        if (!groupEnabled) {
-            if (!sync.configured()) {
-                Toast.makeText(this, "먼저 관리자 메뉴에서 Rider Control Center 서버와 연결 토큰을 설정해 주세요.", Toast.LENGTH_LONG).show(); return
-            }
-            if (relay.isBlank() || room.isBlank()) {
-                Toast.makeText(this, "Rider Control Center 서버와 방 코드를 확인해 주세요.", Toast.LENGTH_LONG).show(); return
-            }
-            if (!riding) {
-                Toast.makeText(this, "먼저 로드 주행을 시작해 주세요.", Toast.LENGTH_SHORT).show(); return
-            }
-            etRelay.setText(relay)
-            prefs.edit().putString(KEY_RELAY, relay).putString(KEY_ROOM, room).putString(KEY_NICK, nick).apply()
-            groupEnabled = true
-            btnGroup.text = "그룹 끄기"
-            tvGroup.text = "실시간 그룹 연결 시작…"
-            realtimeGroup?.close()
-            realtimeGroup = GroupRideRealtimeClient(
-                baseUrl = relay,
-                deviceToken = sync.token(),
-                room = room,
-                onSnapshot = { riders, _ ->
-                    runOnUiThread { currentGroupSelf()?.let { renderGroup(riders, it) } }
-                },
-                onState = { state -> runOnUiThread { if (groupEnabled) tvGroup.text = state } }
-            ).also { it.connect() }
-            maybeSyncGroup(force = true)
-        } else {
-            groupEnabled = false
-            realtimeGroup?.close()
-            realtimeGroup = null
-            btnGroup.text = "그룹 연결"
-            tvGroup.text = "그룹 위치 공유 중지"
+        if (!sync.configured()) {
+            Toast.makeText(this, "먼저 관리자 메뉴에서 Rider Control Center 서버와 연결 토큰을 설정해 주세요.", Toast.LENGTH_LONG).show(); return
         }
+        if (relay.isBlank() || room.isBlank()) {
+            Toast.makeText(this, "Rider Control Center 서버와 방 코드를 확인해 주세요.", Toast.LENGTH_LONG).show(); return
+        }
+        etRelay.setText(relay)
+        prefs.edit().putString(KEY_RELAY, relay).putString(KEY_ROOM, room).putString(KEY_NICK, nick).apply()
+        groupEnabled = true
+        btnGroup.text = "그룹 끄기"
+        tvGroup.text = if (autoCreated) "방 $room 생성 · 클라우드 연결 중…" else "방 $room 연결 중…"
+        realtimeGroup?.close()
+        realtimeGroup = GroupRideRealtimeClient(
+            baseUrl = relay,
+            deviceToken = sync.token(),
+            room = room,
+            onSnapshot = { riders, _ ->
+                runOnUiThread {
+                    if (riding) currentGroupSelf()?.let { renderGroup(riders, it) }
+                    else if (groupEnabled) tvGroup.text = "● 방 $room 연결됨 · 주행 시작 대기 · 최대 20명"
+                }
+            },
+            onState = { state ->
+                runOnUiThread {
+                    if (!groupEnabled) return@runOnUiThread
+                    tvGroup.text = if (!riding && state.startsWith("●")) {
+                        "● 방 $room 연결됨 · 주행 시작 대기 · 최대 20명"
+                    } else state
+                }
+            }
+        ).also { it.connect() }
+        if (autoCreated) Toast.makeText(this, "방 $room 생성 · 주행 전에 팀원을 먼저 초대할 수 있습니다.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun disconnectGroup(message: String) {
+        groupEnabled = false
+        realtimeGroup?.close()
+        realtimeGroup = null
+        btnGroup.text = "그룹 연결"
+        tvGroup.text = message
     }
 
     private fun maybeSyncGroup(force: Boolean = false) {
-        if (!groupEnabled) return
+        if (!groupEnabled || !riding) return
         val now = System.currentTimeMillis()
         if (!force && now - lastGroupSyncMs < 1_000L) return
         val self = currentGroupSelf(now) ?: return
