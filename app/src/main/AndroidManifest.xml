@@ -35,6 +35,12 @@
             </intent-filter>
         </activity>
 
+
+        <activity
+            android:name=".AdminCenterActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".MainActivity"
             android:exported="false"
@@ -111,7 +117,7 @@
 
         <activity
             android:name=".ReleaseUploaderActivity"
-            android:exported="true"
+            android:exported="false"
             android:launchMode="singleTop"
             android:screenOrientation="portrait">
             <intent-filter>

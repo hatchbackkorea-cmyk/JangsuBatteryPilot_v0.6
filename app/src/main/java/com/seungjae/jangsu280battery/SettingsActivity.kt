@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.SeekBar
@@ -122,6 +123,7 @@ class SettingsActivity : Activity() {
         tvSyncStatus = findViewById(R.id.tvSyncStatus)
         btnSyncSave = findViewById(R.id.btnSyncSave)
         btnSyncNow = findViewById(R.id.btnSyncNow)
+        findViewById<View>(R.id.panelLegacyRiderServerSync).visibility = View.GONE
         tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
         switchBetaUpdates = findViewById(R.id.switchBetaUpdates)
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
@@ -247,7 +249,7 @@ class SettingsActivity : Activity() {
             startActivity(Intent(this, SramBleActivity::class.java))
         }
         findViewById<Button>(R.id.btnMobileRelease).setOnClickListener {
-            startActivity(Intent(this, ReleaseUploaderActivity::class.java))
+            startActivity(Intent(this, AdminCenterActivity::class.java))
         }
         findViewById<Button>(R.id.btnSettingsVersion).setOnClickListener { showVersionInfo() }
     }
@@ -386,13 +388,11 @@ class SettingsActivity : Activity() {
     }
 
     private fun setupUpdateUi() {
+        tvUpdateStatus.text = "🔐 앱 업데이트는 첫 화면의 관리자 메뉴에서 관리합니다."
         switchBetaUpdates.isChecked = AppSettings.betaUpdates(this)
-        refreshUpdateStatus()
-        switchBetaUpdates.setOnCheckedChangeListener { _, checked ->
-            prefs.edit().putBoolean(AppSettings.KEY_BETA_UPDATES, checked).apply()
-            refreshUpdateStatus()
-        }
-        btnCheckUpdate.setOnClickListener { checkForUpdate() }
+        switchBetaUpdates.isEnabled = false
+        btnCheckUpdate.text = "🔐 관리자 메뉴 열기"
+        btnCheckUpdate.setOnClickListener { startActivity(Intent(this, AdminCenterActivity::class.java)) }
     }
 
     private fun refreshUpdateStatus(extra: String? = null) {

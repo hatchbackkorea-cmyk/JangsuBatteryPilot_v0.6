@@ -368,7 +368,7 @@ class MainActivity : Activity() {
         renderAssistModeUi()
         renderCurrentMode()
         maybeAutoReinterpretAvinoxOriginals()
-        UpdateManager.maybeCheckOnLaunch(this)
+        // v0.31.7: update/install is admin-only from the first-screen Admin Center.
     }
 
     private fun maybeAutoReinterpretAvinoxOriginals() {
@@ -1924,12 +1924,10 @@ class MainActivity : Activity() {
             startActivity(Intent(this, SramBleActivity::class.java))
         }
         switchPageBetaUpdates.isChecked = AppSettings.betaUpdates(this)
-        switchPageBetaUpdates.setOnCheckedChangeListener { _, checked ->
-            AppSettings.prefs(this).edit().putBoolean(AppSettings.KEY_BETA_UPDATES, checked).apply()
-            refreshInlineUpdateStatus()
-        }
-        btnPageCheckUpdate.setOnClickListener { checkForUpdateInline() }
-        refreshInlineUpdateStatus()
+        switchPageBetaUpdates.isEnabled = false
+        btnPageCheckUpdate.text = "🔐 관리자 메뉴에서 업데이트"
+        btnPageCheckUpdate.setOnClickListener { startActivity(Intent(this, AdminCenterActivity::class.java)) }
+        refreshInlineUpdateStatus("업데이트/설치는 관리자 메뉴에서만 가능합니다.")
         btnPageResetProgress.setOnClickListener { resetProgressQuick() }
     }
 
@@ -2420,8 +2418,9 @@ class MainActivity : Activity() {
             if (repo.isNotBlank()) append(" · $repo")
             append("\n새 소스 ZIP을 휴대폰에서 바로 GitHub main으로 배포할 수 있습니다.")
         }
+        btnPageMobileRelease.text = "🔐 관리자 메뉴에서 모바일 배포"
         btnPageMobileRelease.setOnClickListener {
-            startActivity(Intent(this, ReleaseUploaderActivity::class.java))
+            startActivity(Intent(this, AdminCenterActivity::class.java))
         }
     }
 

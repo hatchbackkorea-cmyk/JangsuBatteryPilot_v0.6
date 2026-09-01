@@ -59,6 +59,35 @@ class RiderServerSync(context: Context) {
         if (deviceToken.isNotBlank()) secure.saveToken(deviceToken)
     }
 
+    fun verifyAdminAsync(password: String, serverOverride: String? = null, tokenOverride: String? = null, callback: (Result) -> Unit) {
+        Thread {
+            val result = runCatching {
+                val url = (serverOverride ?: serverUrl()).trim().trimEnd('/')
+                val tok = (tokenOverride?.takeIf { it.isNotBlank() } ?: token()).trim()
+                require(url.startsWith("http")) { "서버 주소를 확인해 주세요." }
+                require(tok.isNotBlank()) { "연결 토큰을 입력해 주세요." }
+                explicitJsonRequest(url, tok, "/api/mobile/admin/verify", "POST", JSONObject().put("password", password))
+                Result(true, "관리자 인증 성공")
+            }.getOrElse { Result(false, "관리자 인증 실패 · ${it.message ?: "서버 연결 확인"}") }
+            callback(result)
+        }.start()
+    }
+
+    fun changeAdminPasswordAsync(currentPassword: String, newPassword: String, callback: (Result) -> Unit) {
+        Thread {
+            val result = runCatching {
+                require(configured()) { "Rider Server 연결이 필요합니다." }
+                require(newPassword.length >= 6) { "새 관리자 암호는 6자 이상이어야 합니다." }
+                postJson("/api/mobile/admin/password", JSONObject().apply {
+                    put("current_password", currentPassword)
+                    put("new_password", newPassword)
+                })
+                Result(true, "관리자 암호 변경 완료 · PC 관리자도 새 암호를 사용합니다.")
+            }.getOrElse { Result(false, "암호 변경 실패 · ${it.message ?: "서버 연결 확인"}") }
+            callback(result)
+        }.start()
+    }
+
     fun statusText(): String = buildString {
         append(if (configured()) "Rider Server 연결 설정됨" else "Rider Server 미연결")
         append(" · 자동동기화 ").append(if (autoEnabled()) "ON" else "OFF")
@@ -226,6 +255,17 @@ class RiderServerSync(context: Context) {
     }
 
     private class HttpFailure(val code:Int, message:String): RuntimeException(message)
+    private fun explicitJsonRequest(baseUrl:String, bearer:String, path:String, method:String, body:JSONObject):JSONObject {
+        val c=(URL(baseUrl.trimEnd('/')+path).openConnection() as HttpURLConnection).apply {
+            requestMethod=method; connectTimeout=8000; readTimeout=15000; doOutput=true
+            setRequestProperty("Authorization","Bearer $bearer")
+            setRequestProperty("Accept","application/json")
+            setRequestProperty("Content-Type","application/json; charset=utf-8")
+        }
+        c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        return readResponse(c)
+    }
+
     private fun conn(path:String, method:String): HttpURLConnection {
         val c=URL(serverUrl()+path).openConnection() as HttpURLConnection
         c.requestMethod=method; c.connectTimeout=8000; c.readTimeout=30000; c.setRequestProperty("Authorization","Bearer ${token()}"); c.setRequestProperty("Accept","application/json")

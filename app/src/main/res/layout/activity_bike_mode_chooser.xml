@@ -42,6 +42,15 @@
         android:textSize="20sp"
         android:textStyle="bold" />
 
+    <Button
+        android:id="@+id/btnBikeModeAdmin"
+        android:layout_width="match_parent"
+        android:layout_height="58dp"
+        android:layout_marginTop="18dp"
+        android:text="🔐 관리자 · 업데이트 / Rider Control Center"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

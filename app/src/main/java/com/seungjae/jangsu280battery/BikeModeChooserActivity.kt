@@ -18,6 +18,9 @@ class BikeModeChooserActivity : Activity() {
         findViewById<Button>(R.id.btnBikeModeRoad).setOnClickListener {
             startActivity(Intent(this, RoadGranfondoActivity::class.java))
         }
+        findViewById<Button>(R.id.btnBikeModeAdmin).setOnClickListener {
+            startActivity(Intent(this, AdminCenterActivity::class.java))
+        }
     }
     override fun onResume() {
         super.onResume()

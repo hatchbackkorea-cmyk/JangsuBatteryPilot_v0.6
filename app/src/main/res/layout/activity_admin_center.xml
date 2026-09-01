@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <Button android:id="@+id/btnAdminBack" android:layout_width="wrap_content" android:layout_height="44dp" android:text="←" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🔐 관리자" android:textColor="@color/text_primary" android:textSize="25sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tvAdminAuthStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="관리자 인증 필요" android:textColor="@color/text_secondary" android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:background="@drawable/panel_hero_bg" android:orientation="vertical" android:padding="14dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📱 앱 업데이트 / 배포" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvAdminUpdateStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="현재 버전 확인 중…" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Switch android:id="@+id/switchAdminBetaUpdates" android:layout_width="match_parent" android:layout_height="46dp" android:text="테스트판 업데이트 포함" android:textColor="@color/text_primary" />
+            <Button android:id="@+id/btnAdminCheckUpdate" android:layout_width="match_parent" android:layout_height="50dp" android:text="앱 업데이트 확인 · 설치" android:textStyle="bold" />
+            <Button android:id="@+id/btnAdminMobileRelease" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="7dp" android:text="📦 새 ZIP 모바일 배포" android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="14dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📡 Rider Control Center" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvAdminSyncStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="서버 연결 상태" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <EditText android:id="@+id/etAdminServerUrl" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="7dp" android:hint="서버 주소 예: http://192.168.0.10:8000" android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <EditText android:id="@+id/etAdminDeviceToken" android:layout_width="match_parent" android:layout_height="48dp" android:hint="새 연결 토큰 · 비워두면 기존 토큰 유지" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <EditText android:id="@+id/etAdminRiderName" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1.4" android:hint="라이더 이름" android:inputType="textPersonName" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <EditText android:id="@+id/etAdminWeight" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="체중 kg" android:inputType="numberDecimal" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <EditText android:id="@+id/etAdminFtp" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="FTP W" android:inputType="numberDecimal" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            </LinearLayout>
+            <Switch android:id="@+id/switchAdminAutoSync" android:layout_width="match_parent" android:layout_height="46dp" android:text="변경 데이터 자동 업로드" android:textColor="@color/text_primary" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/btnAdminSaveConnection" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="연결 저장/검증" />
+                <Button android:id="@+id/btnAdminSyncNow" android:layout_width="0dp" android:layout_height="50dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="지금 동기화" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_marginBottom="24dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🔑 관리자 암호 변경" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="여기서 바꾸면 PC Rider Control Center 관리자 로그인 암호도 즉시 같이 바뀝니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <EditText android:id="@+id/etAdminCurrentPassword" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="6dp" android:hint="현재 관리자 암호" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <EditText android:id="@+id/etAdminNewPassword" android:layout_width="match_parent" android:layout_height="48dp" android:hint="새 관리자 암호 (6자 이상)" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <EditText android:id="@+id/etAdminConfirmPassword" android:layout_width="match_parent" android:layout_height="48dp" android:hint="새 관리자 암호 확인" android:inputType="textPassword" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <Button android:id="@+id/btnAdminChangePassword" android:layout_width="match_parent" android:layout_height="50dp" android:text="관리자 암호 변경" android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>
