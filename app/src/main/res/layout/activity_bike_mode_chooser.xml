@@ -21,9 +21,23 @@
             android:textSize="13sp" />
 
         <TextView
-            android:layout_width="wrap_content"
+            android:id="@+id/tvBikeModeServerStatus"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:background="@color/panel"
+            android:gravity="center"
+            android:minHeight="42dp"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp"
+            android:text="PC 서버 상태 확인 중…"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
             android:text="오늘 어떤 자전거로 탈까요?"
             android:textColor="@color/text_primary"
             android:textSize="24sp"
