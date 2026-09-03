@@ -40,8 +40,8 @@ data class GuestGroupSession(
  *
  * Resolution order:
  * 1) same-LAN UDP discovery / HTTP scan (prefers the user's PC server)
- * 2) cached public Funnel URL
- * 3) tiny rcc-server.json stored in the same GitHub repository as the APK
+ * 2) current rcc-server.json pointer stored in the same GitHub repository as the APK
+ * 3) cached public Funnel URL
  * 4) configured/cached fallback server
  */
 class GroupRoomDiscovery(private val context: Context) {
@@ -83,15 +83,15 @@ class GroupRoomDiscovery(private val context: Context) {
             if (local.startsWith("http")) return local
         }
 
-        val cachedPublic = prefs.getString(KEY_PUBLIC_SERVER, "").orEmpty().trim().trimEnd('/')
-        if (cachedPublic.startsWith("https")) return cachedPublic
-
-        // GitHub hosts only a tiny URL pointer; the actual live server remains the user's PC.
-        // Check it before stale LAN/configured addresses so a phone that leaves Wi-Fi can still find the PC Funnel.
+        // Prefer the current published pointer over a previously cached Funnel URL.
+        // This lets an app recover automatically after the PC server address changes.
         githubBootstrapUrl()?.let { url ->
             prefs.edit().putString(KEY_PUBLIC_SERVER, url).putString(KEY_LAST_SERVER, url).apply()
             return url
         }
+
+        val cachedPublic = prefs.getString(KEY_PUBLIC_SERVER, "").orEmpty().trim().trimEnd('/')
+        if (cachedPublic.startsWith("https")) return cachedPublic
 
         val configured = RiderServerSync(context).serverUrl().trim().trimEnd('/')
         if (configured.startsWith("http")) return configured

@@ -21,6 +21,7 @@ class BikeModeChooserActivity : Activity() {
     private lateinit var btnUpdate: Button
     private lateinit var tvVersion: TextView
     private lateinit var tvServerStatus: TextView
+    private var lastServerRepairAttemptMs = 0L
 
     private data class PcHealth(
         val ok: Boolean,
@@ -58,6 +59,7 @@ class BikeModeChooserActivity : Activity() {
         }
         refreshAdminVisibility()
         refreshServerHealth()
+        repairPreferredPcServerIfNeeded(force = true)
         UpdateManager.resumePendingInstall(this)
         // 일반 사용자도 앱 실행 시 하루 1회 안정판 업데이트를 자동 확인한다.
         UpdateManager.maybeCheckOnLaunch(this)
@@ -68,6 +70,7 @@ class BikeModeChooserActivity : Activity() {
         UpdateManager.resumePendingInstall(this)
         refreshAdminVisibility()
         refreshServerHealth()
+        repairPreferredPcServerIfNeeded()
         if (sync.configured()) {
             sync.checkAdminStatusAsync {
                 runOnUiThread { refreshAdminVisibility() }
@@ -77,6 +80,110 @@ class BikeModeChooserActivity : Activity() {
             sync.syncAllAsync {
                 runOnUiThread { refreshServerHealth() }
             }
+        }
+    }
+
+    /**
+     * v0.32.8 self-heal: if the phone still points at an older RCC server, read the
+     * current public PC URL from rcc-server.json and adopt it only after /api/health
+     * confirms the PC entrypoint. Existing Device Token/profile settings are preserved.
+     */
+    private fun repairPreferredPcServerIfNeeded(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastServerRepairAttemptMs < 30_000L) return
+        lastServerRepairAttemptMs = now
+
+        Thread {
+            val current = sync.serverUrl().trim().trimEnd('/')
+            val currentHealth = if (current.startsWith("http")) {
+                runCatching { probePcHealth(current) }.getOrNull()
+            } else null
+            if (currentHealth?.ok == true && currentHealth.pcEntry) return@Thread
+
+            val candidate = runCatching { fetchPublishedPcServer() }.getOrNull().orEmpty().trim().trimEnd('/')
+            if (!candidate.startsWith("http") || candidate == current) return@Thread
+
+            val candidateHealth = runCatching { probePcHealth(candidate) }.getOrNull() ?: return@Thread
+            if (!candidateHealth.ok || !candidateHealth.pcEntry) return@Thread
+
+            val wasAdmin = sync.isAdminDeviceCached()
+            sync.configure(
+                url = candidate,
+                deviceToken = sync.token(),
+                name = sync.riderName(),
+                weightKg = sync.weightKg(),
+                ftpW = sync.ftpW(),
+                auto = sync.autoEnabled()
+            )
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val v = candidateHealth.version.takeIf { it.isNotBlank() }?.let { " · v$it" }.orEmpty()
+                tvServerStatus.setTextColor(getColor(R.color.good))
+                tvServerStatus.text = "● 새 PC 서버 자동 연결$v · 동기화 대기 ${sync.pendingCount()}건"
+                Toast.makeText(this, "새 Rider Control Center PC 서버로 자동 전환했습니다.", Toast.LENGTH_SHORT).show()
+            }
+
+            if (wasAdmin) {
+                sync.checkAdminStatusAsync { auth ->
+                    runOnUiThread {
+                        refreshAdminVisibility()
+                        if (!auth.ok && !isFinishing && !isDestroyed) {
+                            Toast.makeText(
+                                this,
+                                "새 PC 서버에서 관리자폰 재등록이 필요할 수 있습니다. Ride Copilot 버전 글자를 길게 눌러 등록할 수 있습니다.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }
+            }
+            if (sync.autoEnabled() && sync.configured()) {
+                sync.syncAllAsync {
+                    runOnUiThread { refreshServerHealth() }
+                }
+            }
+        }.start()
+    }
+
+    private fun fetchPublishedPcServer(): String? {
+        val repo = BuildConfig.UPDATE_REPOSITORY.trim()
+        if (!repo.contains('/')) return null
+        val connection = URL("https://raw.githubusercontent.com/$repo/main/rcc-server.json")
+            .openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 3500
+            connection.readTimeout = 3500
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Cache-Control", "no-cache")
+            if (connection.responseCode !in 200..299) return null
+            val text = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            JSONObject(text).optString("url", "").trim().trimEnd('/').takeIf { it.startsWith("http") }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun probePcHealth(base: String): PcHealth {
+        val connection = URL("${base.trim().trimEnd('/')}/api/health").openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 4000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Accept", "application/json")
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) error("HTTP $code")
+            val json = JSONObject(text)
+            PcHealth(
+                ok = json.optBoolean("ok", false),
+                version = json.optString("version", "").trim(),
+                pcEntry = json.optBoolean("pc_entry", false)
+            )
+        } finally {
+            connection.disconnect()
         }
     }
 
@@ -97,27 +204,7 @@ class BikeModeChooserActivity : Activity() {
         tvServerStatus.text = "PC 서버 확인 중… · 동기화 대기 ${pending}건"
 
         Thread {
-            val result = runCatching {
-                val connection = URL("$base/api/health").openConnection() as HttpURLConnection
-                try {
-                    connection.requestMethod = "GET"
-                    connection.connectTimeout = 4000
-                    connection.readTimeout = 5000
-                    connection.setRequestProperty("Accept", "application/json")
-                    val code = connection.responseCode
-                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                    val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    if (code !in 200..299) error("HTTP $code")
-                    val json = JSONObject(text)
-                    PcHealth(
-                        ok = json.optBoolean("ok", false),
-                        version = json.optString("version", "").trim(),
-                        pcEntry = json.optBoolean("pc_entry", false)
-                    )
-                } finally {
-                    connection.disconnect()
-                }
-            }
+            val result = runCatching { probePcHealth(base) }
 
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
