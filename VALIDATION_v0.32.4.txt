@@ -1,0 +1,8 @@
+JangsuBatteryPilot v0.32.4 validation
+- VERSION.txt updated: PASS
+- RoomCourseAutoSync.kt added
+- CourseRepository downloaded-file import path added (no server re-upload loop)
+- RoadGranfondoActivity snapshot GPX auto-download/apply wiring added
+- same room-course fingerprint reuses local GPX
+- moving ride safety: late course change downloads but defers apply
+- Kotlin parser-level check: no syntax parser errors; Android SDK classes are unavailable in this environment, so full APK compile must be confirmed by the existing GitHub Actions build.

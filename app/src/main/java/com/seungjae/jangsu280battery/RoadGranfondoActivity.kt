@@ -111,7 +111,13 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private var lastGroupSyncMs = 0L
     private var groupSyncBusy = false
     private var realtimeGroup: GroupRideRealtimeClient? = null
+    private var guestGroupServer: String = ""
+    private var guestGroupToken: String = ""
+    private var guestGroupRoom: String = ""
+    private var guestGroupNick: String = ""
     private var lastGpsAccuracyM = 0.0
+    @Volatile private var roomCourseSyncing = false
+    private var roomCourseLastAttemptMs = 0L
     private var syncingInputs = false
     private var pendingPdfPlan: RoadPlan? = null
     private val riderId: String by lazy {
@@ -155,17 +161,30 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         btnGroup = findViewById(R.id.btnRoadGroupToggle)
         tvGroup = findViewById(R.id.tvRoadGroup)
 
+        guestGroupServer = intent.getStringExtra(GroupRoomDiscovery.EXTRA_GUEST_SERVER).orEmpty().trim().trimEnd('/')
+        guestGroupToken = intent.getStringExtra(GroupRoomDiscovery.EXTRA_GUEST_TOKEN).orEmpty().trim()
+        guestGroupRoom = intent.getStringExtra(GroupRoomDiscovery.EXTRA_GUEST_ROOM).orEmpty().trim()
+        guestGroupNick = intent.getStringExtra(GroupRoomDiscovery.EXTRA_GUEST_NICK).orEmpty().trim()
+
         setupPlanInputSpinners()
         val riderServer = RiderServerSync(this)
-        if (riderServer.configured()) {
+        if (guestGroupToken.isNotBlank() && guestGroupServer.startsWith("http")) {
+            etRelay.setText(guestGroupServer)
+            etRelay.isEnabled = false
+            etRelay.hint = "공개 그룹방 서버 자동 사용"
+            etRoom.setText(guestGroupRoom)
+            etNick.setText(guestGroupNick.ifBlank { "라이더" })
+        } else if (riderServer.configured()) {
             etRelay.setText(riderServer.serverUrl())
             etRelay.isEnabled = false
             etRelay.hint = "Rider Control Center 서버 자동 사용"
+            etRoom.setText(prefs.getString(KEY_ROOM, ""))
+            etNick.setText(prefs.getString(KEY_NICK, riderServer.riderName().ifBlank { "승재" }))
         } else {
             etRelay.setText(prefs.getString(KEY_RELAY, ""))
+            etRoom.setText(prefs.getString(KEY_ROOM, ""))
+            etNick.setText(prefs.getString(KEY_NICK, "라이더"))
         }
-        etRoom.setText(prefs.getString(KEY_ROOM, ""))
-        etNick.setText(prefs.getString(KEY_NICK, riderServer.riderName().ifBlank { "승재" }))
 
         findViewById<Button>(R.id.btnRoadBackMode).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
@@ -183,6 +202,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         }
         btnRide.setOnClickListener { if (riding) stopRide() else startRide() }
         findViewById<Button>(R.id.btnRoadGroupMakeRoom).setOnClickListener {
+            if (guestGroupToken.isNotBlank()) {
+                Toast.makeText(this, "일반 참가자는 공개방에 참가만 할 수 있습니다. 방 생성은 PC 관리자 또는 관리자폰에서 해주세요.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
             val code = String.format(Locale.US, "%06d", Random.nextInt(0, 1_000_000))
             etRoom.setText(code)
             prefs.edit().putString(KEY_ROOM, code).apply()
@@ -193,6 +216,9 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
         loadRoadCourse()
         refreshStravaProfileStatus()
+        if (guestGroupToken.isNotBlank() && guestGroupRoom.isNotBlank() && guestGroupServer.startsWith("http")) {
+            tvGroup.post { connectGroup(autoCreated = false) }
+        }
     }
 
     override fun onResume() {
@@ -676,11 +702,13 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
     private fun connectGroup(autoCreated: Boolean) {
         val sync = RiderServerSync(this)
-        val relay = sync.serverUrl().ifBlank { etRelay.text.toString().trim() }
-        val room = etRoom.text.toString().trim()
-        val nick = etNick.text.toString().trim().ifBlank { "라이더" }
-        if (!sync.configured()) {
-            Toast.makeText(this, "먼저 관리자 메뉴에서 Rider Control Center 서버와 연결 토큰을 설정해 주세요.", Toast.LENGTH_LONG).show(); return
+        val guestMode = guestGroupToken.isNotBlank()
+        val relay = if (guestMode) guestGroupServer else sync.serverUrl().ifBlank { etRelay.text.toString().trim() }
+        val token = if (guestMode) guestGroupToken else sync.token()
+        val room = if (guestMode) guestGroupRoom.ifBlank { etRoom.text.toString().trim() } else etRoom.text.toString().trim()
+        val nick = if (guestMode) guestGroupNick.ifBlank { etNick.text.toString().trim().ifBlank { "라이더" } } else etNick.text.toString().trim().ifBlank { "라이더" }
+        if (token.isBlank()) {
+            Toast.makeText(this, "참가 인증정보가 없습니다. 첫 화면의 공개 그룹방에서 다시 참가해 주세요.", Toast.LENGTH_LONG).show(); return
         }
         if (relay.isBlank() || room.isBlank()) {
             Toast.makeText(this, "Rider Control Center 서버와 방 코드를 확인해 주세요.", Toast.LENGTH_LONG).show(); return
@@ -689,16 +717,17 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         prefs.edit().putString(KEY_RELAY, relay).putString(KEY_ROOM, room).putString(KEY_NICK, nick).apply()
         groupEnabled = true
         btnGroup.text = "그룹 끄기"
-        tvGroup.text = if (autoCreated) "방 $room 생성 · 클라우드 연결 중…" else "방 $room 연결 중…"
+        tvGroup.text = if (autoCreated) "방 $room 생성 · 서버 연결 중…" else if (guestMode) "공개방 $room 참가 중…" else "방 $room 연결 중…"
         realtimeGroup?.close()
         realtimeGroup = GroupRideRealtimeClient(
             baseUrl = relay,
-            deviceToken = sync.token(),
+            deviceToken = token,
             room = room,
-            onSnapshot = { riders, _ ->
+            onSnapshot = { riders, snapshot ->
+                maybeAutoSyncRoomCourse(snapshot, relay, room, token)
                 runOnUiThread {
                     if (riding) currentGroupSelf()?.let { renderGroup(riders, it) }
-                    else if (groupEnabled) tvGroup.text = "● 방 $room 연결됨 · 주행 시작 대기 · 최대 20명"
+                    else if (groupEnabled && !roomCourseSyncing) tvGroup.text = "● 방 $room 연결됨 · 주행 시작 대기 · 최대 20명"
                 }
             },
             onState = { state ->
@@ -711,6 +740,67 @@ class RoadGranfondoActivity : Activity(), LocationListener {
             }
         ).also { it.connect() }
         if (autoCreated) Toast.makeText(this, "방 $room 생성 · 주행 전에 팀원을 먼저 초대할 수 있습니다.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun maybeAutoSyncRoomCourse(snapshot: org.json.JSONObject, relay: String, room: String, token: String) {
+        val desc = RoomCourseAutoSync(this).descriptor(snapshot) ?: return
+        val fpKey = "room_course_fp_$room"
+        val localKey = "room_course_local_$room"
+        val savedFp = prefs.getString(fpKey, "").orEmpty()
+        val savedLocalId = prefs.getString(localKey, "").orEmpty()
+
+        if (savedFp == desc.fingerprint && savedLocalId.isNotBlank()) {
+            val currentId = prefs.getString(KEY_COURSE_ID, "").orEmpty()
+            if (currentId != savedLocalId && (!riding || lastRouteKm < 0.2)) {
+                runCatching { courseRepo.loadCourse(savedLocalId) }.onSuccess { downloaded ->
+                    runOnUiThread { applyRoomCourse(downloaded, savedLocalId, room, desc.name, false) }
+                }
+            }
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (roomCourseSyncing || now - roomCourseLastAttemptMs < 30_000L) return
+        roomCourseSyncing = true
+        roomCourseLastAttemptMs = now
+        runOnUiThread { tvGroup.text = "↓ 방 $room GPX 자동 다운로드 중 · ${desc.name}" }
+        Thread {
+            val result = runCatching {
+                val temp = RoomCourseAutoSync(this).download(relay, token, room, desc)
+                try { courseRepo.importGpxFile(temp, desc.name, enqueueServer = false) } finally { temp.delete() }
+            }
+            runOnUiThread {
+                roomCourseSyncing = false
+                result.onSuccess { meta ->
+                    prefs.edit().putString(fpKey, desc.fingerprint).putString(localKey, meta.id).apply()
+                    val canApply = !riding || lastRouteKm < 0.2
+                    if (canApply) {
+                        val downloaded = runCatching { courseRepo.loadCourse(meta.id) }.getOrNull()
+                        if (downloaded != null) applyRoomCourse(downloaded, meta.id, room, desc.name, true)
+                    } else {
+                        tvGroup.text = "✓ 방 GPX 다운로드 완료 · 현재 주행 종료 후 자동 적용 · ${desc.name}"
+                        Toast.makeText(this, "방 GPX를 받았습니다. 현재 주행 중이라 다음 주행부터 적용합니다.", Toast.LENGTH_LONG).show()
+                    }
+                }.onFailure {
+                    tvGroup.text = "⚠ 방 GPX 자동 다운로드 실패 · 그룹 연결은 유지됨"
+                    Toast.makeText(this, "그룹방 GPX 다운로드 실패: ${it.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun applyRoomCourse(downloaded: CourseData, localId: String, room: String, courseName: String, fresh: Boolean) {
+        prefs.edit().putString(KEY_COURSE_ID, localId).apply()
+        course = downloaded
+        matcher = RouteMatcher(downloaded)
+        plan = null
+        refreshCourse()
+        renderAidStationRows()
+        renderCutoffRows()
+        updateBasisPreview()
+        tvPlan.text = "방 GPX가 자동 적용되었습니다. 목표시간/평속 또는 컷오프 계획을 설정해 주세요."
+        tvSchedule.text = ""
+        tvGroup.text = "✓ 방 $room GPX ${if (fresh) "자동 다운로드·적용" else "자동 적용"} · $courseName · 주행 시작 대기"
+        if (fresh) Toast.makeText(this, "방에 설정된 GPX를 자동으로 받았습니다: $courseName", Toast.LENGTH_LONG).show()
     }
 
     private fun disconnectGroup(message: String) {

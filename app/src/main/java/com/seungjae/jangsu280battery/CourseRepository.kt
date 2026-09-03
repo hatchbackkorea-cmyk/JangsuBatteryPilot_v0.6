@@ -98,6 +98,39 @@ class CourseRepository(context: Context) {
         }
     }
 
+    /** Import a GPX that was downloaded from Rider Control Center.
+     *  enqueueServer=false prevents a download -> upload loop.
+     */
+    fun importGpxFile(source: File, displayName: String?, enqueueServer: Boolean = false): CourseMeta {
+        require(source.exists() && source.length() > 0L) { "다운로드한 GPX 파일이 없습니다." }
+        val id = "course_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+        val fileName = "$id.gpx"
+        val target = File(dir, fileName)
+        source.inputStream().use { input -> FileOutputStream(target).use { output -> input.copyTo(output) } }
+        try {
+            val parsed = target.inputStream().use { CourseData.parse(it, displayName ?: "그룹방 GPX") }
+            val meta = CourseMeta(
+                id = id,
+                name = parsed.name.ifBlank { displayName?.substringBeforeLast('.') ?: "그룹방 GPX" },
+                fileName = fileName,
+                totalKm = parsed.totalKm,
+                totalAscentM = parsed.totalAscentM,
+                totalDescentM = parsed.totalDescentM,
+                hasElevation = parsed.hasElevation,
+                importedAtMs = System.currentTimeMillis(),
+                builtIn = false
+            )
+            val list = readIndex().toMutableList().apply { add(meta) }
+            writeIndex(list)
+            setActive(meta.id)
+            if (enqueueServer) RiderServerSync(app).enqueueCourse(meta, target)
+            return meta
+        } catch (e: Exception) {
+            target.delete()
+            throw e
+        }
+    }
+
     fun deleteCourse(id: String): Boolean {
         val meta = listCourses().firstOrNull { it.id == id } ?: return false
         if (meta.builtIn) return false

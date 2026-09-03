@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
  *
  * - WebSocket push: no 10-second polling delay.
  * - Uses the existing Rider Control Center device token.
- * - Reconnects automatically after Cloud Run's WebSocket timeout/network loss.
+ * - Reconnects automatically after server/WebSocket timeout or network loss.
  * - OkHttp ping frames keep mobile/NAT connections alive.
  */
 class GroupRideRealtimeClient(

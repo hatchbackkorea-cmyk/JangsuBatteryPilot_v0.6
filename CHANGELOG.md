@@ -1,3 +1,9 @@
+# v0.32.5 — Guest public rooms + PC server discovery
+- 새 설치 참가자 무토큰 공개방 참가
+- 같은 LAN PC 서버 자동 발견 + 외부 HTTPS 주소 bootstrap
+- 방 GPX 참가 즉시 자동 다운로드/적용
+- 그룹 실시간 가상레이스는 비활성 유지
+
 # v0.32.0 — Google Cloud 실시간 그룹 라이딩
 
 - 그룹 위치 공유를 10초 REST 폴링에서 WebSocket 실시간 push로 변경했습니다.
