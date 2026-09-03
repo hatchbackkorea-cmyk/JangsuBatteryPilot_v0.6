@@ -11,12 +11,22 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class BikeModeChooserActivity : Activity() {
     private lateinit var sync: RiderServerSync
     private lateinit var btnAdmin: Button
     private lateinit var btnUpdate: Button
     private lateinit var tvVersion: TextView
+    private lateinit var tvServerStatus: TextView
+
+    private data class PcHealth(
+        val ok: Boolean,
+        val version: String,
+        val pcEntry: Boolean
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,6 +35,7 @@ class BikeModeChooserActivity : Activity() {
         btnAdmin = findViewById(R.id.btnBikeModeAdmin)
         btnUpdate = findViewById(R.id.btnBikeModeCheckUpdate)
         tvVersion = findViewById(R.id.tvBikeModeVersion)
+        tvServerStatus = findViewById(R.id.tvBikeModeServerStatus)
 
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
         tvVersion.text = "Ride Copilot v$version"
@@ -46,6 +57,7 @@ class BikeModeChooserActivity : Activity() {
             true
         }
         refreshAdminVisibility()
+        refreshServerHealth()
         UpdateManager.resumePendingInstall(this)
         // 일반 사용자도 앱 실행 시 하루 1회 안정판 업데이트를 자동 확인한다.
         UpdateManager.maybeCheckOnLaunch(this)
@@ -55,12 +67,88 @@ class BikeModeChooserActivity : Activity() {
         super.onResume()
         UpdateManager.resumePendingInstall(this)
         refreshAdminVisibility()
+        refreshServerHealth()
         if (sync.configured()) {
             sync.checkAdminStatusAsync {
                 runOnUiThread { refreshAdminVisibility() }
             }
         }
-        if (sync.autoEnabled() && sync.configured()) sync.syncAllAsync()
+        if (sync.autoEnabled() && sync.configured()) {
+            sync.syncAllAsync {
+                runOnUiThread { refreshServerHealth() }
+            }
+        }
+    }
+
+    private fun refreshServerHealth() {
+        val base = sync.serverUrl().trim().trimEnd('/')
+        val pending = sync.pendingCount()
+        if (!base.startsWith("http://") && !base.startsWith("https://")) {
+            tvServerStatus.setTextColor(getColor(R.color.text_secondary))
+            tvServerStatus.text = if (pending > 0) {
+                "PC 서버 미연결 · 앱 단독 사용 가능 · 동기화 대기 ${pending}건"
+            } else {
+                "PC 서버 미연결 · 앱 단독 사용 가능"
+            }
+            return
+        }
+
+        tvServerStatus.setTextColor(getColor(R.color.text_secondary))
+        tvServerStatus.text = "PC 서버 확인 중… · 동기화 대기 ${pending}건"
+
+        Thread {
+            val result = runCatching {
+                val connection = URL("$base/api/health").openConnection() as HttpURLConnection
+                try {
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = 4000
+                    connection.readTimeout = 5000
+                    connection.setRequestProperty("Accept", "application/json")
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    if (code !in 200..299) error("HTTP $code")
+                    val json = JSONObject(text)
+                    PcHealth(
+                        ok = json.optBoolean("ok", false),
+                        version = json.optString("version", "").trim(),
+                        pcEntry = json.optBoolean("pc_entry", false)
+                    )
+                } finally {
+                    connection.disconnect()
+                }
+            }
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val health = result.getOrNull()
+                val currentPending = sync.pendingCount()
+                when {
+                    health == null -> {
+                        tvServerStatus.setTextColor(getColor(R.color.warn))
+                        tvServerStatus.text = if (currentPending > 0) {
+                            "● PC 서버 응답 없음 · 앱 단독 사용 가능 · 동기화 대기 ${currentPending}건"
+                        } else {
+                            "● PC 서버 응답 없음 · 앱 단독 사용 가능"
+                        }
+                    }
+                    !health.ok -> {
+                        tvServerStatus.setTextColor(getColor(R.color.warn))
+                        tvServerStatus.text = "● PC 서버 확인 필요 · 동기화 대기 ${currentPending}건"
+                    }
+                    health.pcEntry -> {
+                        tvServerStatus.setTextColor(getColor(R.color.good))
+                        val versionText = health.version.takeIf { it.isNotBlank() }?.let { " · v$it" }.orEmpty()
+                        tvServerStatus.text = "● PC 서버 연결$versionText · 동기화 대기 ${currentPending}건"
+                    }
+                    else -> {
+                        tvServerStatus.setTextColor(getColor(R.color.warn))
+                        val versionText = health.version.takeIf { it.isNotBlank() }?.let { " v$it" }.orEmpty()
+                        tvServerStatus.text = "● PC 서버 연결 · 구버전$versionText · 업데이트 권장 · 대기 ${currentPending}건"
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun checkPublicUpdate() {
@@ -118,6 +206,7 @@ class BikeModeChooserActivity : Activity() {
                         Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
                         if (result.ok) {
                             refreshAdminVisibility()
+                            refreshServerHealth()
                             dialog.dismiss()
                         }
                     }
