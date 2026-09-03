@@ -1,3 +1,12 @@
+# v0.32.7 — PC Server Health + Sync Visibility
+- 앱 첫 화면에서 Rider Control Center PC `/api/health`를 직접 확인해 서버 연결 상태와 버전을 표시.
+- 새 PC entrypoint(`pc_entry=true`)는 정상 연결로, 예전 서버는 `구버전 · 업데이트 권장`으로 구분.
+- 서버 응답이 없거나 설정되지 않았을 때 `앱 단독 사용 가능`을 명확히 표시.
+- Rider Control Center 동기화 대기 건수를 첫 화면에 표시하고 자동동기화 완료 후 다시 갱신.
+- 관리자폰 등록 성공 직후 서버 상태를 다시 확인.
+- v0.32.6의 ROAD 공개 그룹방, 이름만으로 게스트 참가, 방 GPX 자동 적용, 일반 사용자 안정판 업데이트 기능 유지.
+- PR마다 Android debug APK를 실제 빌드하는 CI 검증 추가.
+
 # v0.32.6 — Granfondo Room Hub + Public Updater
 - 공개 그룹방 목록을 모드 선택 첫 화면에서 ROAD 그란폰도 페이스 코치 내부로 이동.
 - 공개방 터치 → 이름 입력만으로 임시 방 토큰 자동 발급 및 WebSocket 연결.
