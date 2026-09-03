@@ -1,3 +1,10 @@
+# v0.32.6 — Granfondo Room Hub + Public Updater
+- 공개 그룹방 목록을 모드 선택 첫 화면에서 ROAD 그란폰도 페이스 코치 내부로 이동.
+- 공개방 터치 → 이름 입력만으로 임시 방 토큰 자동 발급 및 WebSocket 연결.
+- 방 GPX 자동 다운로드/적용 유지.
+- 일반 사용자도 앱 시작 시 안정판 자동 확인 및 수동 업데이트 확인/다운로드/설치 가능.
+- 관리자 메뉴/Beta·RC 관리는 관리자폰 전용으로 유지.
+
 # v0.32.5 — Guest public rooms + PC server discovery
 - 새 설치 참가자 무토큰 공개방 참가
 - 같은 LAN PC 서버 자동 발견 + 외부 HTTPS 주소 bootstrap

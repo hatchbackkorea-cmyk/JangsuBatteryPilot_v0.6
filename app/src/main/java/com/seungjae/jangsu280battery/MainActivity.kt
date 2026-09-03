@@ -1923,16 +1923,15 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.btnPageSramDiagnostic).setOnClickListener {
             startActivity(Intent(this, SramBleActivity::class.java))
         }
-        switchPageBetaUpdates.isChecked = AppSettings.betaUpdates(this)
-        switchPageBetaUpdates.isEnabled = false
-        btnPageCheckUpdate.text = "🔐 관리자 메뉴에서 업데이트"
-        btnPageCheckUpdate.setOnClickListener { startActivity(Intent(this, AdminCenterActivity::class.java)) }
-        refreshInlineUpdateStatus("업데이트/설치는 관리자 메뉴에서만 가능합니다.")
+        switchPageBetaUpdates.visibility = View.GONE
+        btnPageCheckUpdate.text = "⬆ 최신 안정판 업데이트 확인"
+        btnPageCheckUpdate.setOnClickListener { checkForUpdateInline() }
+        refreshInlineUpdateStatus("일반 사용자도 안정판 APK를 직접 업데이트할 수 있습니다.")
         btnPageResetProgress.setOnClickListener { resetProgressQuick() }
     }
 
     private fun refreshInlineUpdateStatus(extra: String? = null) {
-        val channel = if (AppSettings.betaUpdates(this)) "테스트판 포함" else "안정판"
+        val channel = "안정판"
         val repo = UpdateManager.repository()
         tvPageUpdateStatus.text = buildString {
             append("현재 v${UpdateManager.currentVersion(this@MainActivity)} · $channel")
@@ -1944,7 +1943,7 @@ class MainActivity : Activity() {
     private fun checkForUpdateInline() {
         btnPageCheckUpdate.isEnabled = false
         refreshInlineUpdateStatus("GitHub에서 최신 릴리스를 확인 중…")
-        UpdateManager.checkAsync(this) { result ->
+        UpdateManager.checkAsync(this, UpdateChannel.STABLE) { result ->
             btnPageCheckUpdate.isEnabled = true
             result.onSuccess { info ->
                 if (info == null) {

@@ -2,6 +2,7 @@ package com.seungjae.jangsu280battery
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -9,6 +10,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.provider.OpenableColumns
 import android.view.WindowManager
 import android.widget.ArrayAdapter
@@ -95,6 +97,10 @@ class RoadGranfondoActivity : Activity(), LocationListener {
     private lateinit var etNick: EditText
     private lateinit var btnGroup: Button
     private lateinit var tvGroup: TextView
+    private lateinit var tvRoomStatus: TextView
+    private lateinit var roomContainer: LinearLayout
+    private lateinit var roomDiscovery: GroupRoomDiscovery
+    @Volatile private var roomRefreshBusy = false
 
     private val aidRows = mutableListOf<AidRow>()
     private val cutoffRows = mutableListOf<CutoffRow>()
@@ -160,6 +166,9 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         etNick = findViewById(R.id.etRoadGroupNick)
         btnGroup = findViewById(R.id.btnRoadGroupToggle)
         tvGroup = findViewById(R.id.tvRoadGroup)
+        tvRoomStatus = findViewById(R.id.tvRoadRoomStatus)
+        roomContainer = findViewById(R.id.llRoadPublicRooms)
+        roomDiscovery = GroupRoomDiscovery(this)
 
         guestGroupServer = intent.getStringExtra(GroupRoomDiscovery.EXTRA_GUEST_SERVER).orEmpty().trim().trimEnd('/')
         guestGroupToken = intent.getStringExtra(GroupRoomDiscovery.EXTRA_GUEST_TOKEN).orEmpty().trim()
@@ -187,6 +196,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         }
 
         findViewById<Button>(R.id.btnRoadBackMode).setOnClickListener { finish() }
+        findViewById<Button>(R.id.btnRoadRoomRefresh).setOnClickListener { refreshPublicRooms() }
         findViewById<Button>(R.id.btnRoadImportGpx).setOnClickListener { pickGpx() }
         findViewById<Button>(R.id.btnRoadStravaReview).setOnClickListener { startActivity(Intent(this, StravaReviewActivity::class.java)) }
         findViewById<Button>(R.id.btnRoadBuildPlan).setOnClickListener { buildTargetPlan(showToast = true) }
@@ -216,6 +226,7 @@ class RoadGranfondoActivity : Activity(), LocationListener {
 
         loadRoadCourse()
         refreshStravaProfileStatus()
+        refreshPublicRooms()
         if (guestGroupToken.isNotBlank() && guestGroupRoom.isNotBlank() && guestGroupServer.startsWith("http")) {
             tvGroup.post { connectGroup(autoCreated = false) }
         }
@@ -225,11 +236,109 @@ class RoadGranfondoActivity : Activity(), LocationListener {
         super.onResume()
         refreshStravaProfileStatus()
         refreshStravaAthleteIfStale()
+        refreshPublicRooms()
     }
 
     override fun onPause() {
         if (!riding) runCatching { locationManager.removeUpdates(this) }
         super.onPause()
+    }
+
+    private fun refreshPublicRooms() {
+        if (roomRefreshBusy) return
+        roomRefreshBusy = true
+        tvRoomStatus.text = "내 PC Rider Control Center와 공개방을 찾는 중…"
+        Thread {
+            val result = runCatching {
+                val server = roomDiscovery.resolveServer() ?: error("Rider Control Center 서버를 찾지 못했습니다.")
+                server to roomDiscovery.fetchRooms(server)
+            }
+            runOnUiThread {
+                roomRefreshBusy = false
+                result.onSuccess { (server, rooms) -> renderPublicRooms(server, rooms) }
+                    .onFailure {
+                        roomContainer.removeAllViews()
+                        tvRoomStatus.text = "공개방을 찾지 못했습니다 · PC 서버가 켜져 있는지 확인하세요."
+                    }
+            }
+        }.start()
+    }
+
+    private fun renderPublicRooms(server: String, rooms: List<PublicGroupRoom>) {
+        roomContainer.removeAllViews()
+        if (rooms.isEmpty()) {
+            tvRoomStatus.text = "서버 연결됨 · 현재 참가 가능한 공개 그룹방이 없습니다."
+            return
+        }
+        tvRoomStatus.text = "공개방 ${rooms.size}개 · 방을 누르고 이름만 입력하면 바로 참가합니다."
+        rooms.forEach { room ->
+            val courseText = if (room.hasCourse) {
+                val km = if (room.courseDistanceKm > 0.0) " · ${String.format(Locale.US, "%.1f", room.courseDistanceKm)}km" else ""
+                "\nGPX ${room.courseName.ifBlank { "코스 설정됨" }}$km · 입장 시 자동 다운로드"
+            } else "\nGPX 미설정"
+            val button = Button(this).apply {
+                isAllCaps = false
+                text = "🚴 ${room.title}  [${room.room}]\n참가 ${room.connectedCount}/${room.maxRiders}명$courseText"
+                textSize = 14f
+                minHeight = dp(76)
+                setOnClickListener { showGuestJoinDialog(server, room) }
+            }
+            roomContainer.addView(button, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(6) })
+        }
+    }
+
+    private fun showGuestJoinDialog(server: String, room: PublicGroupRoom) {
+        val nameInput = EditText(this).apply {
+            hint = "참가자 이름 또는 닉네임"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME
+            setText(roomDiscovery.lastNickname())
+            setSelectAllOnFocus(true)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("${room.title} 참가")
+            .setMessage("별도 토큰 설정 없이 이 방 전용 임시 참가권을 자동 발급합니다.${if (room.hasCourse) "\n입장하면 방 GPX도 자동 다운로드·적용합니다." else ""}")
+            .setView(nameInput)
+            .setPositiveButton("바로 참가", null)
+            .setNegativeButton("취소", null)
+            .create()
+        dialog.setOnShowListener {
+            val ok = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            ok.setOnClickListener {
+                val nick = nameInput.text.toString().trim()
+                if (nick.isBlank()) {
+                    nameInput.error = "이름을 입력하세요."
+                    return@setOnClickListener
+                }
+                ok.isEnabled = false
+                Thread {
+                    val result = runCatching { roomDiscovery.joinRoom(server, room.room, nick) }
+                    runOnUiThread {
+                        ok.isEnabled = true
+                        result.onSuccess { session ->
+                            dialog.dismiss()
+                            if (groupEnabled) disconnectGroup("다른 공개방으로 전환")
+                            guestGroupServer = session.serverUrl.trim().trimEnd('/')
+                            guestGroupToken = session.token.trim()
+                            guestGroupRoom = session.room.trim()
+                            guestGroupNick = session.nickname.trim()
+                            etRelay.setText(guestGroupServer)
+                            etRelay.isEnabled = false
+                            etRelay.hint = "공개 그룹방 서버 자동 사용"
+                            etRoom.setText(guestGroupRoom)
+                            etNick.setText(guestGroupNick.ifBlank { "라이더" })
+                            tvRoomStatus.text = "✓ ${room.title} 참가 완료 · 실시간 연결 중…"
+                            connectGroup(autoCreated = false)
+                        }.onFailure {
+                            Toast.makeText(this, "그룹방 참가 실패: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+        }
+        dialog.show()
     }
 
     private fun refreshStravaAthleteIfStale() {

@@ -29,58 +29,19 @@
             android:textSize="24sp"
             android:textStyle="bold" />
 
-        <LinearLayout
+        <Button
+            android:id="@+id/btnBikeModeCheckUpdate"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:background="@color/panel"
-            android:orientation="vertical"
-            android:padding="12dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="📡 지금 참가 가능한 그룹방"
-                    android:textColor="@color/orange"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <Button
-                    android:id="@+id/btnBikeModeRoomRefresh"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:text="새로고침" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/tvBikeModeRoomStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="내 PC Rider Control Center를 찾는 중…"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-
-            <LinearLayout
-                android:id="@+id/llBikeModePublicRooms"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:orientation="vertical" />
-        </LinearLayout>
+            android:layout_height="44dp"
+            android:layout_marginTop="14dp"
+            android:text="⬆ 앱 업데이트 확인"
+            android:textSize="13sp" />
 
         <Button
             android:id="@+id/btnBikeModeEmtb"
             android:layout_width="match_parent"
             android:layout_height="92dp"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="12dp"
             android:text="⚡ eMTB\n배터리 코파일럿"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -109,7 +70,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
             android:gravity="center"
-            android:text="일반 참가자는 별도 토큰 없이 공개 그룹방에 바로 참가할 수 있습니다."
+            android:text="그룹방 참가: ROAD → 그란폰도 페이스 코치에서 확인 · 앱 업데이트는 일반 사용자도 가능합니다."
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
     </LinearLayout>

@@ -125,7 +125,8 @@ object UpdateManager {
         val p = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         if (now - p.getLong(KEY_LAST_AUTO_CHECK, 0L) < AUTO_CHECK_MS) return
-        checkAsync(activity) { result ->
+        val autoChannel = if (RiderServerSync(activity).isAdminDeviceCached()) channel(activity) else UpdateChannel.STABLE
+        checkAsync(activity, autoChannel) { result ->
             if (result.isSuccess) {
                 p.edit().putLong(KEY_LAST_AUTO_CHECK, System.currentTimeMillis()).apply()
                 result.getOrNull()?.let { showUpdateDialog(activity, it) }

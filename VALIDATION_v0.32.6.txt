@@ -1,0 +1,15 @@
+GPX Battery Copilot v0.32.6 static validation
+
+- VERSION.txt: 0.32.6
+- Android resource XML parse errors: 0
+- R.id references missing from resources: 0
+- BikeModeChooser public room panel removed: PASS
+- RoadGranfondo public room panel IDs present: PASS
+- Public guest join -> temporary room token -> WebSocket connect path retained: PASS
+- Room GPX auto-download/apply path retained: PASS
+- General-user stable update manual button: PASS
+- App-launch update check hook: PASS
+- Admin menu visibility rule retained: PASS
+- GitHub Actions signed Release workflow retained: PASS
+
+Note: Android APK assemble was not executed in this environment. Final dependency/Android compilation should be confirmed by the existing GitHub Actions signed Release workflow.

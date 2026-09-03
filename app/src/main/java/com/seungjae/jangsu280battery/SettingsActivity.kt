@@ -388,15 +388,14 @@ class SettingsActivity : Activity() {
     }
 
     private fun setupUpdateUi() {
-        tvUpdateStatus.text = "🔐 앱 업데이트는 첫 화면의 관리자 메뉴에서 관리합니다."
-        switchBetaUpdates.isChecked = AppSettings.betaUpdates(this)
-        switchBetaUpdates.isEnabled = false
-        btnCheckUpdate.text = "🔐 관리자 메뉴 열기"
-        btnCheckUpdate.setOnClickListener { startActivity(Intent(this, AdminCenterActivity::class.java)) }
+        switchBetaUpdates.visibility = View.GONE
+        btnCheckUpdate.text = "⬆ 최신 안정판 업데이트 확인"
+        btnCheckUpdate.setOnClickListener { checkForUpdate() }
+        refreshUpdateStatus("일반 사용자도 안정판 APK를 직접 업데이트할 수 있습니다. Beta/RC 관리는 관리자 메뉴에서만 합니다.")
     }
 
     private fun refreshUpdateStatus(extra: String? = null) {
-        val channel = if (AppSettings.betaUpdates(this)) "테스트판 포함" else "안정판"
+        val channel = "안정판"
         val repo = UpdateManager.repository()
         tvUpdateStatus.text = buildString {
             append("현재 v${UpdateManager.currentVersion(this@SettingsActivity)} · $channel")
@@ -408,7 +407,7 @@ class SettingsActivity : Activity() {
     private fun checkForUpdate() {
         btnCheckUpdate.isEnabled = false
         refreshUpdateStatus("GitHub에서 최신 릴리스를 확인 중…")
-        UpdateManager.checkAsync(this) { result ->
+        UpdateManager.checkAsync(this, UpdateChannel.STABLE) { result ->
             btnCheckUpdate.isEnabled = true
             result.onSuccess { info ->
                 if (info == null) {
