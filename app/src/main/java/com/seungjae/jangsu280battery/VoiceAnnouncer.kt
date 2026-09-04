@@ -63,11 +63,12 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
-     * v0.33.3: riding guidance temporarily uses the top media volume so the phone's external
-     * speaker is easier to hear outdoors. The user's previous volume is restored after TTS.
-     * This never attempts to exceed the hardware/Android maximum.
+     * v0.33.4: riding guidance can temporarily use the top media volume so the phone's external
+     * speaker is easier to hear outdoors. This is controlled by the visible app setting and the
+     * user's previous media volume is restored after TTS. It never exceeds Android/hardware max.
      */
     private fun boostVoiceVolume(utteranceId: String) {
+        if (!AppSettings.voiceVolumeBoostEnabled(appContext)) return
         synchronized(volumeLock) {
             activeUtterances += utteranceId
             if (originalMusicVolume == null) {
