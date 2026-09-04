@@ -299,7 +299,7 @@ class ElevationProfileView @JvmOverloads constructor(
     }
 
     private fun gradeColor(gradePct: Double): Int = when {
-        gradePct < -3.0 -> Color.rgb(66, 165, 245)
+        gradePct < -2.0 -> Color.rgb(66, 165, 245)
         gradePct < 2.0 -> Color.rgb(76, 175, 80)
         gradePct < 5.0 -> Color.rgb(253, 216, 53)
         gradePct < 8.0 -> Color.rgb(251, 140, 0)
