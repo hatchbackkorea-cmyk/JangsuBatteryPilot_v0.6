@@ -6,6 +6,8 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -77,6 +79,50 @@ class ElevationProfileView @JvmOverloads constructor(
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = context.getColor(R.color.text_secondary)
         textSize = dp(10f)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // v0.32.9 MTB HUD only: keep the existing order, but make the map the visual focus.
+        // The original static Kakao ImageView remains below the live map as a fallback.
+        if (id == R.id.rideMiniProfileView) {
+            post { installMtbLiveMapLayout() }
+        }
+    }
+
+    private fun installMtbLiveMapLayout() {
+        if (!isAttachedToWindow || id != R.id.rideMiniProfileView) return
+
+        layoutParams?.let { lp ->
+            val target = dp(92f).toInt()
+            if (lp.height != target) {
+                lp.height = target
+                layoutParams = lp
+            }
+        }
+
+        val mapFrame = rootView.findViewById<FrameLayout?>(R.id.layoutRideMapPreview) ?: return
+        mapFrame.layoutParams?.let { lp ->
+            val target = dp(240f).toInt()
+            if (lp.height != target) {
+                lp.height = target
+                mapFrame.layoutParams = lp
+            }
+        }
+
+        if (mapFrame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP) == null) {
+            val liveMap = RideLiveMapWebView(context)
+            val status = mapFrame.findViewById<View?>(R.id.tvRideMapPreviewStatus)
+            val insertAt = status?.let { mapFrame.indexOfChild(it) }?.takeIf { it >= 0 } ?: mapFrame.childCount
+            mapFrame.addView(
+                liveMap,
+                insertAt,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
     }
 
     fun setCourse(value: CourseData) {
