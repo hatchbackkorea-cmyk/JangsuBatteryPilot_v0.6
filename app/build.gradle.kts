@@ -11,6 +11,9 @@ val signingKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 val kakaoRestApiKey = (project.findProperty("kakaoRestApiKey")?.toString()
     ?: System.getenv("KAKAO_REST_API_KEY")
     ?: "").trim()
+val kakaoNativeAppKey = (project.findProperty("kakaoNativeAppKey")?.toString()
+    ?: System.getenv("KAKAO_NATIVE_APP_KEY")
+    ?: "").trim()
 
 android {
     namespace = "com.seungjae.jangsu280battery"
@@ -28,6 +31,8 @@ android {
         buildConfigField("String", "UPDATE_REPOSITORY", "\"$escapedRepo\"")
         val escapedKakao = kakaoRestApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
         buildConfigField("String", "KAKAO_REST_API_KEY", "\"$escapedKakao\"")
+        val escapedKakaoNative = kakaoNativeAppKey.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$escapedKakaoNative\"")
     }
 
     signingConfigs {
@@ -71,4 +76,5 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.kakao.maps.open:android:2.15.1")
 }
