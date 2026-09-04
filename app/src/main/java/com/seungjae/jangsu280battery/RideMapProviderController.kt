@@ -303,7 +303,8 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
             i += step
         }
         course.track.lastOrNull()?.let { p ->
-            if (points.isEmpty() || points.last() != LatLng.from(p.lat, p.lon)) points += LatLng.from(p.lat, p.lon)
+            val lastPoint = LatLng.from(p.lat, p.lon)
+            if (points.isEmpty() || points.last() != lastPoint) points += lastPoint
         }
         if (points.size < 2) return
 
@@ -311,7 +312,7 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
         val stylesSet = RouteLineStylesSet.from("ride-gpx", styles)
         val segment = RouteLineSegment.from(points).setStyles(styles)
         val options = RouteLineOptions.from("ride-gpx", segment).setStylesSet(stylesSet)
-        runCatching { map.routeLineManager.layer.addRouteLine(options) }
+        runCatching { map.routeLineManager?.layer?.addRouteLine(options) }
     }
 
     private fun hasLocationPermission(): Boolean =
