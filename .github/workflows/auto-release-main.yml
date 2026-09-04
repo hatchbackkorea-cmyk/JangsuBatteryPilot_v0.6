@@ -54,7 +54,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify fixed signing secrets
+      - name: Verify required release secrets
         if: steps.meta.outputs.skip != 'true'
         shell: bash
         env:
@@ -62,11 +62,13 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
         run: |
           test -n "$KEYSTORE_B64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
           test -n "$STORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
           test -n "$KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
           test -n "$KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
+          test -n "$KAKAO_NATIVE_APP_KEY" || (echo "Missing KAKAO_NATIVE_APP_KEY" && exit 1)
 
       - name: Restore fixed signing key
         if: steps.meta.outputs.skip != 'true'
@@ -88,7 +90,9 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          gradle :app:assembleRelease --stacktrace -PupdateRepo="${GITHUB_REPOSITORY}"
+          gradle :app:assembleRelease --stacktrace \
+            -PkakaoNativeAppKey="$KAKAO_NATIVE_APP_KEY" \
+            -PupdateRepo="${GITHUB_REPOSITORY}"
           APK="GPXBatteryCopilot-${{ steps.meta.outputs.tag }}-release.apk"
           cp app/build/outputs/apk/release/app-release.apk "$APK"
           sha256sum "$APK" > "$APK.sha256"
