@@ -112,7 +112,8 @@ class ElevationProfileView @JvmOverloads constructor(
 
         val mapFrame = rootView.findViewById<FrameLayout?>(R.id.layoutRideMapPreview) ?: return
         mapFrame.layoutParams?.let { lp ->
-            val target = dp(240f).toInt()
+            // v0.33.7: reclaim 40dp so the ride/charge controls stay above the pager indicator.
+            val target = dp(200f).toInt()
             if (lp.height != target) {
                 lp.height = target
                 mapFrame.layoutParams = lp
@@ -246,8 +247,6 @@ class ElevationProfileView @JvmOverloads constructor(
         fillPath.lineTo(left, bottom)
         fillPath.close()
 
-        // v0.33.6: the user wanted the grade colour to be an AREA, not only a thin line.
-        // Each coloured profile segment now drops vertically to the distance-axis baseline.
         if (sampled.size >= 2) {
             for (j in 1 until sampled.size) {
                 val a = sampled[j - 1]
