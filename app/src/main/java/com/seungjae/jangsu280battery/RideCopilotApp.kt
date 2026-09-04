@@ -23,9 +23,6 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         when (activity) {
-            is BikeModeChooserActivity -> activity.window.decorView.post {
-                RaceProfileUiInstaller.install(activity)
-            }
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
                 RideWarningOverlayController.install(activity)

@@ -10,8 +10,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import org.json.JSONObject
 import kotlin.math.roundToInt
@@ -21,6 +21,9 @@ class RaceActivity : Activity() {
     private lateinit var store: RaceDataStore
     private lateinit var client: RaceServerClient
     private lateinit var repo: CourseRepository
+    private lateinit var profileName: EditText
+    private lateinit var profileNickname: EditText
+    private lateinit var profileStatus: TextView
     private lateinit var eventCode: EditText
     private lateinit var eventStatus: TextView
     private lateinit var courseSpinner: Spinner
@@ -56,10 +59,56 @@ class RaceActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(16), dp(18), dp(24)) }
         scroll.addView(root); setContentView(scroll)
         root.addView(TextView(this).apply { text = "🏁 RACE MODE"; textSize = 27f; setTextColor(getColor(R.color.text_primary)); setTypeface(typeface, 1) })
-        root.addView(TextView(this).apply {
-            val p = RaceProfileStore.profile(this@RaceActivity); text = if (p.isReady) "${p.nickname} (${p.name})" else "프로필 필요 · 이름 / 닉네임"
-            textSize = 14f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, dp(3), 0, dp(12))
+
+        val profile = RaceProfileStore.profile(this)
+        val profilePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setBackgroundColor(getColor(R.color.panel))
+        }
+        profilePanel.addView(TextView(this).apply {
+            text = "RACE 프로필"
+            textSize = 16f
+            setTypeface(typeface, 1)
+            setTextColor(getColor(R.color.text_primary))
         })
+        profilePanel.addView(TextView(this).apply {
+            text = "이름과 닉네임만 입력합니다. 저장 버튼을 눌러야 실제 RACE 프로필에 적용됩니다."
+            textSize = 11f
+            setTextColor(getColor(R.color.text_secondary))
+            setPadding(0, dp(3), 0, dp(6))
+        })
+        val profileRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        profileName = EditText(this).apply {
+            hint = "이름"
+            setSingleLine()
+            textSize = 15f
+            setText(profile.name)
+            layoutParams = LinearLayout.LayoutParams(0, dp(50), 1f)
+        }
+        profileNickname = EditText(this).apply {
+            hint = "닉네임"
+            setSingleLine()
+            textSize = 15f
+            setText(profile.nickname)
+            layoutParams = LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginStart = dp(6) }
+        }
+        profileRow.addView(profileName); profileRow.addView(profileNickname)
+        profilePanel.addView(profileRow)
+        val saveProfileButton = Button(this).apply {
+            text = "프로필 저장"
+            textSize = 15f
+            setOnClickListener { saveProfile() }
+        }
+        profilePanel.addView(saveProfileButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(6) })
+        profileStatus = TextView(this).apply {
+            text = if (profile.isReady) "✓ 저장됨 · ${profile.nickname} (${profile.name})" else "아직 저장된 RACE 프로필이 없습니다."
+            textSize = 12f
+            setTextColor(if (profile.isReady) getColor(R.color.good) else getColor(R.color.text_secondary))
+            setPadding(0, dp(5), 0, 0)
+        }
+        profilePanel.addView(profileStatus)
+        root.addView(profilePanel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         val eventPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); setBackgroundColor(getColor(R.color.panel)) }
         eventPanel.addView(TextView(this).apply { text = "대회 참가"; textSize = 16f; setTypeface(typeface, 1); setTextColor(getColor(R.color.text_primary)) })
@@ -69,7 +118,7 @@ class RaceActivity : Activity() {
         row.addView(Button(this).apply { text = "참가 / 불러오기"; setOnClickListener { joinEvent() } }, LinearLayout.LayoutParams(dp(145), dp(50)).apply { marginStart = dp(6) })
         eventPanel.addView(row)
         eventStatus = TextView(this).apply { text = "대회 코드가 없으면 로컬 연습 RACE로 사용할 수 있습니다."; textSize = 12f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, dp(6), 0, 0) }
-        eventPanel.addView(eventStatus); root.addView(eventPanel)
+        eventPanel.addView(eventStatus); root.addView(eventPanel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         root.addView(TextView(this).apply { text = "코스"; textSize = 13f; setTextColor(getColor(R.color.text_secondary)); setPadding(0, dp(14), 0, dp(3)) })
         courseSpinner = Spinner(this); root.addView(courseSpinner, LinearLayout.LayoutParams(-1, dp(52)))
@@ -97,6 +146,22 @@ class RaceActivity : Activity() {
         })
     }
 
+    private fun saveProfile() {
+        val name = profileName.text?.toString().orEmpty().trim()
+        val nickname = profileNickname.text?.toString().orEmpty().trim()
+        if (name.isBlank() || nickname.isBlank()) {
+            profileStatus.setTextColor(getColor(R.color.warn))
+            profileStatus.text = "이름과 닉네임을 모두 입력해 주세요."
+            Toast.makeText(this, "이름과 닉네임을 모두 입력해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val saved = RaceProfileStore.save(this, name, nickname)
+        profileStatus.setTextColor(getColor(R.color.good))
+        profileStatus.text = "✓ 저장됨 · ${saved.nickname} (${saved.name})"
+        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(profileNickname.windowToken, 0)
+        Toast.makeText(this, "RACE 프로필을 저장했습니다.", Toast.LENGTH_SHORT).show()
+    }
+
     private fun refreshCourses() {
         courses = repo.listCourses()
         courseSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, courses.map { "${it.name} · %.2f km".format(it.totalKm) })
@@ -105,9 +170,19 @@ class RaceActivity : Activity() {
     private fun selectCourse(id: String) { val i = courses.indexOfFirst { it.id == id }; if (i >= 0) courseSpinner.setSelection(i) }
     private fun selectedCourse(): CourseMeta? = courses.getOrNull(courseSpinner.selectedItemPosition)
 
-    private fun joinEvent() {
+    private fun requireSavedProfile(): RaceProfileStore.Profile? {
         val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { Toast.makeText(this, "첫 화면에서 이름과 닉네임만 입력해 주세요.", Toast.LENGTH_LONG).show(); return }
+        if (!profile.isReady) {
+            profileStatus.setTextColor(getColor(R.color.warn))
+            profileStatus.text = "이름과 닉네임을 입력한 뒤 ‘프로필 저장’을 눌러 주세요."
+            Toast.makeText(this, "RACE 프로필을 먼저 저장해 주세요.", Toast.LENGTH_LONG).show()
+            return null
+        }
+        return profile
+    }
+
+    private fun joinEvent() {
+        val profile = requireSavedProfile() ?: return
         val code = eventCode.text.toString().trim().uppercase()
         if (code.isBlank()) { Toast.makeText(this, "대회 코드를 입력하세요.", Toast.LENGTH_SHORT).show(); return }
         eventStatus.text = "대회 정보와 GPX 불러오는 중…"
@@ -135,8 +210,7 @@ class RaceActivity : Activity() {
     }
 
     private fun onStartRace() {
-        val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { Toast.makeText(this, "이름과 닉네임을 먼저 입력해 주세요.", Toast.LENGTH_LONG).show(); return }
+        requireSavedProfile() ?: return
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 8801); return
         }
