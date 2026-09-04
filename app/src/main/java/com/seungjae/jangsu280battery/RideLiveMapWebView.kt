@@ -1,14 +1,23 @@
 package com.seungjae.jangsu280battery
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Build
+import android.os.Bundle
+import android.os.Looper
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -20,46 +29,65 @@ import java.util.Locale
 /**
  * MTB HUD live navigation map.
  *
- * v0.33.0 turns the v0.32.9 whole-route preview into a rider-centred navigation camera:
- * - the rider stays near the lower centre of the map
- * - travel direction is always up (heading-up)
- * - zoom changes automatically with speed
- * - the already ridden route is deliberately de-emphasised
- * - the selected GPX remains the navigation line
- *
- * The existing Kakao static-map ImageView stays underneath this view as a fallback.
- * GPS is still consumed from the existing RideService broadcast, so this view does not
- * create a second location subscription.
+ * v0.33.1:
+ * - map display uses the phone GPS directly at 5 Hz by default (1 Hz selectable)
+ * - current position is available even before RideService starts a ride
+ * - the map stays in a neutral waiting screen until the first real phone GPS fix
+ * - rider marker is a small heading-up triangle instead of a dot
+ * - RideService broadcasts are still consumed for route-progress context, but no longer
+ *   limit visible map refresh rate.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class RideLiveMapWebView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
-) : WebView(context, attrs) {
+) : WebView(context, attrs), LocationListener {
 
     private val courseRepo = CourseRepository(context)
+    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private val gpsPrefs = context.getSharedPreferences("ride_live_map_gps", Context.MODE_PRIVATE)
+
     private var pageReady = false
     private var mapVerified = false
     private var receiverRegistered = false
+    private var directGpsStarted = false
     private var activeCourseId: String? = null
+    private var activeCourse: CourseData? = null
+
     private var latestLat = Double.NaN
     private var latestLon = Double.NaN
     private var latestKm = 0.0
     private var latestSpeedKmh = 0.0
+    private var gpsRateHz = if (gpsPrefs.getInt(KEY_GPS_RATE_HZ, 5) == 1) 1 else 5
+    private var lastFixElapsedMs = 0L
+    private var actualHz = 0.0
+
+    private val gpsBridge = object {
+        @JavascriptInterface
+        fun toggleGpsRate() {
+            post {
+                gpsRateHz = if (gpsRateHz == 5) 1 else 5
+                gpsPrefs.edit().putInt(KEY_GPS_RATE_HZ, gpsRateHz).apply()
+                restartDirectGps()
+                pushGpsRateToPage()
+                updateStatusText()
+            }
+        }
+    }
 
     private val rideReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != RideService.ACTION_UPDATE) return
-            if (intent.hasExtra(RideService.EXTRA_LAT)) {
-                latestLat = intent.getDoubleExtra(RideService.EXTRA_LAT, latestLat)
-            }
-            if (intent.hasExtra(RideService.EXTRA_LON)) {
-                latestLon = intent.getDoubleExtra(RideService.EXTRA_LON, latestLon)
-            }
             latestKm = intent.getDoubleExtra(RideService.EXTRA_ROUTE_KM, latestKm)
             latestSpeedKmh = intent.getDoubleExtra(RideService.EXTRA_SPEED_KMH, latestSpeedKmh)
-            if (latestLat.isFinite() && latestLon.isFinite()) {
-                pushLocation(latestLat, latestLon, latestKm, latestSpeedKmh)
+
+            // If direct GPS could not start, keep the previous RideService path as fallback.
+            if (!directGpsStarted && intent.hasExtra(RideService.EXTRA_LAT) && intent.hasExtra(RideService.EXTRA_LON)) {
+                latestLat = intent.getDoubleExtra(RideService.EXTRA_LAT, latestLat)
+                latestLon = intent.getDoubleExtra(RideService.EXTRA_LON, latestLon)
+                if (latestLat.isFinite() && latestLon.isFinite()) {
+                    pushLocation(latestLat, latestLon, latestKm, latestSpeedKmh)
+                }
             }
         }
     }
@@ -79,6 +107,7 @@ class RideLiveMapWebView @JvmOverloads constructor(
         settings.displayZoomControls = false
         settings.allowFileAccess = false
         settings.allowContentAccess = false
+        addJavascriptInterface(gpsBridge, "RiderGps")
 
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -86,6 +115,7 @@ class RideLiveMapWebView @JvmOverloads constructor(
                 pageReady = true
                 mapVerified = false
                 refreshCourse(force = true)
+                pushGpsRateToPage()
                 if (latestLat.isFinite() && latestLon.isFinite()) {
                     pushLocation(latestLat, latestLon, latestKm, latestSpeedKmh)
                 }
@@ -119,18 +149,117 @@ class RideLiveMapWebView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         registerRideReceiver()
+        startDirectGps()
         post { refreshCourse(force = false) }
     }
 
     override fun onDetachedFromWindow() {
+        stopDirectGps()
         unregisterRideReceiver()
         super.onDetachedFromWindow()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
-        if (visibility == View.VISIBLE) post { refreshCourse(force = false) }
+        if (visibility == View.VISIBLE) {
+            post {
+                refreshCourse(force = false)
+                if (!directGpsStarted) startDirectGps()
+            }
+        }
     }
+
+    private fun hasLocationPermission(): Boolean =
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private fun startDirectGps() {
+        if (directGpsStarted || !isAttachedToWindow || !hasLocationPermission()) return
+        try {
+            val intervalMs = if (gpsRateHz == 5) 200L else 1000L
+            val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            if (gpsEnabled) {
+                locationManager.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    intervalMs,
+                    0f,
+                    this,
+                    Looper.getMainLooper()
+                )
+                directGpsStarted = true
+                primeLastKnownLocation(LocationManager.GPS_PROVIDER)
+            } else if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                locationManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    1000L,
+                    0f,
+                    this,
+                    Looper.getMainLooper()
+                )
+                directGpsStarted = true
+                primeLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            }
+        } catch (_: SecurityException) {
+            directGpsStarted = false
+        } catch (_: Exception) {
+            directGpsStarted = false
+        }
+        updateStatusText()
+    }
+
+    private fun stopDirectGps() {
+        if (!directGpsStarted) return
+        try { locationManager.removeUpdates(this) } catch (_: Exception) {}
+        directGpsStarted = false
+    }
+
+    private fun restartDirectGps() {
+        stopDirectGps()
+        lastFixElapsedMs = 0L
+        actualHz = 0.0
+        startDirectGps()
+    }
+
+    private fun primeLastKnownLocation(provider: String) {
+        try {
+            val last = locationManager.getLastKnownLocation(provider) ?: return
+            val ageMs = System.currentTimeMillis() - last.time
+            if (ageMs in 0..300_000L) onLocationChanged(last)
+        } catch (_: SecurityException) {}
+    }
+
+    override fun onLocationChanged(location: Location) {
+        if (location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return
+        if (location.hasAccuracy() && location.accuracy > 100f) return
+
+        val now = SystemClock.elapsedRealtime()
+        if (lastFixElapsedMs > 0L && now > lastFixElapsedMs) {
+            val hz = 1000.0 / (now - lastFixElapsedMs).toDouble()
+            if (hz in 0.05..20.0) actualHz = if (actualHz <= 0.0) hz else actualHz * 0.78 + hz * 0.22
+        }
+        lastFixElapsedMs = now
+
+        latestLat = location.latitude
+        latestLon = location.longitude
+        if (location.hasSpeed()) latestSpeedKmh = (location.speed * 3.6).coerceIn(0.0, 120.0)
+
+        activeCourse?.let { c ->
+            runCatching { c.nearestRouteLocation(latestLat, latestLon) }.getOrNull()?.let { match ->
+                // Only use a nearby GPX projection. If the selected GPX is elsewhere, keep the
+                // camera at the real phone position rather than jumping to that course.
+                if (match.distanceM <= 250.0) latestKm = match.routeKm
+            }
+        }
+
+        pushLocation(latestLat, latestLon, latestKm, latestSpeedKmh)
+        pushGpsRateToPage()
+        updateStatusText()
+    }
+
+    override fun onProviderDisabled(provider: String) = Unit
+    override fun onProviderEnabled(provider: String) = Unit
+    @Deprecated("Deprecated in Android")
+    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
     private fun registerRideReceiver() {
         if (receiverRegistered) return
@@ -161,7 +290,8 @@ class RideLiveMapWebView @JvmOverloads constructor(
                 if (!mapVerified) {
                     mapVerified = true
                     animate().alpha(1f).setDuration(180L).start()
-                    updateStatus("내비 지도 · 진행방향 ↑ · 속도 자동줌 · GPS 대기")
+                    pushGpsRateToPage()
+                    updateStatusText()
                 }
             } else if (attempt < 12) {
                 postDelayed({ verifyInteractiveMap(attempt + 1) }, 500L)
@@ -179,6 +309,7 @@ class RideLiveMapWebView @JvmOverloads constructor(
         if (!force && activeCourseId == meta.id) return
         val course = runCatching { courseRepo.loadCourse(meta.id) }.getOrNull() ?: return
         activeCourseId = meta.id
+        activeCourse = course
 
         val points = downsample(course.track, MAX_ROUTE_POINTS)
         val routeJson = JSONArray()
@@ -194,7 +325,7 @@ class RideLiveMapWebView @JvmOverloads constructor(
             "window.rcSetRoute && window.rcSetRoute(${routeJson},$nameJson);",
             null
         )
-        updateStatus("내비 지도 · ${meta.name} · GPS 대기")
+        updateStatusText()
     }
 
     private fun pushLocation(lat: Double, lon: Double, km: Double, speedKmh: Double) {
@@ -210,11 +341,28 @@ class RideLiveMapWebView @JvmOverloads constructor(
             safeSpeed
         )
         evaluateJavascript(js, null)
-        if (mapVerified) {
-            updateStatus(
-                "내비 지도 · 진행방향 ↑ · ${String.format(Locale.KOREA, "%.0f", safeSpeed)} km/h · 자동줌"
-            )
+    }
+
+    private fun pushGpsRateToPage() {
+        if (!pageReady) return
+        val hz = if (actualHz > 0.0) actualHz.coerceAtMost(20.0) else 0.0
+        val js = String.format(
+            Locale.US,
+            "window.rcSetGpsRate && window.rcSetGpsRate(%d,%.2f);",
+            gpsRateHz,
+            hz
+        )
+        evaluateJavascript(js, null)
+    }
+
+    private fun updateStatusText() {
+        val rateText = if (actualHz > 0.0) {
+            "요청 ${gpsRateHz}Hz · 실제 ${String.format(Locale.KOREA, "%.1f", actualHz)}Hz"
+        } else {
+            "요청 ${gpsRateHz}Hz"
         }
+        val gpsText = if (latestLat.isFinite() && latestLon.isFinite()) "현재 위치 추적" else "현재 위치 잡는 중"
+        updateStatus("내비 지도 · $gpsText · $rateText")
     }
 
     private fun updateStatus(text: String) {
@@ -236,7 +384,8 @@ class RideLiveMapWebView @JvmOverloads constructor(
     }
 
     companion object {
-        const val TAG_LIVE_MAP = "ride_live_map_v0329"
+        const val TAG_LIVE_MAP = "ride_live_map_v0331"
+        private const val KEY_GPS_RATE_HZ = "gps_rate_hz"
         private const val MAX_ROUTE_POINTS = 900
 
         private val HTML = """
@@ -247,26 +396,41 @@ class RideLiveMapWebView @JvmOverloads constructor(
               <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
               <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
               <style>
-                html,body,#map{width:100%;height:100%;margin:0;padding:0;background:#111820;overflow:hidden}
+                html,body{width:100%;height:100%;margin:0;padding:0;background:#111820;overflow:hidden}
+                #map{position:absolute;inset:0;opacity:0;transition:opacity .16s ease;background:#111820}
+                #map.gps-ready{opacity:1}
                 .maplibregl-ctrl-attrib{font-size:8px!important;opacity:.70}
-                .rider-arrow{
-                  width:24px;height:24px;border-radius:50%;background:#ff4b2b;border:3px solid #fff;
-                  box-shadow:0 1px 7px rgba(0,0,0,.55);position:relative;box-sizing:border-box;
+                #waiting{
+                  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                  color:#dfe8ef;background:#111820;font:700 14px sans-serif;z-index:4;text-align:center;
                 }
-                .rider-arrow:before{
-                  content:'';position:absolute;left:50%;top:-10px;transform:translateX(-50%);
-                  width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
-                  border-bottom:12px solid #fff;
+                .rider-triangle{
+                  width:28px;height:32px;position:relative;filter:drop-shadow(0 2px 4px rgba(0,0,0,.62));
+                }
+                .rider-triangle:before{
+                  content:'';position:absolute;inset:0;background:#ffffff;
+                  clip-path:polygon(50% 0,100% 100%,50% 78%,0 100%);
+                }
+                .rider-triangle:after{
+                  content:'';position:absolute;left:4px;right:4px;top:5px;bottom:5px;background:#ff4b2b;
+                  clip-path:polygon(50% 0,100% 100%,50% 78%,0 100%);
                 }
                 .nav-chip{
-                  position:absolute;left:8px;top:8px;z-index:5;background:rgba(17,24,32,.82);color:#fff;
+                  position:absolute;left:8px;top:8px;z-index:7;background:rgba(17,24,32,.84);color:#fff;
                   border-radius:12px;padding:4px 7px;font:700 10px sans-serif;pointer-events:none;
+                }
+                #gpsRate{
+                  position:absolute;right:8px;top:8px;z-index:8;background:rgba(17,24,32,.90);color:#fff;
+                  border:1px solid rgba(255,255,255,.35);border-radius:12px;padding:5px 9px;
+                  font:700 11px sans-serif;-webkit-tap-highlight-color:transparent;
                 }
               </style>
             </head>
             <body>
               <div id="map"></div>
-              <div id="chip" class="nav-chip">GPS 대기 · 진행방향 ↑</div>
+              <div id="waiting">휴대폰 GPS로<br/>현재 위치 잡는 중…</div>
+              <div id="chip" class="nav-chip">진행방향 ↑ · 자동줌</div>
+              <button id="gpsRate" onclick="RiderGps.toggleGpsRate()">GPS 5Hz</button>
               <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
               <script>
                 window.rcMapReady=false;
@@ -279,6 +443,8 @@ class RideLiveMapWebView @JvmOverloads constructor(
                 let smoothHeading=null;
                 let latestKm=0;
                 let latestSpeed=0;
+                let requestedGpsHz=5;
+                let actualGpsHz=0;
 
                 const style={
                   version:8,
@@ -299,32 +465,23 @@ class RideLiveMapWebView @JvmOverloads constructor(
                   }]:[]};
                 }
 
-                function ensureRouteLayers(){
+                function ensureRouteLayer(){
                   if(!map || !map.isStyleLoaded()) return;
-                  if(!map.getSource('routeDone')){
-                    map.addSource('routeDone',{type:'geojson',data:lineFeature([])});
-                    map.addLayer({id:'routeDone',type:'line',source:'routeDone',paint:{
-                      'line-color':'#75818b','line-width':2,'line-opacity':0.16
-                    },layout:{'line-cap':'round','line-join':'round'}});
-                  }
                   if(!map.getSource('routeRemaining')){
                     map.addSource('routeRemaining',{type:'geojson',data:lineFeature([])});
                     map.addLayer({id:'routeRemaining',type:'line',source:'routeRemaining',paint:{
-                      'line-color':'#29b6f6','line-width':6,'line-opacity':0.96
+                      'line-color':'#29b6f6','line-width':6,'line-opacity':0.97
                     },layout:{'line-cap':'round','line-join':'round'}});
                   }
                 }
 
                 function renderRoute(km){
                   if(!map || !map.isStyleLoaded() || !routePts.length) return;
-                  ensureRouteLayers();
-                  const done=[];
+                  ensureRouteLayer();
                   const remain=[];
                   let split=0;
                   while(split<routePts.length && routePts[split][2] <= km+0.02) split++;
-                  for(let i=0;i<Math.min(routePts.length,split+1);i++) done.push([routePts[i][1],routePts[i][0]]);
                   for(let i=Math.max(0,split-1);i<routePts.length;i++) remain.push([routePts[i][1],routePts[i][0]]);
-                  const d=map.getSource('routeDone'); if(d) d.setData(lineFeature(done));
                   const r=map.getSource('routeRemaining'); if(r) r.setData(lineFeature(remain));
                 }
 
@@ -337,7 +494,7 @@ class RideLiveMapWebView @JvmOverloads constructor(
                   return (toDeg(Math.atan2(y,x))+360)%360;
                 }
                 function distM(a,b){
-                  const R=6371000, p1=toRad(a[0]),p2=toRad(b[0]),dp=toRad(b[0]-a[0]),dl=toRad(b[1]-a[1]);
+                  const R=6371000,p1=toRad(a[0]),p2=toRad(b[0]),dp=toRad(b[0]-a[0]),dl=toRad(b[1]-a[1]);
                   const q=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
                   return R*2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
                 }
@@ -350,20 +507,20 @@ class RideLiveMapWebView @JvmOverloads constructor(
                   if(routePts.length<2) return null;
                   let i=0;
                   while(i<routePts.length-1 && routePts[i][2] < km) i++;
-                  const lookKm=Math.max(0.07,Math.min(0.22,0.07+latestSpeed*0.0035));
+                  const lookKm=Math.max(.06,Math.min(.24,.06+latestSpeed*.004));
                   let j=i;
                   while(j<routePts.length-1 && routePts[j][2] < km+lookKm) j++;
-                  const a=routePts[Math.max(0,i-1)], b=routePts[Math.max(i+1,j)];
+                  const a=routePts[Math.max(0,i-1)],b=routePts[Math.min(routePts.length-1,Math.max(i+1,j))];
                   if(!a || !b) return null;
                   return bearing([a[0],a[1]],[b[0],b[1]]);
                 }
                 function zoomForSpeed(s){
-                  if(s<4) return 17.9;
-                  if(s<10) return 17.55;
-                  if(s<18) return 17.05;
-                  if(s<28) return 16.55;
-                  if(s<40) return 16.05;
-                  return 15.55;
+                  if(s<4) return 18.2;
+                  if(s<10) return 17.8;
+                  if(s<18) return 17.3;
+                  if(s<28) return 16.8;
+                  if(s<40) return 16.3;
+                  return 15.8;
                 }
 
                 function updateCamera(lat,lon,km,speed){
@@ -372,17 +529,16 @@ class RideLiveMapWebView @JvmOverloads constructor(
                   let h=routeHeading(km);
                   if(lastFix){
                     const moved=distM(lastFix,pos);
-                    if(speed>=5 && moved>=3){
+                    if(speed>=3 && moved>=1.2){
                       const gpsH=bearing(lastFix,pos);
-                      h=(h==null)?gpsH:angularBlend(h,gpsH,Math.min(.72,Math.max(.35,speed/45)));
+                      h=(h==null)?gpsH:angularBlend(h,gpsH,Math.min(.80,Math.max(.35,speed/40)));
                     }
                   }
                   if(h==null) h=(smoothHeading==null?0:smoothHeading);
-                  smoothHeading=angularBlend(smoothHeading,h,speed<4?.18:.34);
-                  const z=zoomForSpeed(speed);
+                  smoothHeading=angularBlend(smoothHeading,h,speed<3?.14:.36);
                   map.easeTo({
-                    center:[lon,lat],zoom:z,bearing:smoothHeading,pitch:0,
-                    duration:firstLocation?0:420,offset:[0,58],essential:true
+                    center:[lon,lat],zoom:zoomForSpeed(speed),bearing:smoothHeading,pitch:0,
+                    duration:firstLocation?0:Math.max(120,1000/requestedGpsHz*.9),offset:[0,66],essential:true
                   });
                   lastFix=pos;
                   firstLocation=false;
@@ -392,14 +548,16 @@ class RideLiveMapWebView @JvmOverloads constructor(
                 window.rcSetRoute=function(points,name){
                   routePts=Array.isArray(points)?points:[];
                   routeName=name||'';
-                  latestKm=0;
                   if(!map || !map.isStyleLoaded()) return;
                   renderRoute(latestKm);
-                  if(firstLocation && routePts.length>1){
-                    const bounds=new maplibregl.LngLatBounds();
-                    routePts.forEach(p=>bounds.extend([p[1],p[0]]));
-                    map.fitBounds(bounds,{padding:24,duration:0,maxZoom:15.5});
-                  }
+                  // Deliberately do NOT fit the whole GPX here. Until a real phone GPS fix arrives
+                  // the user sees a neutral waiting screen instead of an unrelated course area.
+                };
+
+                window.rcSetGpsRate=function(requested,actual){
+                  requestedGpsHz=(requested===1)?1:5;
+                  actualGpsHz=isFinite(actual)?Math.max(0,actual):0;
+                  document.getElementById('gpsRate').textContent='GPS '+requestedGpsHz+'Hz';
                 };
 
                 window.rcSetLocation=function(lat,lon,km,speed){
@@ -407,23 +565,25 @@ class RideLiveMapWebView @JvmOverloads constructor(
                   latestSpeed=isFinite(speed)?Math.max(0,speed):0;
                   const pos=[lon,lat];
                   if(!rider){
-                    const el=document.createElement('div');el.className='rider-arrow';
+                    const el=document.createElement('div');el.className='rider-triangle';
                     rider=new maplibregl.Marker({element:el,anchor:'center',rotationAlignment:'viewport'})
                       .setLngLat(pos).addTo(map);
                   }else rider.setLngLat(pos);
                   renderRoute(latestKm);
+                  document.getElementById('map').classList.add('gps-ready');
+                  document.getElementById('waiting').style.display='none';
                   updateCamera(lat,lon,latestKm,latestSpeed);
                 };
 
                 try{
                   map=new maplibregl.Map({
-                    container:'map',style:style,center:[127.0,36.0],zoom:14,
+                    container:'map',style:style,center:[127.0,36.0],zoom:16,
                     attributionControl:true,dragRotate:false,pitchWithRotate:false,
                     touchPitch:false,cooperativeGestures:false
                   });
                   map.touchZoomRotate.disableRotation();
                   map.on('load',()=>{
-                    ensureRouteLayers();
+                    ensureRouteLayer();
                     window.rcMapReady=true;
                     if(routePts.length) window.rcSetRoute(routePts,routeName);
                   });
