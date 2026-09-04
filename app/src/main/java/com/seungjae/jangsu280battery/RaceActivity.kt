@@ -18,11 +18,9 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -42,7 +40,6 @@ class RaceActivity : Activity() {
     private var mode = MODE_HOME
     private var currentEventCode = ""
 
-    // HOME controls
     private var eventCodeInput: EditText? = null
     private var riderIdInput: EditText? = null
     private var nicknameInput: EditText? = null
@@ -50,7 +47,6 @@ class RaceActivity : Activity() {
     private var registrationStatus: TextView? = null
     private var startButton: Button? = null
 
-    // LIVE controls
     private var liveHeader: TextView? = null
     private var bestTime: TextView? = null
     private var previousTime: TextView? = null
@@ -215,7 +211,7 @@ class RaceActivity : Activity() {
 
     private fun darkInput(hintText: String, value: String): EditText = EditText(this).apply {
         hint = hintText
-        hintTextColor = Color.GRAY
+        setHintTextColor(Color.GRAY)
         setTextColor(Color.WHITE)
         textSize = 16f
         setSingleLine(true)
@@ -498,24 +494,6 @@ class RaceActivity : Activity() {
         val token = currentFocus?.windowToken ?: return
         (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(token, 0)
         currentFocus?.clearFocus()
-    }
-
-    private fun stopCurrentRun() {
-        val s = store.snapshot()
-        if (s.state == "RUNNING") {
-            AlertDialog.Builder(this)
-                .setTitle("현재 RACE를 중단할까요?")
-                .setMessage("완주하지 않은 현재 Run은 공식 순위에 등록하지 않습니다.")
-                .setPositiveButton("현재 Run 폐기") { _, _ ->
-                    startService(Intent(this, RaceTimingService::class.java).apply { action = RaceTimingService.ACTION_STOP })
-                    showHome()
-                }
-                .setNegativeButton("계속 주행", null)
-                .show()
-        } else {
-            startService(Intent(this, RaceTimingService::class.java).apply { action = RaceTimingService.ACTION_STOP })
-            showHome()
-        }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
