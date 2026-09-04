@@ -36,15 +36,10 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * v0.33.5 MTB navigation display.
- *
- * Raw GPS / trusted RideService logging remains untouched. This view is display-only:
- * - phone GPS is requested at 1 Hz
- * - every real fix becomes an anchor, while the WebView renders at 24 fps
- * - between fixes, a snapped ride advances along the selected GPX using current speed
- * - off-route display uses short dead-reckoning from speed + heading, capped to 1.15 s
- * - GPS course is preferred while moving; GPX and rotation-vector sensor fill gaps
- * - heading smoothing is deliberately much lighter than v0.33.3 so the map does not crab sideways
+ * MTB navigation display.
+ * Raw GPS / trusted RideService logging remains untouched. This view is display-only.
+ * v0.33.9 also bootstraps the map from Android's system last-known location so that
+ * opening the app indoors can still show the place where the phone was last located.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class RideSmoothMapWebView @JvmOverloads constructor(
@@ -82,6 +77,11 @@ class RideSmoothMapWebView @JvmOverloads constructor(
 
     private var lastFixElapsedMs = 0L
     private var actualHz = 0.0
+
+    // System location cache can exist even when this app was not running.
+    // Keep it separate from the live GPS stream so it never affects logging or measured GPS Hz.
+    private var bootstrapLocation: Location? = null
+    private var bootstrapPushed = false
 
     private val rideReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -128,6 +128,7 @@ class RideSmoothMapWebView @JvmOverloads constructor(
                 pageReady = true
                 mapVerified = false
                 refreshCourse(force = true)
+                pushBootstrapLocationIfAvailable()
                 pushGpsRateToPage()
                 verifyInteractiveMap(0)
             }
@@ -150,6 +151,7 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         super.onAttachedToWindow()
         registerRideReceiver()
         startSensors()
+        primeSystemLastKnownLocation()
         startGps()
         post { refreshCourse(false) }
     }
@@ -166,6 +168,7 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         if (visibility == View.VISIBLE) {
             post {
                 refreshCourse(false)
+                if (!latestDisplayLat.isFinite() || !latestDisplayLon.isFinite()) primeSystemLastKnownLocation()
                 if (!sensorsStarted) startSensors()
                 if (!gpsStarted) startGps()
             }
@@ -175,6 +178,84 @@ class RideSmoothMapWebView @JvmOverloads constructor(
     private fun hasLocationPermission(): Boolean =
         context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Reads Android's own last-known location cache. This may have been populated by the OS or
+     * another location-using app before Ride Copilot was launched. No age label is shown; the
+     * point is only a startup visual anchor and is replaced immediately by the first live fix.
+     */
+    private fun primeSystemLastKnownLocation() {
+        if (!hasLocationPermission()) return
+        try {
+            val providers = LinkedHashSet<String>().apply {
+                add(LocationManager.GPS_PROVIDER)
+                add(LocationManager.NETWORK_PROVIDER)
+                add(LocationManager.PASSIVE_PROVIDER)
+                addAll(locationManager.getProviders(true))
+            }
+            val candidates = providers.mapNotNull { provider ->
+                runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
+            }.filter { it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 }
+
+            val best = candidates.maxWithOrNull(
+                compareBy<Location> { it.time }
+                    .thenBy { if (it.hasAccuracy()) -it.accuracy.toDouble() else -9999.0 }
+            ) ?: return
+
+            bootstrapLocation = Location(best)
+            if (!latestDisplayLat.isFinite() || !latestDisplayLon.isFinite()) {
+                applyBootstrapLocation(best)
+            }
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun applyBootstrapLocation(location: Location) {
+        var displayLat = location.latitude
+        var displayLon = location.longitude
+        var routeKm = latestRouteKm
+        var snapped = false
+
+        activeCourse?.let { course ->
+            val match = runCatching { course.nearestRouteLocation(location.latitude, location.longitude) }.getOrNull()
+            if (match != null && match.distanceM <= 250.0) {
+                routeKm = match.routeKm
+                displayLat = match.trackLat
+                displayLon = match.trackLon
+                snapped = match.distanceM <= 80.0
+            }
+        }
+
+        latestRouteKm = routeKm
+        latestDisplayLat = displayLat
+        latestDisplayLon = displayLon
+        latestAccuracyM = if (location.hasAccuracy()) location.accuracy else -1f
+        lastAcceptedLocation = Location(location)
+        val heading = when {
+            location.hasBearing() -> normalizeAngle(location.bearing.toDouble())
+            else -> routeHeadingAt(routeKm) ?: sensorTrueHeading ?: fusedHeading ?: 0.0
+        }
+        fusedHeading = normalizeAngle(heading)
+        isSnapped = snapped
+        pushBootstrapLocationIfAvailable()
+    }
+
+    private fun pushBootstrapLocationIfAvailable() {
+        if (!pageReady || bootstrapPushed) return
+        val last = bootstrapLocation ?: return
+        if (!latestDisplayLat.isFinite() || !latestDisplayLon.isFinite()) return
+        bootstrapPushed = true
+        pushFix(
+            latestDisplayLat,
+            latestDisplayLon,
+            latestRouteKm,
+            0.0,
+            fusedHeading ?: routeHeadingAt(latestRouteKm) ?: 0.0,
+            if (last.hasAccuracy()) last.accuracy else -1f,
+            isSnapped
+        )
+    }
 
     private fun startGps() {
         if (gpsStarted || !isAttachedToWindow || !hasLocationPermission()) return
@@ -189,7 +270,6 @@ class RideSmoothMapWebView @JvmOverloads constructor(
                         Looper.getMainLooper()
                     )
                     gpsStarted = true
-                    primeLastKnownLocation(LocationManager.GPS_PROVIDER)
                 }
                 locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> {
                     locationManager.requestLocationUpdates(
@@ -200,7 +280,6 @@ class RideSmoothMapWebView @JvmOverloads constructor(
                         Looper.getMainLooper()
                     )
                     gpsStarted = true
-                    primeLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 }
             }
         } catch (_: Exception) {
@@ -213,15 +292,6 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         if (!gpsStarted) return
         runCatching { locationManager.removeUpdates(this) }
         gpsStarted = false
-    }
-
-    private fun primeLastKnownLocation(provider: String) {
-        try {
-            val last = locationManager.getLastKnownLocation(provider) ?: return
-            val ageMs = System.currentTimeMillis() - last.time
-            if (ageMs in 0..60_000L) onLocationChanged(last)
-        } catch (_: SecurityException) {
-        }
     }
 
     private fun startSensors() {
@@ -287,6 +357,10 @@ class RideSmoothMapWebView @JvmOverloads constructor(
             updateStatusText()
             return
         }
+
+        // A live fix takes ownership immediately; bootstrap was display-only.
+        bootstrapLocation = null
+        bootstrapPushed = true
 
         val previous = lastAcceptedLocation
         lastAcceptedLocation = Location(location)
@@ -367,7 +441,6 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         return (physicalKm + 0.35).coerceIn(0.45, 1.4)
     }
 
-    /** Short look-ahead deliberately follows MTB turns sooner than the old 50~120 m look-ahead. */
     private fun routeHeadingAt(km: Double): Double? {
         val course = activeCourse ?: return null
         if (course.track.size < 2) return null
@@ -382,10 +455,6 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         return bearing(a.lat, a.lon, b.lat, b.lon)
     }
 
-    /**
-     * Moving GPS course gets priority. The phone rotation vector is a gap filler, not the boss;
-     * this avoids handlebar/phone tilt creating a persistent diagonal map while riding.
-     */
     private fun responsiveHeadingCandidate(speedKmh: Double): Double? {
         val route = routeHeadingAt(latestRouteKm)
         val gps = latestGpsHeading
@@ -410,7 +479,6 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         return circularAverage(weighted)
     }
 
-    /** Lighter dead-band and faster catch-up; 24fps JavaScript handles the visual smoothing. */
     private fun stabilizeHeading(candidate: Double, speedKmh: Double): Double {
         val previous = fusedHeading ?: return normalizeAngle(candidate)
         val delta = shortestDelta(previous, candidate)
@@ -491,6 +559,7 @@ class RideSmoothMapWebView @JvmOverloads constructor(
                 if (!mapVerified) {
                     mapVerified = true
                     animate().alpha(1f).setDuration(140L).start()
+                    pushBootstrapLocationIfAvailable()
                     updateStatusText()
                 }
             } else if (attempt < 12) {
@@ -511,6 +580,12 @@ class RideSmoothMapWebView @JvmOverloads constructor(
         activeCourseId = meta.id
         activeCourse = course
         lastSnapKm = null
+
+        // If the bootstrap point was obtained before the GPX was loaded, re-evaluate it now.
+        if (bootstrapLocation != null && lastFixElapsedMs == 0L) {
+            bootstrapPushed = false
+            applyBootstrapLocation(bootstrapLocation!!)
+        }
 
         val points = downsample(course.track, MAX_ROUTE_POINTS)
         val routeJson = JSONArray()
