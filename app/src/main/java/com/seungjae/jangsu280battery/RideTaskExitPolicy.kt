@@ -37,18 +37,17 @@ object RideTaskExitPolicy {
     fun stopEverything(context: Context) {
         val app = context.applicationContext
 
-        // Stop both foreground ride tracking and any release/deploy foreground work owned by app.
         runCatching { app.stopService(android.content.Intent(app, RideService::class.java)) }
         runCatching { app.stopService(android.content.Intent(app, ReleaseDeployService::class.java)) }
 
         val prefs = app.getSharedPreferences(RIDE_PREFS, Context.MODE_PRIVATE)
         val activeId = prefs.getString("active_id", null)
         if (!activeId.isNullOrBlank()) {
-            // The user explicitly discarded resume. Remove only the unfinished session directory;
-            // completed exported rides live elsewhere and are untouched.
             runCatching { File(app.filesDir, "ride_sessions/$activeId").deleteRecursively() }
         }
-        prefs.edit().also { edit -> activeKeys.forEach(edit::remove) }.apply()
+        val edit = prefs.edit()
+        activeKeys.forEach { edit.remove(it) }
+        edit.apply()
 
         app.getSharedPreferences(CHARGE_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         AppSettings.prefs(app).edit().putFloat(AppSettings.KEY_LAST_KM, 0f).apply()
