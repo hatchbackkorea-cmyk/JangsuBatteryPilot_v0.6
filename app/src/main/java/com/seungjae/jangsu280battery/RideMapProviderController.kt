@@ -8,12 +8,19 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.hardware.GeomagneticField
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
+import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -35,15 +42,19 @@ import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import com.kakao.vectormap.route.RouteLineStylesSet
 import java.util.WeakHashMap
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * v0.33.12 map-provider switcher.
+ * MTB map-provider switcher.
  *
  * The route itself is always the selected GPX. Kakao is used only as a basemap:
  *  - Kakao map (NORMAL)
  *  - Kakao Skyview + SKYVIEW_HYBRID road/name overlay
  *  - CyclOSM (existing MapLibre WebView)
+ *
+ * Direction is independent from GPS position. On Kakao maps TYPE_ROTATION_VECTOR provides
+ * heading even while GPS is still waiting; once moving fast enough, GPS course is preferred.
  */
 object RideMapProviderController {
     private const val PREFS = "mtb_map_ui"
@@ -51,7 +62,7 @@ object RideMapProviderController {
     private const val STYLE_KAKAO = "kakao_normal"
     private const val STYLE_KAKAO_SKY = "kakao_sky"
     private const val STYLE_CYCLOSM = "cyclosm"
-    private const val TAG_KAKAO = "ride_kakao_map_v03312"
+    private const val TAG_KAKAO = "ride_kakao_map_v03315"
 
     private val sessions = WeakHashMap<Activity, Session>()
 
@@ -168,7 +179,21 @@ object RideMapProviderController {
             val smooth = frame.findViewWithTag<View>(RideSmoothMapWebView.TAG_SMOOTH_MAP) as? RideSmoothMapWebView
             smooth?.visibility = View.VISIBLE
             smooth?.evaluateJavascript(
-                "(function(){try{var s=map&&map.getSource('osm');if(s&&s.setTiles)s.setTiles(['https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png']);}catch(e){}})();",
+                """
+                (function(){
+                  try {
+                    var s=map&&map.getSource('osm');
+                    if(s&&s.setTiles)s.setTiles(['https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png']);
+                    var q=document.getElementById('rc-quarter-arrow');
+                    if(!q){
+                      q=document.createElement('style');
+                      q.id='rc-quarter-arrow';
+                      q.textContent='.rider-triangle{width:11.25px!important;height:12.75px!important}';
+                      document.head.appendChild(q);
+                    }
+                  } catch(e) {}
+                })();
+                """.trimIndent(),
                 null
             )
             attribution?.apply {
@@ -203,21 +228,30 @@ object RideMapProviderController {
     }
 }
 
-private class KakaoRideMapSurface(context: Context) : FrameLayout(context), LocationListener {
+private class KakaoRideMapSurface(context: Context) : FrameLayout(context), LocationListener, SensorEventListener {
     private val mapView = MapView(context)
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val courseRepo = CourseRepository(context)
+
     private var kakaoMap: KakaoMap? = null
     private var started = false
+    private var locationStarted = false
+    private var sensorsStarted = false
     private var skyview = false
     private var liveGpsSeen = false
     private var lastGpsElapsed = 0L
     private var actualGpsHz = 0.0
     private var lastLocation: Location? = null
+    private var latestSpeedKmh = 0.0
+    private var sensorHeading: Double? = null
+    private var gpsHeading: Double? = null
     private var lastHeading = 0.0
+    private var lastSensorPushElapsed = 0L
 
     private val gpsText = TextView(context).apply {
-        text = "GPS 대기"
+        text = if (rotationSensor != null) "GPS 대기 · 방향센서" else "GPS 대기"
         textSize = 11f
         setTextColor(Color.WHITE)
         setBackgroundColor(0xA6111820.toInt())
@@ -232,7 +266,8 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
             topMargin = dp(8)
             marginEnd = dp(8)
         })
-        addView(arrow, LayoutParams(dp(45), dp(51), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
+        // Previous size was 45 x 51 dp. Keep exactly 25% of that size.
+        addView(arrow, LayoutParams(dpf(11.25f), dpf(12.75f), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
             bottomMargin = dp(52)
         })
         startMapIfNeeded()
@@ -263,6 +298,7 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
                     applyMapType()
                     drawCourse()
                     lastLocation?.let { updateCamera(it) }
+                    if (lastLocation == null) rotateCameraOnly(lastHeading, animate = false)
                 }
 
                 override fun getPosition(): LatLng {
@@ -275,6 +311,7 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
             }
         )
         mapView.resume()
+        startSensors()
         startLocation()
     }
 
@@ -320,19 +357,38 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
             context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private fun startLocation() {
-        if (!hasLocationPermission()) return
+        if (locationStarted || !hasLocationPermission()) return
         runCatching {
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
+                locationStarted = true
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2500L, 0f, this, Looper.getMainLooper())
+                locationStarted = true
             }
             newestLastKnown()?.let { location ->
                 lastLocation = Location(location)
                 updateCamera(location)
             }
         }
+    }
+
+    private fun stopLocation() {
+        if (!locationStarted) return
+        runCatching { locationManager.removeUpdates(this) }
+        locationStarted = false
+    }
+
+    private fun startSensors() {
+        if (sensorsStarted || rotationSensor == null || !isAttachedToWindow) return
+        sensorsStarted = sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+    }
+
+    private fun stopSensors() {
+        if (!sensorsStarted) return
+        sensorManager.unregisterListener(this)
+        sensorsStarted = false
     }
 
     private fun newestLastKnown(): Location? {
@@ -343,22 +399,77 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
             .maxByOrNull { it.time }
     }
 
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event?.sensor?.type != Sensor.TYPE_ROTATION_VECTOR) return
+
+        val raw = FloatArray(9)
+        val adjusted = FloatArray(9)
+        val orientation = FloatArray(3)
+        runCatching {
+            SensorManager.getRotationMatrixFromVector(raw, event.values)
+            when (display?.rotation ?: Surface.ROTATION_0) {
+                Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(raw, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, adjusted)
+                Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(raw, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, adjusted)
+                Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(raw, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, adjusted)
+                else -> System.arraycopy(raw, 0, adjusted, 0, raw.size)
+            }
+            SensorManager.getOrientation(adjusted, orientation)
+        }.getOrElse { return }
+
+        var heading = normalizeHeading(Math.toDegrees(orientation[0].toDouble()))
+        val referenceLocation = lastLocation ?: newestLastKnown()
+        if (referenceLocation != null) {
+            val field = GeomagneticField(
+                referenceLocation.latitude.toFloat(),
+                referenceLocation.longitude.toFloat(),
+                (if (referenceLocation.hasAltitude()) referenceLocation.altitude else 0.0).toFloat(),
+                System.currentTimeMillis()
+            )
+            heading = normalizeHeading(heading + field.declination)
+        }
+        sensorHeading = heading
+
+        // At low speed or before GPS course exists, the phone sensor owns map direction.
+        // Above 5 km/h a valid GPS course is preferred so trail vibration does not swing the map.
+        if (latestSpeedKmh >= 5.0 && gpsHeading != null) return
+
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSensorPushElapsed < 90L) return
+        lastSensorPushElapsed = now
+        lastHeading = smoothHeading(lastHeading, heading)
+        rotateCameraOnly(lastHeading, animate = true)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
     override fun onLocationChanged(location: Location) {
         if (location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return
         if (location.provider == LocationManager.GPS_PROVIDER) {
             liveGpsSeen = true
-            val now = android.os.SystemClock.elapsedRealtime()
+            val now = SystemClock.elapsedRealtime()
             if (lastGpsElapsed > 0 && now > lastGpsElapsed) {
                 val hz = 1000.0 / (now - lastGpsElapsed).toDouble()
                 if (hz in 0.05..10.0) actualGpsHz = if (actualGpsHz == 0.0) hz else actualGpsHz * 0.75 + hz * 0.25
             }
             lastGpsElapsed = now
-            gpsText.text = if (actualGpsHz > 0.0) "GPS %.1fHz".format(actualGpsHz) else "GPS 수신"
+            gpsText.text = if (actualGpsHz > 0.0) "GPS %.1fHz · 방향융합".format(actualGpsHz) else "GPS 수신 · 방향융합"
         } else if (liveGpsSeen) {
             return
         }
+
         lastLocation = Location(location)
-        if (location.hasBearing() && location.speed >= 1.0f) lastHeading = location.bearing.toDouble()
+        latestSpeedKmh = if (location.hasSpeed()) (location.speed * 3.6).toDouble() else 0.0
+
+        if (location.hasBearing() && latestSpeedKmh >= 5.0) {
+            gpsHeading = normalizeHeading(location.bearing.toDouble())
+        }
+
+        val candidate = if (latestSpeedKmh >= 5.0) {
+            gpsHeading ?: sensorHeading ?: lastHeading
+        } else {
+            sensorHeading ?: gpsHeading ?: lastHeading
+        }
+        lastHeading = smoothHeading(lastHeading, candidate)
         updateCamera(location)
     }
 
@@ -383,19 +494,50 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
         }
     }
 
+    private fun rotateCameraOnly(heading: Double, animate: Boolean) {
+        val map = kakaoMap ?: return
+        runCatching {
+            if (animate) {
+                map.moveCamera(
+                    CameraUpdateFactory.rotateTo(Math.toRadians(normalizeHeading(heading))),
+                    CameraAnimation.from(180, true, true)
+                )
+            } else {
+                map.moveCamera(CameraUpdateFactory.rotateTo(Math.toRadians(normalizeHeading(heading))))
+            }
+        }
+    }
+
+    private fun smoothHeading(previous: Double, candidate: Double): Double {
+        val delta = shortestDelta(previous, candidate)
+        if (abs(delta) < 1.5) return normalizeHeading(previous)
+        val alpha = when {
+            abs(delta) >= 60.0 -> 0.55
+            abs(delta) >= 25.0 -> 0.42
+            else -> 0.30
+        }
+        return normalizeHeading(previous + delta * alpha)
+    }
+
+    private fun normalizeHeading(value: Double): Double = ((value % 360.0) + 360.0) % 360.0
+    private fun shortestDelta(from: Double, to: Double): Double = ((to - from + 540.0) % 360.0) - 180.0
+
     fun resumeMap() {
         startMapIfNeeded()
         runCatching { mapView.resume() }
+        startSensors()
         startLocation()
     }
 
     fun pauseMap() {
-        runCatching { locationManager.removeUpdates(this) }
+        stopLocation()
+        stopSensors()
         runCatching { mapView.pause() }
     }
 
     fun destroyMap() {
-        runCatching { locationManager.removeUpdates(this) }
+        stopLocation()
+        stopSensors()
         runCatching { mapView.finish() }
     }
 
@@ -405,6 +547,7 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dpf(v: Float): Int = (v * resources.displayMetrics.density).toInt().coerceAtLeast(1)
 }
 
 private class FixedRiderArrowView(context: Context) : View(context) {
