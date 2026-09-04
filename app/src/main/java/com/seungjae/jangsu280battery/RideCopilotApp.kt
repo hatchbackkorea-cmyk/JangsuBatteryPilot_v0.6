@@ -9,12 +9,12 @@ import android.widget.Switch
 import android.widget.TextView
 
 /**
- * v0.33.4: injects the voice-volume boost control into both settings surfaces without
- * duplicating the preference logic in MainActivity and SettingsActivity.
+ * App-wide lightweight UI helpers and map SDK bootstrap.
  */
 class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     override fun onCreate() {
         super.onCreate()
+        KakaoMapSdkGate.ensureInitialized(this)
         registerActivityLifecycleCallbacks(this)
     }
 
