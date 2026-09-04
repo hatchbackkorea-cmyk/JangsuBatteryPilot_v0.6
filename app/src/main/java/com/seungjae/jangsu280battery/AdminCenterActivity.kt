@@ -3,13 +3,16 @@ package com.seungjae.jangsu280battery
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.ViewFlipper
 import java.util.Locale
+import kotlin.math.abs
 
 class AdminCenterActivity : Activity() {
     private lateinit var sync: RiderServerSync
@@ -27,7 +30,11 @@ class AdminCenterActivity : Activity() {
     private lateinit var btnSyncNow: Button
     private lateinit var btnSave: Button
     private lateinit var btnCheckUpdate: Button
+    private lateinit var adminPager: ViewFlipper
+    private lateinit var tvPagerIndicator: TextView
     private var authenticated = false
+    private var swipeDownX = 0f
+    private var swipeDownY = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +43,7 @@ class AdminCenterActivity : Activity() {
         bindViews()
         populate()
         wire()
+        updatePagerIndicator()
         checkAdminPhone()
     }
 
@@ -51,6 +59,29 @@ class AdminCenterActivity : Activity() {
                 }
             }
         }
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                swipeDownX = ev.x
+                swipeDownY = ev.y
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = ev.x - swipeDownX
+                val dy = ev.y - swipeDownY
+                if (::adminPager.isInitialized && abs(dx) >= 100f && abs(dx) > abs(dy) * 1.25f) {
+                    if (dx < 0 && adminPager.displayedChild < adminPager.childCount - 1) {
+                        adminPager.showNext()
+                        updatePagerIndicator()
+                    } else if (dx > 0 && adminPager.displayedChild > 0) {
+                        adminPager.showPrevious()
+                        updatePagerIndicator()
+                    }
+                }
+            }
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun bindViews() {
@@ -69,6 +100,8 @@ class AdminCenterActivity : Activity() {
         btnSyncNow = findViewById(R.id.btnAdminSyncNow)
         btnSave = findViewById(R.id.btnAdminSaveConnection)
         btnCheckUpdate = findViewById(R.id.btnAdminCheckUpdate)
+        adminPager = findViewById(R.id.adminPager)
+        tvPagerIndicator = findViewById(R.id.tvAdminPagerIndicator)
     }
 
     private fun populate() {
@@ -103,8 +136,22 @@ class AdminCenterActivity : Activity() {
         findViewById<Button>(R.id.btnAdminMobileRelease).setOnClickListener {
             if (authenticated) startActivity(Intent(this, ReleaseUploaderActivity::class.java))
         }
+        findViewById<Button>(R.id.btnAdminBleDiagnostic).setOnClickListener {
+            if (authenticated) startActivity(Intent(this, BleDiagnosticActivity::class.java))
+        }
+        findViewById<Button>(R.id.btnAdminSramDiagnostic).setOnClickListener {
+            if (authenticated) startActivity(Intent(this, SramBleActivity::class.java))
+        }
         btnSave.setOnClickListener { saveAdminSettings() }
         btnSyncNow.setOnClickListener { runSync() }
+    }
+
+    private fun updatePagerIndicator() {
+        if (!::adminPager.isInitialized || !::tvPagerIndicator.isInitialized) return
+        tvPagerIndicator.text = when (adminPager.displayedChild) {
+            0 -> "●  ○   업데이트 · 실험"
+            else -> "○  ●   Rider Control Center"
+        }
     }
 
     private fun checkAdminPhone() {
@@ -125,7 +172,6 @@ class AdminCenterActivity : Activity() {
                     Toast.makeText(this, "관리자폰 권한이 없거나 해제되었습니다.", Toast.LENGTH_LONG).show()
                     finish()
                 } else {
-                    // Offline: cached role can keep the local update menu visible; network actions will fail safely.
                     authenticated = true
                     tvAuth.text = "관리자폰 · 서버 상태 확인 보류"
                     setAdminUiEnabled(true)
@@ -136,10 +182,13 @@ class AdminCenterActivity : Activity() {
     }
 
     private fun setAdminUiEnabled(enabled: Boolean) {
-        listOf<View>(etName, etWeight, etFtp, switchAuto, switchBeta,
-            btnSyncNow, btnSave, btnCheckUpdate, findViewById(R.id.btnAdminMobileRelease)
+        listOf<View>(
+            etName, etWeight, etFtp, switchAuto, switchBeta,
+            btnSyncNow, btnSave, btnCheckUpdate,
+            findViewById(R.id.btnAdminMobileRelease),
+            findViewById(R.id.btnAdminBleDiagnostic),
+            findViewById(R.id.btnAdminSramDiagnostic)
         ).forEach { it.isEnabled = enabled }
-        // Server address/token are assigned only by the hidden one-time admin-phone pairing flow.
         etServer.isEnabled = false
         etToken.visibility = View.GONE
     }
