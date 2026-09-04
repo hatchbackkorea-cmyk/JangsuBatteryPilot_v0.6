@@ -30,7 +30,8 @@ object StartupLocationPrimer {
     private const val KEY_ACCURACY = "accuracy"
     private const val KEY_BEARING = "bearing"
     private const val KEY_HAS_BEARING = "has_bearing"
-    private const val BOOTSTRAP_LISTEN_MS = 20_000L
+    private const val BOOTSTRAP_LISTEN_MS = 60_000L
+    private const val FRESH_ASSISTED_AGE_MS = 15_000L
     private const val MAX_NETWORK_ACCURACY_M = 2_500f
 
     fun prime(context: Context, map: RideSmoothMapWebView) {
@@ -44,7 +45,7 @@ object StartupLocationPrimer {
         }
 
         // GPS is requested by RideSmoothMapWebView. In parallel, ask Android's network/passive
-        // providers for a short startup window so an indoor launch can still get a usable position.
+        // providers long enough for an indoor Wi-Fi/cell fix to arrive.
         requestIndoorBootstrap(context, map)
     }
 
@@ -76,20 +77,22 @@ object StartupLocationPrimer {
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         if (!hasLocationPermission(context)) return
 
-        var firstFreshInjected = false
+        var freshInjected = false
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 if (!isUsable(location)) return
                 if (location.hasAccuracy() && location.accuracy > MAX_NETWORK_ACCURACY_M) return
 
-                // Persist every usable startup fix. This gives us our own fallback next launch,
-                // even if Android happens to return an empty last-known cache later.
+                val ageMs = if (location.time > 0L) System.currentTimeMillis() - location.time else 0L
+                if (location.time > 0L && ageMs !in 0..FRESH_ASSISTED_AGE_MS) return
+
+                // Persist every genuinely fresh usable assisted fix for the next indoor launch.
                 remember(context, location)
 
-                // Only the first fresh assisted fix is injected. Real GPS continues independently
-                // in RideSmoothMapWebView and will overwrite this visual anchor as soon as it arrives.
-                if (!firstFreshInjected) {
-                    firstFreshInjected = true
+                // Inject only the first fresh assisted position. Live GPS remains free to take over
+                // without a later network fix pulling the visible map away again.
+                if (!freshInjected) {
+                    freshInjected = true
                     injectWhenReady(map, location, 0)
                 }
             }
@@ -111,8 +114,6 @@ object StartupLocationPrimer {
         } catch (_: Exception) {
         }
 
-        // Passive updates can contain a location already being produced by Android/system apps,
-        // and add no extra GNSS demand of their own.
         try {
             manager.requestLocationUpdates(
                 LocationManager.PASSIVE_PROVIDER,
