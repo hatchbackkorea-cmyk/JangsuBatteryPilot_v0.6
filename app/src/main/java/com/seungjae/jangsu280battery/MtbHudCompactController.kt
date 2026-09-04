@@ -81,8 +81,6 @@ object MtbHudCompactController {
             val frame = root.findViewById<FrameLayout?>(R.id.layoutRideMapPreview) ?: return
             if (frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP) != null) return
 
-            // ElevationProfileView may already have inserted the v0.33.1 live-map prototype.
-            // Remove only that overlay; the static fallback image and bottom status strip remain.
             frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { old ->
                 frame.removeView(old)
             }
@@ -90,7 +88,7 @@ object MtbHudCompactController {
             val status = frame.findViewById<View?>(R.id.tvRideMapPreviewStatus)
             val insertAt = status?.let { frame.indexOfChild(it) }?.takeIf { it >= 0 } ?: frame.childCount
             frame.addView(
-                RideSmartMapWebView(context),
+                RideSmartMapWebView(root.context),
                 insertAt,
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
