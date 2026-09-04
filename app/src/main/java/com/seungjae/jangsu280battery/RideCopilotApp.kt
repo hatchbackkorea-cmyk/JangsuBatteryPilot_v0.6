@@ -20,7 +20,14 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         when (activity) {
-            is MainActivity, is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
+            is MainActivity -> {
+                activity.window.decorView.post { installVoiceBoostControl(activity) }
+                // MtbHudCompactController creates the lower-right selector at runtime. Try once
+                // immediately and once after layout settles, then replace only its click action.
+                activity.window.decorView.post { KakaoMapSelectorBridge.install(activity.window.decorView) }
+                activity.window.decorView.postDelayed({ KakaoMapSelectorBridge.install(activity.window.decorView) }, 700L)
+            }
+            is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
         }
     }
 
