@@ -22,8 +22,12 @@ class RaceServerClient(context: Context) {
         require(available()) { "Rider Control Center 서버가 연결되지 않았습니다." }
         val body = JSONObject().apply {
             put("event_code", eventCode.trim().uppercase())
-            put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname)
-            put("platform", "ANDROID"); put("app_version", UpdateManager.currentVersion(app))
+            put("profile_id", profile.profileId)
+            put("name", profile.name)
+            put("nickname", profile.nickname)
+            put("bib", profile.bib)
+            put("platform", "ANDROID")
+            put("app_version", UpdateManager.currentVersion(app))
         }
         val x = request("POST", "/api/race/join", body, null)
         val event = RaceEventConfig.fromJson(x.getJSONObject("event"))
