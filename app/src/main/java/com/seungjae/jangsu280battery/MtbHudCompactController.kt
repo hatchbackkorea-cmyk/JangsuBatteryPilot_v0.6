@@ -2,9 +2,6 @@ package com.seungjae.jangsu280battery
 
 import android.content.Context
 import android.graphics.drawable.Drawable
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -18,11 +15,12 @@ import java.util.WeakHashMap
 /**
  * MTB HUD presentation controller.
  *
- * v0.33.6:
- * - battery summary becomes a two-line CURRENT / ARRIVAL block
- * - map debug/status strip is hidden from the normal riding HUD
- * - next climb card moves to the left and next point card to the right
- * - climb text is enlarged and gained elevation is shown on its own fourth line
+ * v0.33.7:
+ * - CURRENT / ARRIVAL battery lines use exactly the same text size
+ * - remove the redundant "다음 업힐" / "다음 지점" labels
+ * - compact climb wording (10.8 km, 획고 203m)
+ * - make finish/checkpoint typography match the climb card
+ * - keep map debug/status text hidden from the riding HUD
  */
 object MtbHudCompactController {
     private val installed = WeakHashMap<View, Controller>()
@@ -52,6 +50,7 @@ object MtbHudCompactController {
         private val routeScale = root.findViewById<TextView?>(R.id.tvRideRouteScale)
         private val mapStatus = root.findViewById<TextView?>(R.id.tvRideMapPreviewStatus)
         private val nextCheckpoint = root.findViewById<TextView?>(R.id.tvNextCheckpoint)
+        private val nextCheckpointDetail = root.findViewById<TextView?>(R.id.tvNextCheckpointDetail)
         private val nextClimb = root.findViewById<TextView?>(R.id.tvNextClimb)
         private val nextClimbDetail = root.findViewById<TextView?>(R.id.tvNextClimbDetail)
 
@@ -96,7 +95,6 @@ object MtbHudCompactController {
             frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { frame.removeView(it) }
             frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP)?.let { frame.removeView(it) }
 
-            // Debug/status text is intentionally gone in the riding UI.
             mapStatus?.visibility = View.GONE
             val insertAt = mapStatus?.let { frame.indexOfChild(it) }?.takeIf { it >= 0 } ?: frame.childCount
             frame.addView(
@@ -135,23 +133,42 @@ object MtbHudCompactController {
                 }
             }
 
-            // 19sp x 1.5 = 28.5sp, detail 13sp x 2 = 26sp.
-            nextClimb?.apply {
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 28.5f)
-                includeFontPadding = false
+            // The climb header itself is redundant; the first information line is the distance.
+            nextClimb?.visibility = View.GONE
+
+            // Remove the static "다음 지점" label while keeping the dynamic destination name.
+            (nextCheckpoint?.parent as? ViewGroup)?.let { card ->
+                for (i in 0 until card.childCount) {
+                    val child = card.getChildAt(i)
+                    if (child is TextView && child.id == View.NO_ID && child.text?.toString()?.trim() == "다음 지점") {
+                        child.visibility = View.GONE
+                    }
+                }
             }
+
             nextClimbDetail?.apply {
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 26f)
                 maxLines = 4
                 includeFontPadding = false
-                setLineSpacing(0f, 0.94f)
+                setLineSpacing(0f, 0.92f)
+            }
+            nextCheckpoint?.apply {
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 26f)
+                includeFontPadding = false
+                maxLines = 1
+            }
+            nextCheckpointDetail?.apply {
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 26f)
+                includeFontPadding = false
+                maxLines = 4
+                setLineSpacing(0f, 0.92f)
             }
 
-            // Give the enlarged 4-line climb block enough room; keep both cards aligned.
+            // v0.33.6 used 178dp. Keep the large type but reclaim some vertical room.
             val climbCard = nextClimb?.parent as? View
             val cpCard = nextCheckpoint?.parent as? View
-            climbCard?.minimumHeight = dp(178f)
-            cpCard?.minimumHeight = dp(178f)
+            climbCard?.minimumHeight = dp(160f)
+            cpCard?.minimumHeight = dp(160f)
         }
 
         private fun hideRiskSummaryRow() {
@@ -193,24 +210,45 @@ object MtbHudCompactController {
             hideRiskSummaryRow()
             configureNavigationCards()
             normalizeClimbDetail()
+            normalizeCheckpointDetail()
             renderCombinedBattery()
         }
 
         private fun normalizeClimbDetail() {
             val view = nextClimbDetail ?: return
-            val raw = view.text?.toString().orEmpty()
-            if (raw.isBlank()) return
+            var text = view.text?.toString().orEmpty()
+            if (text.isBlank()) return
 
-            // MainActivity currently renders line 3 as "평균 6.0% · +203m".
-            // Split the gained elevation onto the requested fourth line.
-            val match = CLIMB_GAIN_REGEX.find(raw)
-            if (match != null) {
-                val grade = match.groupValues[1]
-                val gain = match.groupValues[2]
-                val replacement = "평균 ${grade}%\n획고 ${gain}미터"
-                val rewritten = raw.replaceRange(match.range, replacement)
-                if (rewritten != raw) view.text = rewritten
+            // "10.8 km 후" -> "10.8 km"
+            text = CLIMB_DISTANCE_AFTER_REGEX.replace(text) { m -> "${m.groupValues[1]} km" }
+
+            // "평균 6.0% · +203m" -> two compact lines.
+            text = CLIMB_GAIN_REGEX.replace(text) { m ->
+                "평균 ${m.groupValues[1]}%\n획고 ${m.groupValues[2]}m"
             }
+
+            // Already-normalized v0.33.6 text: "획고 203미터" -> "획고 203m".
+            text = CLIMB_GAIN_KOREAN_UNIT_REGEX.replace(text) { m -> "획고 ${m.groupValues[1]}m" }
+
+            if (view.text?.toString() != text) view.text = text
+        }
+
+        private fun normalizeCheckpointDetail() {
+            val title = nextCheckpoint?.text?.toString().orEmpty().trim()
+            val view = nextCheckpointDetail ?: return
+            val raw = view.text?.toString().orEmpty()
+            if (raw.isBlank() || !title.contains("종점")) return
+
+            val lines = raw.lines().map { it.trim() }.filter { it.isNotBlank() }
+            val distance = lines.firstOrNull { line ->
+                line.contains("남음") && (line.contains("km", ignoreCase = true) || line.contains("킬로미터"))
+            }?.replace("킬로미터", "km")
+            val arrival = lines.firstOrNull { it.contains("예상") && it.contains('%') }
+                ?.replace("종점 도착 예상", "도착 예상")
+                ?.replace("종점 예상", "도착 예상")
+
+            val compact = listOfNotNull(distance, arrival).joinToString("\n")
+            if (compact.isNotBlank() && compact != raw) view.text = compact
         }
 
         private fun renderCombinedBattery() {
@@ -236,18 +274,13 @@ object MtbHudCompactController {
             val summary = "현재 $currentText\n도착 $arrivalText"
             if (summary == lastRenderedSummary && batteryView.text.toString() == summary) return
 
-            val span = SpannableString(summary)
-            val lineBreak = summary.indexOf('\n')
-            if (lineBreak > 0) {
-                span.setSpan(RelativeSizeSpan(1.08f), 0, lineBreak, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                span.setSpan(RelativeSizeSpan(0.92f), lineBreak + 1, summary.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            batteryView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 19f)
+            // Both floors deliberately use the exact same point size.
+            batteryView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
             batteryView.maxLines = 2
             batteryView.gravity = Gravity.END
             batteryView.includeFontPadding = false
-            batteryView.setLineSpacing(0f, 0.96f)
-            batteryView.text = span
+            batteryView.setLineSpacing(0f, 0.94f)
+            batteryView.text = summary
             lastRenderedSummary = summary
         }
 
@@ -256,5 +289,7 @@ object MtbHudCompactController {
 
     private val PERCENT_REGEX = Regex("(\\d{1,3})%")
     private val ARRIVAL_REGEX = Regex("예상\\s*(\\d{1,3})%")
+    private val CLIMB_DISTANCE_AFTER_REGEX = Regex("([0-9.]+)\\s*km\\s*후", RegexOption.IGNORE_CASE)
     private val CLIMB_GAIN_REGEX = Regex("평균\\s*([0-9.]+)%\\s*·\\s*\\+?([0-9]+)m")
+    private val CLIMB_GAIN_KOREAN_UNIT_REGEX = Regex("획고\\s*([0-9]+)미터")
 }
