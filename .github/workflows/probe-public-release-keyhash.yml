@@ -1,0 +1,32 @@
+name: Probe public release key hash
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  keyhash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download public v0.33.12 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.33.12 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'GPXBatteryCopilot-v0.33.12-release.apk'
+
+      - name: Print Kakao Android release key hash
+        shell: bash
+        run: |
+          APK='GPXBatteryCopilot-v0.33.12-release.apk'
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -n "$APKSIGNER" || (echo 'apksigner not found' && exit 1)
+          SHA1_HEX=$($APKSIGNER verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-1 digest: //p' | head -n 1 | tr -d ':[:space:]')
+          test -n "$SHA1_HEX" || (echo 'certificate SHA-1 not found' && exit 1)
+          KEY_HASH=$(printf '%s' "$SHA1_HEX" | xxd -r -p | base64 -w0)
+          echo "CERT_SHA1_HEX=$SHA1_HEX"
+          echo "KAKAO_RELEASE_KEY_HASH=$KEY_HASH"
