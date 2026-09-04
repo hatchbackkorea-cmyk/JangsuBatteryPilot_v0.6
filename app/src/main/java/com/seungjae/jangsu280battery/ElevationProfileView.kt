@@ -132,6 +132,8 @@ class ElevationProfileView @JvmOverloads constructor(
                 )
             )
         }
+
+        MtbHudCompactController.install(rootView, context)
     }
 
     fun setCourse(value: CourseData) {
