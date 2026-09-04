@@ -22,6 +22,7 @@ class BikeModeChooserActivity : Activity() {
     private lateinit var tvVersion: TextView
     private lateinit var tvServerStatus: TextView
     private var lastServerRepairAttemptMs = 0L
+    private var explicitExitHandled = false
 
     private data class PcHealth(
         val ok: Boolean,
@@ -65,9 +66,9 @@ class BikeModeChooserActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // v0.33.3: swiping the task away intentionally stops the foreground RideService.
-        // If a ride session was still marked active, reopening the app resumes that same session.
-        resumeActiveRideServiceIfNeeded()
+        // v0.33.5: do NOT automatically revive an old ride service.
+        // Explicit app/task close means the next launch starts from a clean ride state.
+        explicitExitHandled = false
         UpdateManager.resumePendingInstall(this)
         refreshAdminVisibility()
         refreshServerHealth()
@@ -84,17 +85,23 @@ class BikeModeChooserActivity : Activity() {
         }
     }
 
-    private fun resumeActiveRideServiceIfNeeded() {
-        val store = runCatching { RideLogManager(this) }.getOrNull() ?: return
-        if (!store.isActive()) return
-        val intent = Intent(this, RideService::class.java).apply { action = RideService.ACTION_START }
-        runCatching {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-        }
+    override fun onStop() {
+        // When the root task is explicitly finished/removed, stop every app-owned background
+        // ride function. Merely opening MTB/ROAD puts this activity in the background without
+        // setting isFinishing, so normal riding is unaffected.
+        if (!isChangingConfigurations && isFinishing) handleExplicitExit()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations && isFinishing) handleExplicitExit()
+        super.onDestroy()
+    }
+
+    private fun handleExplicitExit() {
+        if (explicitExitHandled) return
+        explicitExitHandled = true
+        RideTaskExitPolicy.stopEverything(this)
     }
 
     private fun repairPreferredPcServerIfNeeded(force: Boolean = false) {
