@@ -62,7 +62,7 @@ object RideMapProviderController {
     private const val STYLE_KAKAO = "kakao_normal"
     private const val STYLE_KAKAO_SKY = "kakao_sky"
     private const val STYLE_CYCLOSM = "cyclosm"
-    private const val TAG_KAKAO = "ride_kakao_map_v03315"
+    private const val TAG_KAKAO = "ride_kakao_map_v03316"
 
     private val sessions = WeakHashMap<Activity, Session>()
 
@@ -270,7 +270,15 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
         addView(arrow, LayoutParams(dpf(11.25f), dpf(12.75f), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
             bottomMargin = dp(52)
         })
-        startMapIfNeeded()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        post {
+            startMapIfNeeded()
+            startSensors()
+            startLocation()
+        }
     }
 
     fun setSkyview(enabled: Boolean) {
@@ -280,29 +288,47 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
 
     private fun startMapIfNeeded() {
         if (started || BuildConfig.KAKAO_NATIVE_APP_KEY.isBlank()) return
+        if (!isAttachedToWindow) {
+            post { startMapIfNeeded() }
+            return
+        }
         started = true
+        gpsText.text = if (rotationSensor != null) "지도 준비 · GPS 대기 · 방향센서" else "지도 준비 · GPS 대기"
         mapView.start(
             object : MapLifeCycleCallback() {
-                override fun onMapDestroy() = Unit
+                override fun onMapDestroy() {
+                    kakaoMap = null
+                    started = false
+                }
+
                 override fun onMapError(error: Exception) {
+                    kakaoMap = null
+                    started = false
                     post {
-                        gpsText.text = "카카오 지도 연결 실패"
-                        Toast.makeText(context, "카카오 지도 인증을 확인해 주세요.", Toast.LENGTH_LONG).show()
+                        gpsText.text = "카카오 지도 연결 실패 · 다시 시도"
+                        Toast.makeText(context, "카카오 지도 연결을 다시 시도합니다.", Toast.LENGTH_LONG).show()
+                        postDelayed({ if (isAttachedToWindow && visibility == View.VISIBLE) startMapIfNeeded() }, 1200L)
                     }
                 }
             },
             object : KakaoMapReadyCallback() {
                 override fun onMapReady(map: KakaoMap) {
                     kakaoMap = map
+                    gpsText.text = if (liveGpsSeen) "GPS 수신 · 방향융합" else if (rotationSensor != null) "GPS 대기 · 방향센서" else "GPS 대기"
                     map.setPoiLanguage("ko")
                     applyMapType()
                     drawCourse()
-                    lastLocation?.let { updateCamera(it) }
-                    if (lastLocation == null) rotateCameraOnly(lastHeading, animate = false)
+                    val first = lastLocation ?: newestLastKnown()
+                    if (first != null) {
+                        lastLocation = Location(first)
+                        updateCamera(first)
+                    } else {
+                        rotateCameraOnly(lastHeading, animate = false)
+                    }
                 }
 
                 override fun getPosition(): LatLng {
-                    val last = newestLastKnown()
+                    val last = lastLocation ?: newestLastKnown()
                     return if (last != null) LatLng.from(last.latitude, last.longitude)
                     else LatLng.from(36.9920, 127.2700)
                 }
@@ -310,9 +336,7 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
                 override fun getZoomLevel(): Int = 17
             }
         )
-        mapView.resume()
-        startSensors()
-        startLocation()
+        runCatching { mapView.resume() }
     }
 
     private fun applyMapType() {
@@ -364,7 +388,11 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
                 locationStarted = true
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2500L, 0f, this, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1500L, 0f, this, Looper.getMainLooper())
+                locationStarted = true
+            }
+            runCatching {
+                locationManager.requestLocationUpdates(LocationManager.PASSIVE_PROVIDER, 1500L, 0f, this, Looper.getMainLooper())
                 locationStarted = true
             }
             newestLastKnown()?.let { location ->
@@ -455,6 +483,8 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
             gpsText.text = if (actualGpsHz > 0.0) "GPS %.1fHz · 방향융합".format(actualGpsHz) else "GPS 수신 · 방향융합"
         } else if (liveGpsSeen) {
             return
+        } else {
+            gpsText.text = if (rotationSensor != null) "보조 위치 · GPS 대기 · 방향센서" else "보조 위치 · GPS 대기"
         }
 
         lastLocation = Location(location)
@@ -488,7 +518,7 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
         runCatching {
             map.moveCamera(
                 CameraUpdateFactory.newCenterPosition(pos, zoom),
-                CameraAnimation.from(650, true, true)
+                CameraAnimation.from(450, true, true)
             )
             map.moveCamera(CameraUpdateFactory.rotateTo(Math.toRadians(lastHeading)))
         }
@@ -523,10 +553,15 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
     private fun shortestDelta(from: Double, to: Double): Double = ((to - from + 540.0) % 360.0) - 180.0
 
     fun resumeMap() {
+        if (!isAttachedToWindow) {
+            post { resumeMap() }
+            return
+        }
         startMapIfNeeded()
         runCatching { mapView.resume() }
         startSensors()
         startLocation()
+        lastLocation?.let { updateCamera(it) }
     }
 
     fun pauseMap() {
@@ -538,6 +573,8 @@ private class KakaoRideMapSurface(context: Context) : FrameLayout(context), Loca
     fun destroyMap() {
         stopLocation()
         stopSensors()
+        kakaoMap = null
+        started = false
         runCatching { mapView.finish() }
     }
 
