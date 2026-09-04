@@ -25,6 +25,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         when (activity) {
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
+                RideWarningOverlayController.install(activity)
                 RideMapProviderController.install(activity)
             }
             is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
@@ -36,7 +37,10 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        if (activity is MainActivity) RideMapProviderController.destroy(activity)
+        if (activity is MainActivity) {
+            RideWarningOverlayController.destroy(activity)
+            RideMapProviderController.destroy(activity)
+        }
     }
 
     private fun installVoiceBoostControl(activity: Activity) {
