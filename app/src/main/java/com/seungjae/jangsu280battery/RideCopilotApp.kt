@@ -30,17 +30,22 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
                 installVoiceBoostControl(activity)
                 RideWarningOverlayController.install(activity)
                 RideMapProviderController.install(activity)
+                RideLiveLocationBridge.install(activity)
             }
             is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
         }
     }
 
     override fun onActivityPaused(activity: Activity) {
-        if (activity is MainActivity) RideMapProviderController.pause(activity)
+        if (activity is MainActivity) {
+            RideLiveLocationBridge.pause(activity)
+            RideMapProviderController.pause(activity)
+        }
     }
 
     override fun onActivityDestroyed(activity: Activity) {
         if (activity is MainActivity) {
+            RideLiveLocationBridge.destroy(activity)
             RideWarningOverlayController.destroy(activity)
             RideMapProviderController.destroy(activity)
         }
