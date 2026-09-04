@@ -9,16 +9,15 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.WeakHashMap
 
 /**
- * v0.33.2 MTB HUD cleanup.
- *
- * The existing MainActivity still owns all battery / reserve calculations. This controller
- * only reorganises their presentation on the ride page so there is one compact information
- * strip above the profile and map, without duplicating the energy model.
+ * MTB HUD presentation controller.
+ * v0.33.3 also swaps the earlier live-map prototype for the Smart GPS map without changing
+ * the proven profile/map dimensions.
  */
 object MtbHudCompactController {
     private val installed = WeakHashMap<View, Controller>()
@@ -59,8 +58,6 @@ object MtbHudCompactController {
         private var lastRenderedSummary = ""
 
         fun attach() {
-            // These are now intentionally redundant: the top-right battery block contains
-            // current SOC + destination/next-charge arrival SOC.
             batteryLabel?.visibility = View.GONE
             manualBattery?.visibility = View.GONE
             reachMargins?.visibility = View.GONE
@@ -75,14 +72,34 @@ object MtbHudCompactController {
                 }
             }
 
-            // Keep profile/map sizing exactly as v0.33.1; only presentation changes here.
+            installSmartMap()
             hero?.viewTreeObserver?.addOnPreDrawListener(this)
             applyPresentation()
         }
 
+        private fun installSmartMap() {
+            val frame = root.findViewById<FrameLayout?>(R.id.layoutRideMapPreview) ?: return
+            if (frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP) != null) return
+
+            // ElevationProfileView may already have inserted the v0.33.1 live-map prototype.
+            // Remove only that overlay; the static fallback image and bottom status strip remain.
+            frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { old ->
+                frame.removeView(old)
+            }
+
+            val status = frame.findViewById<View?>(R.id.tvRideMapPreviewStatus)
+            val insertAt = status?.let { frame.indexOfChild(it) }?.takeIf { it >= 0 } ?: frame.childCount
+            frame.addView(
+                RideSmartMapWebView(context),
+                insertAt,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
         private fun hideRiskSummaryRow() {
-            // tvRiskStatus -> inner row -> risk card -> outer row. The second card in this row
-            // is already legacy/hidden, so removing the whole row leaves no blank spacer.
             val inner = riskStatus?.parent as? View
             val card = inner?.parent as? View
             val row = card?.parent as? View
@@ -95,12 +112,8 @@ object MtbHudCompactController {
         }
 
         private fun applyPresentation() {
-            // MainActivity historically colours the whole hero (profile + map included).
-            // Override only that outer background and move the mode colour to the first/top row.
             hero?.let { h ->
-                if (neutralBackground != null && h.background !== neutralBackground) {
-                    h.background = neutralBackground
-                }
+                if (neutralBackground != null && h.background !== neutralBackground) h.background = neutralBackground
             }
 
             val modeKey = mode?.text?.toString()?.trim()?.uppercase().orEmpty()
@@ -118,7 +131,6 @@ object MtbHudCompactController {
 
             mode?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 42f)
             routeScale?.setTextColor(context.getColor(R.color.text_secondary))
-
             batteryLabel?.visibility = View.GONE
             manualBattery?.visibility = View.GONE
             reachMargins?.visibility = View.GONE
@@ -128,18 +140,11 @@ object MtbHudCompactController {
 
         private fun renderCombinedBattery() {
             val batteryView = battery ?: return
-
-            // MainActivity writes the current SOC as e.g. "85%". After we replace it with the
-            // combined string, the LAST percentage remains the current SOC, so the next pass can
-            // still recover it until MainActivity supplies a newer value.
             val percents = PERCENT_REGEX.findAll(batteryView.text?.toString().orEmpty())
                 .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
                 .toList()
             if (percents.isNotEmpty()) lastCurrentSoc = percents.last().coerceIn(0, 100)
 
-            // MainActivity already selects the correct target: next planned charging CP when one
-            // exists, otherwise the finish. Reuse its hidden reserve text instead of maintaining
-            // a second forecast implementation here.
             val arrival = ARRIVAL_REGEX.find(riskDetail?.text?.toString().orEmpty())
                 ?.groupValues?.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 100)
 
