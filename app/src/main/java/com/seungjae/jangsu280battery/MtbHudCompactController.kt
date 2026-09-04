@@ -17,12 +17,10 @@ import java.util.WeakHashMap
 /**
  * MTB HUD presentation controller.
  *
- * v0.33.8:
- * - keep only GPS Hz in the upper-right corner of the riding map
- * - hide MapLibre's compact info/attribution control and replace it with a tiny attribution label
- * - enlarge the rider arrow
- * - add an OSM / CyclOSM map selector in the lower-right corner
- * - remove the redundant mobile-release pager page; deployment remains in Admin Center
+ * v0.33.9:
+ * - preserve v0.33.8 map cleanup and OSM / CyclOSM selector
+ * - before live GNSS is available, prime the map from Android's system last-known location
+ * - if the system has no cached location, use the app-side startup fallback cache
  */
 object MtbHudCompactController {
     private val installed = WeakHashMap<View, Controller>()
@@ -123,6 +121,7 @@ object MtbHudCompactController {
 
             installMapSelector(frame, smooth)
             scheduleMapPolish(smooth)
+            StartupLocationPrimer.prime(context, smooth)
         }
 
         private fun installMapSelector(frame: FrameLayout, map: RideSmoothMapWebView) {
@@ -283,9 +282,6 @@ object MtbHudCompactController {
             val lastIndex = count - 1
             var current = flipper.displayedChild.coerceIn(0, lastIndex)
 
-            // MainActivity v0.33.7 still has a legacy maximum index of 6. After removing the
-            // deployment page there are six pages (0..5). Prevent a swipe past the last page
-            // from wrapping to page 0.
             if (mobileReleasePageRemoved && lastPagerChild == lastIndex && current == 0) {
                 flipper.displayedChild = lastIndex
                 current = lastIndex
