@@ -35,27 +35,10 @@
             </intent-filter>
         </activity>
 
-
-        <activity
-            android:name=".AdminCenterActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".RoadGranfondoActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".RoadRaceSimulationActivity"
-            android:exported="false"
-            android:screenOrientation="unspecified" />
-
+        <activity android:name=".AdminCenterActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".MainActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".RoadGranfondoActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".RoadRaceSimulationActivity" android:exported="false" android:screenOrientation="unspecified" />
 
         <activity
             android:name=".StravaReviewActivity"
@@ -66,54 +49,18 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="jangsubatterypilot"
-                    android:host="localhost"
-                    android:pathPrefix="/strava" />
+                <data android:scheme="jangsubatterypilot" android:host="localhost" android:pathPrefix="/strava" />
             </intent-filter>
         </activity>
 
-
-        <activity
-            android:name=".CourseActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".ChargeScenarioSimulatorActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".SettingsActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-
-        <activity
-            android:name=".BleDiagnosticActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".BatteryForensicsActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".HistoricalRideActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".RideInsightsActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-
-        <activity
-            android:name=".SramBleActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
+        <activity android:name=".CourseActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ChargeScenarioSimulatorActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".SettingsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".BleDiagnosticActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".BatteryForensicsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".HistoricalRideActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".RideInsightsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".SramBleActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <activity
             android:name=".ReleaseUploaderActivity"
@@ -129,7 +76,6 @@
             </intent-filter>
         </activity>
 
-
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
@@ -143,15 +89,14 @@
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/update_file_paths" />
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" />
         </provider>
 
         <service
             android:name=".RideService"
             android:enabled="true"
             android:exported="false"
+            android:stopWithTask="true"
             android:foregroundServiceType="location" />
 
         <service
