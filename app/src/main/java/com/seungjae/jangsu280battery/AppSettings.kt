@@ -9,6 +9,7 @@ object AppSettings {
     const val PREFS = "ride_state"
     const val KEY_LAST_KM = "last_km"
     const val KEY_VOICE = "voice_enabled"
+    const val KEY_VOICE_VOLUME_BOOST = "voice_volume_boost_enabled"
     const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     const val KEY_FINISH_TARGET = "finish_target"
     const val KEY_ANNOUNCE_DISTANCE_KM = "announce_distance_km"
@@ -32,6 +33,7 @@ object AppSettings {
         .toDouble()
 
     fun voiceEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_VOICE, true)
+    fun voiceVolumeBoostEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_VOICE_VOLUME_BOOST, true)
     fun keepScreenOn(context: Context): Boolean = prefs(context).getBoolean(KEY_KEEP_SCREEN_ON, false)
     fun distanceIntervalKm(context: Context): Int = prefs(context)
         .getIntCompat(KEY_ANNOUNCE_DISTANCE_KM, DEFAULT_DISTANCE_INTERVAL_KM)
