@@ -274,7 +274,6 @@ class KakaoRideMapView @JvmOverloads constructor(
             lastGpsElapsed = now
             gpsChip.text = "GPS ${String.format(Locale.KOREA, "%.1f", actualGpsHz.coerceAtLeast(1.0))}Hz"
         } else {
-            // A recent real GPS fix owns the display. Network/passive is only an indoor bootstrap.
             if (lastGpsElapsed > 0L && now - lastGpsElapsed < 10_000L) return
             if (location.hasAccuracy() && location.accuracy > 250f) return
         }
@@ -430,7 +429,7 @@ class KakaoRideMapView @JvmOverloads constructor(
         }
         val inner = Path().apply {
             moveTo(width * 0.5f, dp(5f).toFloat())
-            lineTo(width - dp(5f), height - dp(6f).toFloat())
+            lineTo((width - dp(5f)).toFloat(), height - dp(6f).toFloat())
             lineTo(width * 0.5f, height * 0.76f)
             lineTo(dp(5f).toFloat(), height - dp(6f).toFloat())
             close()
