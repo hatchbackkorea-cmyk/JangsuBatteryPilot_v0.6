@@ -22,10 +22,8 @@ class ElevationProfileView @JvmOverloads constructor(
     private var compactMode: Boolean = false
     private var checkpointKmsOverride: List<Double>? = null
 
-    // v0.27.4: ride HUD can zoom to the active charging segment while other pages keep full-course mode.
     private var windowStartKm: Double? = null
     private var windowEndKm: Double? = null
-    // v0.27.5: blue = recommended reserve reach, red = hard-reserve absolute reach.
     private var recommendedReachKm: Double? = null
     private var hardReachKm: Double? = null
 
@@ -45,6 +43,10 @@ class ElevationProfileView @JvmOverloads constructor(
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = context.getColor(R.color.profile_fill)
+    }
+    private val gradeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        alpha = 78
     }
     private val currentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -92,8 +94,6 @@ class ElevationProfileView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        // v0.32.9+ MTB HUD only: keep the existing order, but make the map the visual focus.
-        // The original static Kakao ImageView remains below the live map as a fallback.
         if (id == R.id.rideMiniProfileView) {
             post { installMtbLiveMapLayout() }
         }
@@ -156,24 +156,18 @@ class ElevationProfileView @JvmOverloads constructor(
         invalidate()
     }
 
-    /** null/null means full-course view. */
     fun setWindow(startKm: Double?, endKm: Double?) {
         windowStartKm = startKm
         windowEndKm = endKm
         invalidate()
     }
 
-    /**
-     * Blue = normal/recommended reserve reach. Red = hard-reserve absolute reach.
-     * Either may be null independently; the compact HUD normally keeps blue always on.
-     */
     fun setReachLimits(recommendedKm: Double?, hardKm: Double?) {
         recommendedReachKm = recommendedKm
         hardReachKm = hardKm
         invalidate()
     }
 
-    /** Backward-compatible helper used by older callers/tests. */
     fun setReachLimitKm(value: Double?) {
         hardReachKm = value
         invalidate()
@@ -226,7 +220,6 @@ class ElevationProfileView @JvmOverloads constructor(
         val eleSpan = max(1.0, maxEle - minEle)
         fun y(ele: Double): Float = bottom - ((ele - minEle) / eleSpan * plotH).toFloat()
 
-        // Keep a small "next 10 km" shade, clipped to the currently visible segment window.
         if (currentKm in visibleStart..visibleEnd) {
             val previewEnd = min(visibleEnd, currentKm + 10.0)
             if (previewEnd > currentKm + 0.01) {
@@ -252,21 +245,33 @@ class ElevationProfileView @JvmOverloads constructor(
         fillPath.lineTo(x(visibleEnd), bottom)
         fillPath.lineTo(left, bottom)
         fillPath.close()
-        canvas.drawPath(fillPath, fillPaint)
 
-        // v0.33.0: colour each profile segment by cycling grade instead of one plain line.
-        // Blue=descent, green=flat, yellow=gentle climb, orange=medium climb,
-        // red=steep, purple=very steep.
+        // v0.33.6: the user wanted the grade colour to be an AREA, not only a thin line.
+        // Each coloured profile segment now drops vertically to the distance-axis baseline.
         if (sampled.size >= 2) {
             for (j in 1 until sampled.size) {
                 val a = sampled[j - 1]
                 val b = sampled[j]
                 val distanceM = (b.routeKm - a.routeKm) * 1000.0
                 val gradePct = if (distanceM > 2.0) (b.ele - a.ele) / distanceM * 100.0 else 0.0
-                gradePaint.color = gradeColor(gradePct)
+                val color = gradeColor(gradePct)
+
+                gradeFillPaint.color = color
+                gradeFillPaint.alpha = 78
+                val area = Path().apply {
+                    moveTo(x(a.routeKm), y(a.ele))
+                    lineTo(x(b.routeKm), y(b.ele))
+                    lineTo(x(b.routeKm), bottom)
+                    lineTo(x(a.routeKm), bottom)
+                    close()
+                }
+                canvas.drawPath(area, gradeFillPaint)
+
+                gradePaint.color = color
                 canvas.drawLine(x(a.routeKm), y(a.ele), x(b.routeKm), y(b.ele), gradePaint)
             }
         } else {
+            canvas.drawPath(fillPath, fillPaint)
             canvas.drawPath(fillPath, linePaint)
         }
 
@@ -295,12 +300,12 @@ class ElevationProfileView @JvmOverloads constructor(
     }
 
     private fun gradeColor(gradePct: Double): Int = when {
-        gradePct < -3.0 -> Color.rgb(66, 165, 245)   // descent
-        gradePct < 2.0 -> Color.rgb(76, 175, 80)     // flat / rolling
-        gradePct < 5.0 -> Color.rgb(253, 216, 53)    // gentle climb
-        gradePct < 8.0 -> Color.rgb(251, 140, 0)     // medium climb
-        gradePct < 12.0 -> Color.rgb(229, 57, 53)    // steep climb
-        else -> Color.rgb(142, 36, 170)               // very steep climb
+        gradePct < -3.0 -> Color.rgb(66, 165, 245)
+        gradePct < 2.0 -> Color.rgb(76, 175, 80)
+        gradePct < 5.0 -> Color.rgb(253, 216, 53)
+        gradePct < 8.0 -> Color.rgb(251, 140, 0)
+        gradePct < 12.0 -> Color.rgb(229, 57, 53)
+        else -> Color.rgb(142, 36, 170)
     }
 
     private fun drawReachLimits(
