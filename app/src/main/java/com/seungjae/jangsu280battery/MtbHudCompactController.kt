@@ -9,18 +9,20 @@ import android.view.ViewTreeObserver
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
+import android.widget.ViewFlipper
 import java.util.WeakHashMap
 
 /**
  * MTB HUD presentation controller.
  *
- * v0.33.7:
- * - CURRENT / ARRIVAL battery lines use exactly the same text size
- * - remove the redundant "다음 업힐" / "다음 지점" labels
- * - compact climb wording (10.8 km, 획고 203m)
- * - make finish/checkpoint typography match the climb card
- * - keep map debug/status text hidden from the riding HUD
+ * v0.33.8:
+ * - keep only GPS Hz in the upper-right corner of the riding map
+ * - hide MapLibre's compact info/attribution control and replace it with a tiny attribution label
+ * - enlarge the rider arrow
+ * - add an OSM / CyclOSM map selector in the lower-right corner
+ * - remove the redundant mobile-release pager page; deployment remains in Admin Center
  */
 object MtbHudCompactController {
     private val installed = WeakHashMap<View, Controller>()
@@ -53,6 +55,9 @@ object MtbHudCompactController {
         private val nextCheckpointDetail = root.findViewById<TextView?>(R.id.tvNextCheckpointDetail)
         private val nextClimb = root.findViewById<TextView?>(R.id.tvNextClimb)
         private val nextClimbDetail = root.findViewById<TextView?>(R.id.tvNextClimbDetail)
+        private val pager = root.findViewById<ViewFlipper?>(R.id.pagerFlipper)
+        private val pagerIndicator = root.findViewById<TextView?>(R.id.tvPagerIndicator)
+        private val mobileReleaseButton = root.findViewById<View?>(R.id.btnPageMobileRelease)
 
         private val topRow: ViewGroup? = hero?.getChildAt(0) as? ViewGroup
         private val neutralBackground: Drawable? = context.getDrawable(R.drawable.panel_bg)?.mutate()
@@ -61,10 +66,16 @@ object MtbHudCompactController {
         private val autoBackground: Drawable? = context.getDrawable(R.drawable.assist_mode_auto_bg)?.mutate()
         private val trailBackground: Drawable? = context.getDrawable(R.drawable.assist_mode_trail_bg)?.mutate()
         private val turboBackground: Drawable? = context.getDrawable(R.drawable.assist_mode_turbo_bg)?.mutate()
+        private val mapPrefs = context.getSharedPreferences("mtb_map_ui", Context.MODE_PRIVATE)
 
         private var lastCurrentSoc: Int? = null
         private var lastRenderedSummary = ""
         private var navCardsSwapped = false
+        private var mobileReleasePageRemoved = false
+        private var lastPagerChild = 0
+        private var mapPolishAttempts = 0
+        private var attributionView: TextView? = null
+        private var selectorView: TextView? = null
 
         fun attach() {
             batteryLabel?.visibility = View.GONE
@@ -84,27 +95,209 @@ object MtbHudCompactController {
 
             configureNavigationCards()
             installSmoothMap()
+            removeMobileReleasePage()
+            root.postDelayed({ removeMobileReleasePage() }, 350L)
             hero?.viewTreeObserver?.addOnPreDrawListener(this)
             applyPresentation()
         }
 
         private fun installSmoothMap() {
             val frame = root.findViewById<FrameLayout?>(R.id.layoutRideMapPreview) ?: return
-            if (frame.findViewWithTag<View>(RideSmoothMapWebView.TAG_SMOOTH_MAP) != null) return
+            var smooth = frame.findViewWithTag<View>(RideSmoothMapWebView.TAG_SMOOTH_MAP) as? RideSmoothMapWebView
+            if (smooth == null) {
+                frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { frame.removeView(it) }
+                frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP)?.let { frame.removeView(it) }
 
-            frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { frame.removeView(it) }
-            frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP)?.let { frame.removeView(it) }
-
-            mapStatus?.visibility = View.GONE
-            val insertAt = mapStatus?.let { frame.indexOfChild(it) }?.takeIf { it >= 0 } ?: frame.childCount
-            frame.addView(
-                RideSmoothMapWebView(root.context),
-                insertAt,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
+                mapStatus?.visibility = View.GONE
+                val insertAt = mapStatus?.let { frame.indexOfChild(it) }?.takeIf { it >= 0 } ?: frame.childCount
+                smooth = RideSmoothMapWebView(root.context)
+                frame.addView(
+                    smooth,
+                    insertAt,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                 )
-            )
+            }
+
+            installMapSelector(frame, smooth)
+            scheduleMapPolish(smooth)
+        }
+
+        private fun installMapSelector(frame: FrameLayout, map: RideSmoothMapWebView) {
+            if (selectorView == null) {
+                val selector = TextView(root.context).apply {
+                    text = "▦"
+                    textSize = 20f
+                    gravity = Gravity.CENTER
+                    setTextColor(context.getColor(R.color.text_primary))
+                    background = context.getDrawable(R.drawable.panel_bg)?.mutate()
+                    elevation = dp(5f).toFloat()
+                    contentDescription = "지도 종류 선택"
+                    setOnClickListener { showMapSelector(this, map) }
+                }
+                frame.addView(
+                    selector,
+                    FrameLayout.LayoutParams(dp(42f), dp(42f), Gravity.END or Gravity.BOTTOM).apply {
+                        marginEnd = dp(8f)
+                        bottomMargin = dp(8f)
+                    }
+                )
+                selectorView = selector
+            }
+
+            if (attributionView == null) {
+                val attribution = TextView(root.context).apply {
+                    textSize = 7f
+                    setTextColor(context.getColor(R.color.text_secondary))
+                    setPadding(dp(3f), dp(1f), dp(3f), dp(1f))
+                    background = context.getDrawable(R.drawable.panel_bg)?.mutate()
+                    alpha = 0.72f
+                }
+                frame.addView(
+                    attribution,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.START or Gravity.BOTTOM
+                    ).apply {
+                        marginStart = dp(4f)
+                        bottomMargin = dp(4f)
+                    }
+                )
+                attributionView = attribution
+            }
+            updateAttribution(currentMapStyle())
+        }
+
+        private fun showMapSelector(anchor: View, map: RideSmoothMapWebView) {
+            PopupMenu(root.context, anchor).apply {
+                menu.add(0, MAP_OSM, 0, "기본 지도 · OSM")
+                menu.add(0, MAP_CYCLOSM, 1, "자전거 지도 · CyclOSM")
+                setOnMenuItemClickListener { item ->
+                    val style = when (item.itemId) {
+                        MAP_CYCLOSM -> "cyclosm"
+                        else -> "osm"
+                    }
+                    mapPrefs.edit().putString(KEY_MAP_STYLE, style).apply()
+                    applyMapStyle(map, style)
+                    updateAttribution(style)
+                    true
+                }
+                show()
+            }
+        }
+
+        private fun currentMapStyle(): String =
+            mapPrefs.getString(KEY_MAP_STYLE, "osm")?.takeIf { it == "cyclosm" } ?: "osm"
+
+        private fun updateAttribution(style: String) {
+            attributionView?.text = if (style == "cyclosm") {
+                "© OpenStreetMap · CyclOSM"
+            } else {
+                "© OpenStreetMap"
+            }
+        }
+
+        private fun applyMapStyle(map: RideSmoothMapWebView, style: String) {
+            val tile = if (style == "cyclosm") {
+                "https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png"
+            } else {
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            }
+            val js = """
+                (function(){
+                  try {
+                    if (typeof map !== 'undefined' && map) {
+                      var src = map.getSource('osm');
+                      if (src && typeof src.setTiles === 'function') src.setTiles(['$tile']);
+                    }
+                  } catch(e) {}
+                })();
+            """.trimIndent()
+            runCatching { map.evaluateJavascript(js, null) }
+        }
+
+        private fun scheduleMapPolish(map: RideSmoothMapWebView) {
+            mapPolishAttempts = 0
+            fun attempt() {
+                if (!map.isAttachedToWindow || mapPolishAttempts >= 12) return
+                mapPolishAttempts++
+                val js = """
+                    (function(){
+                      try {
+                        var style = document.getElementById('rc-clean-style');
+                        if (!style) {
+                          style = document.createElement('style');
+                          style.id='rc-clean-style';
+                          style.textContent='.maplibregl-ctrl-bottom-right,.maplibregl-ctrl-attrib{display:none!important}.rider-triangle{width:45px!important;height:51px!important}.nav-chip{display:none!important}#fps{right:8px!important;top:8px!important;font-size:11px!important;padding:5px 9px!important}';
+                          document.head.appendChild(style);
+                        }
+                        var chip=document.getElementById('chip'); if(chip) chip.style.display='none';
+                        var fps=document.getElementById('fps');
+                        if(fps){
+                          var old=fps.textContent||'';
+                          var m=old.match(/GPS\\s+([0-9.]+Hz|대기)/i);
+                          fps.textContent=m?'GPS '+m[1]:'GPS 대기';
+                        }
+                        window.rcSetGpsRate=function(actual){
+                          var t=(actual>0)?actual.toFixed(1)+'Hz':'대기';
+                          var f=document.getElementById('fps'); if(f)f.textContent='GPS '+t;
+                        };
+                        return true;
+                      } catch(e) { return false; }
+                    })();
+                """.trimIndent()
+                runCatching {
+                    map.evaluateJavascript(js) { raw ->
+                        if (raw != "true") root.postDelayed({ attempt() }, 350L)
+                        else applyMapStyle(map, currentMapStyle())
+                    }
+                }.onFailure { root.postDelayed({ attempt() }, 350L) }
+            }
+            root.postDelayed({ attempt() }, 250L)
+        }
+
+        private fun removeMobileReleasePage() {
+            if (mobileReleasePageRemoved) return
+            val flipper = pager ?: return
+            val anchor = mobileReleaseButton ?: return
+            var direct: View = anchor
+            while (direct.parent is ViewGroup && direct.parent !== flipper) {
+                direct = direct.parent as View
+            }
+            if (direct.parent === flipper) {
+                flipper.removeView(direct)
+                mobileReleasePageRemoved = true
+                lastPagerChild = flipper.displayedChild.coerceIn(0, (flipper.childCount - 1).coerceAtLeast(0))
+                updateCompactPagerIndicator()
+            }
+        }
+
+        private fun updateCompactPagerIndicator() {
+            val flipper = pager ?: return
+            val indicator = pagerIndicator ?: return
+            val count = flipper.childCount
+            if (count <= 0) return
+            val lastIndex = count - 1
+            var current = flipper.displayedChild.coerceIn(0, lastIndex)
+
+            // MainActivity v0.33.7 still has a legacy maximum index of 6. After removing the
+            // deployment page there are six pages (0..5). Prevent a swipe past the last page
+            // from wrapping to page 0.
+            if (mobileReleasePageRemoved && lastPagerChild == lastIndex && current == 0) {
+                flipper.displayedChild = lastIndex
+                current = lastIndex
+            }
+            lastPagerChild = current
+
+            val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배터리")
+            val dots = (0 until count).joinToString("  ") { if (it == current) "●" else "○" }
+            val locked = indicator.text?.toString()?.contains("🔒") == true
+            val prefix = if (locked) "🔒 터치잠금   " else ""
+            val label = labels.getOrElse(current) { "" }
+            indicator.text = "$prefix$dots   $label"
         }
 
         private fun configureNavigationCards() {
@@ -133,10 +326,8 @@ object MtbHudCompactController {
                 }
             }
 
-            // The climb header itself is redundant; the first information line is the distance.
             nextClimb?.visibility = View.GONE
 
-            // Remove the static "다음 지점" label while keeping the dynamic destination name.
             (nextCheckpoint?.parent as? ViewGroup)?.let { card ->
                 for (i in 0 until card.childCount) {
                     val child = card.getChildAt(i)
@@ -164,7 +355,6 @@ object MtbHudCompactController {
                 setLineSpacing(0f, 0.92f)
             }
 
-            // v0.33.6 used 178dp. Keep the large type but reclaim some vertical room.
             val climbCard = nextClimb?.parent as? View
             val cpCard = nextCheckpoint?.parent as? View
             climbCard?.minimumHeight = dp(160f)
@@ -180,6 +370,7 @@ object MtbHudCompactController {
 
         override fun onPreDraw(): Boolean {
             applyPresentation()
+            updateCompactPagerIndicator()
             return true
         }
 
@@ -218,18 +409,11 @@ object MtbHudCompactController {
             val view = nextClimbDetail ?: return
             var text = view.text?.toString().orEmpty()
             if (text.isBlank()) return
-
-            // "10.8 km 후" -> "10.8 km"
             text = CLIMB_DISTANCE_AFTER_REGEX.replace(text) { m -> "${m.groupValues[1]} km" }
-
-            // "평균 6.0% · +203m" -> two compact lines.
             text = CLIMB_GAIN_REGEX.replace(text) { m ->
                 "평균 ${m.groupValues[1]}%\n획고 ${m.groupValues[2]}m"
             }
-
-            // Already-normalized v0.33.6 text: "획고 203미터" -> "획고 203m".
             text = CLIMB_GAIN_KOREAN_UNIT_REGEX.replace(text) { m -> "획고 ${m.groupValues[1]}m" }
-
             if (view.text?.toString() != text) view.text = text
         }
 
@@ -274,7 +458,6 @@ object MtbHudCompactController {
             val summary = "현재 $currentText\n도착 $arrivalText"
             if (summary == lastRenderedSummary && batteryView.text.toString() == summary) return
 
-            // Both floors deliberately use the exact same point size.
             batteryView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
             batteryView.maxLines = 2
             batteryView.gravity = Gravity.END
@@ -286,6 +469,10 @@ object MtbHudCompactController {
 
         private fun dp(value: Float): Int = (value * context.resources.displayMetrics.density).toInt()
     }
+
+    private const val KEY_MAP_STYLE = "map_style"
+    private const val MAP_OSM = 101
+    private const val MAP_CYCLOSM = 102
 
     private val PERCENT_REGEX = Regex("(\\d{1,3})%")
     private val ARRIVAL_REGEX = Regex("예상\\s*(\\d{1,3})%")
