@@ -16,8 +16,7 @@ import java.util.WeakHashMap
 
 /**
  * MTB HUD presentation controller.
- * v0.33.3 also swaps the earlier live-map prototype for the Smart GPS map without changing
- * the proven profile/map dimensions.
+ * v0.33.5 swaps the previous Smart GPS prototype for the 1 Hz GPS / 24 fps visual interpolator.
  */
 object MtbHudCompactController {
     private val installed = WeakHashMap<View, Controller>()
@@ -72,23 +71,22 @@ object MtbHudCompactController {
                 }
             }
 
-            installSmartMap()
+            installSmoothMap()
             hero?.viewTreeObserver?.addOnPreDrawListener(this)
             applyPresentation()
         }
 
-        private fun installSmartMap() {
+        private fun installSmoothMap() {
             val frame = root.findViewById<FrameLayout?>(R.id.layoutRideMapPreview) ?: return
-            if (frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP) != null) return
+            if (frame.findViewWithTag<View>(RideSmoothMapWebView.TAG_SMOOTH_MAP) != null) return
 
-            frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { old ->
-                frame.removeView(old)
-            }
+            frame.findViewWithTag<View>(RideLiveMapWebView.TAG_LIVE_MAP)?.let { frame.removeView(it) }
+            frame.findViewWithTag<View>(RideSmartMapWebView.TAG_SMART_MAP)?.let { frame.removeView(it) }
 
             val status = frame.findViewById<View?>(R.id.tvRideMapPreviewStatus)
             val insertAt = status?.let { frame.indexOfChild(it) }?.takeIf { it >= 0 } ?: frame.childCount
             frame.addView(
-                RideSmartMapWebView(root.context),
+                RideSmoothMapWebView(root.context),
                 insertAt,
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
