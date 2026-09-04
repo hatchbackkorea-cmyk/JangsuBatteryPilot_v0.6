@@ -10,6 +10,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.ViewFlipper
 import java.util.WeakHashMap
@@ -17,10 +18,11 @@ import java.util.WeakHashMap
 /**
  * MTB HUD presentation controller.
  *
- * v0.33.9:
- * - preserve v0.33.8 map cleanup and OSM / CyclOSM selector
- * - before live GNSS is available, prime the map from Android's system last-known location
- * - if the system has no cached location, use the app-side startup fallback cache
+ * v0.33.10:
+ * - preserve map cleanup / OSM-CyclOSM selector / last-known startup location
+ * - compact the settings page into four one-line dropdown buttons
+ * - move experiment/update controls out of the normal settings page
+ * - hide non-essential altitude / GPS-off-course explanatory text on the course page
  */
 object MtbHudCompactController {
     private val installed = WeakHashMap<View, Controller>()
@@ -74,6 +76,8 @@ object MtbHudCompactController {
         private var mapPolishAttempts = 0
         private var attributionView: TextView? = null
         private var selectorView: TextView? = null
+        private var settingsCompacted = false
+        private var courseTextCompacted = false
 
         fun attach() {
             batteryLabel?.visibility = View.GONE
@@ -94,7 +98,13 @@ object MtbHudCompactController {
             configureNavigationCards()
             installSmoothMap()
             removeMobileReleasePage()
-            root.postDelayed({ removeMobileReleasePage() }, 350L)
+            compactCoursePageText()
+            compactSettingsPage()
+            root.postDelayed({
+                removeMobileReleasePage()
+                compactCoursePageText()
+                compactSettingsPage()
+            }, 350L)
             hero?.viewTreeObserver?.addOnPreDrawListener(this)
             applyPresentation()
         }
@@ -256,6 +266,156 @@ object MtbHudCompactController {
                 }.onFailure { root.postDelayed({ attempt() }, 350L) }
             }
             root.postDelayed({ attempt() }, 250L)
+        }
+
+        private fun compactCoursePageText() {
+            if (courseTextCompacted) return
+            val flipper = pager ?: return
+            if (flipper.childCount < 2) return
+            val coursePage = flipper.getChildAt(1)
+            walk(coursePage) { view ->
+                if (view is TextView && view.visibility == View.VISIBLE) {
+                    val text = view.text?.toString().orEmpty()
+                    if (text.contains("고도", ignoreCase = true) ||
+                        text.contains("GPS", ignoreCase = true) ||
+                        text.contains("이탈", ignoreCase = true)) {
+                        view.visibility = View.GONE
+                    }
+                }
+            }
+            courseTextCompacted = true
+        }
+
+        private fun compactSettingsPage() {
+            if (settingsCompacted) return
+            val distanceSeek = root.findViewById<SeekBar?>(R.id.seekPageDistanceInterval) ?: return
+            val timeSeek = root.findViewById<SeekBar?>(R.id.seekPageTimeInterval) ?: return
+            val finishSeek = root.findViewById<SeekBar?>(R.id.seekPageFinishTarget) ?: return
+            val hardSeek = root.findViewById<SeekBar?>(R.id.seekPageHardReserve) ?: return
+            val distanceLabel = root.findViewById<TextView?>(R.id.tvPageDistanceInterval)
+            val timeLabel = root.findViewById<TextView?>(R.id.tvPageTimeInterval)
+            val finishLabel = root.findViewById<TextView?>(R.id.tvPageFinishTarget)
+            val hardLabel = root.findViewById<TextView?>(R.id.tvPageHardReserve)
+
+            val settingsCard = distanceSeek.parent as? LinearLayout ?: return
+            val row = LinearLayout(root.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(0, dp(2f), 0, dp(2f))
+            }
+
+            fun menuButton(): Button = Button(root.context).apply {
+                minWidth = 0
+                minHeight = 0
+                textSize = 9.5f
+                isAllCaps = false
+                setPadding(dp(2f), 0, dp(2f), 0)
+            }
+
+            val distanceBtn = menuButton()
+            val timeBtn = menuButton()
+            val finishBtn = menuButton()
+            val hardBtn = menuButton()
+            listOf(distanceBtn, timeBtn, finishBtn, hardBtn).forEachIndexed { index, button ->
+                row.addView(
+                    button,
+                    LinearLayout.LayoutParams(0, dp(42f), 1f).apply {
+                        if (index > 0) marginStart = dp(3f)
+                    }
+                )
+            }
+
+            fun refreshButtons() {
+                val d = distanceSeek.progress
+                val t = timeSeek.progress
+                val f = finishSeek.progress + 1
+                val h = hardSeek.progress + 5
+                distanceBtn.text = if (d == 0) "거리 OFF" else "거리 ${d}k"
+                timeBtn.text = if (t == 0) "시간 OFF" else "시간 ${t}m"
+                finishBtn.text = "기준잔량 $f%"
+                hardBtn.text = "긴급충전 $h%"
+            }
+
+            distanceBtn.setOnClickListener {
+                PopupMenu(root.context, distanceBtn).apply {
+                    for (v in 0..50) menu.add(if (v == 0) "사용 안 함" else "$v km마다").setOnMenuItemClickListener {
+                        distanceSeek.progress = v
+                        refreshButtons()
+                        true
+                    }
+                    show()
+                }
+            }
+            timeBtn.setOnClickListener {
+                PopupMenu(root.context, timeBtn).apply {
+                    for (v in 0..120) menu.add(if (v == 0) "사용 안 함" else "$v 분마다").setOnMenuItemClickListener {
+                        timeSeek.progress = v
+                        refreshButtons()
+                        true
+                    }
+                    show()
+                }
+            }
+            finishBtn.setOnClickListener {
+                PopupMenu(root.context, finishBtn).apply {
+                    for (pct in 1..99) menu.add("$pct%").setOnMenuItemClickListener {
+                        finishSeek.progress = pct - 1
+                        refreshButtons()
+                        true
+                    }
+                    show()
+                }
+            }
+            hardBtn.setOnClickListener {
+                PopupMenu(root.context, hardBtn).apply {
+                    for (pct in 5..15) menu.add("$pct%").setOnMenuItemClickListener {
+                        hardSeek.progress = pct - 5
+                        refreshButtons()
+                        true
+                    }
+                    show()
+                }
+            }
+
+            val insertAt = listOfNotNull(distanceLabel, distanceSeek).map { settingsCard.indexOfChild(it) }.filter { it >= 0 }.minOrNull() ?: 0
+            settingsCard.addView(row, insertAt)
+            listOf(distanceLabel, distanceSeek, timeLabel, timeSeek, finishLabel, finishSeek, hardLabel, hardSeek).forEach {
+                it?.visibility = View.GONE
+            }
+
+            // The whole normal-settings experiment/update card moves to Admin Center.
+            root.findViewById<View?>(R.id.btnPageBleDiagnostic)?.let { diagnostic ->
+                var card: View = diagnostic
+                var parent = card.parent as? ViewGroup
+                while (parent != null && parent !== (pager?.getChildAt(2) as? ViewGroup)) {
+                    if (parent is LinearLayout && parent.childCount >= 3) {
+                        val hasSram = containsViewId(parent, R.id.btnPageSramDiagnostic)
+                        val hasUpdate = containsViewId(parent, R.id.btnPageCheckUpdate)
+                        if (hasSram || hasUpdate) {
+                            parent.visibility = View.GONE
+                            break
+                        }
+                    }
+                    card = parent
+                    parent = card.parent as? ViewGroup
+                }
+            }
+
+            refreshButtons()
+            settingsCompacted = true
+        }
+
+        private fun containsViewId(group: ViewGroup, id: Int): Boolean {
+            var found = false
+            walk(group) { if (it.id == id) found = true }
+            return found
+        }
+
+        private fun walk(view: View, block: (View) -> Unit) {
+            block(view)
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) walk(view.getChildAt(i), block)
+            }
         }
 
         private fun removeMobileReleasePage() {
