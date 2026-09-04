@@ -4,19 +4,23 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Handler
+import android.os.Looper
 import java.util.Locale
 
 /**
  * Display-only startup location primer.
  *
- * Android keeps a last-known location cache that can have been populated before this app starts
- * by the system or another location-using app. When the rider opens Copilot indoors and a fresh
- * GNSS fix is not immediately available, show that cached position first instead of an empty map.
- * A tiny app-side fallback cache is also kept for cases where Android returns no system cache.
+ * Startup order:
+ * 1) Android system last-known location
+ * 2) Copilot's own last startup/location cache
+ * 3) fresh NETWORK/PASSIVE location (cell tower + Wi-Fi assisted)
  *
- * This never writes into RideService logs, learning data, distance, or battery prediction.
- * The normal live GPS stream replaces this visual position as soon as it arrives.
+ * RideSmoothMapWebView keeps requesting real GPS in parallel. As soon as a GPS fix arrives,
+ * the normal live navigation path takes over. Bootstrap locations never enter RideService logs,
+ * learning data, distance, battery prediction, or measured GPS Hz.
  */
 object StartupLocationPrimer {
     private const val PREFS = "startup_location_cache"
@@ -26,12 +30,22 @@ object StartupLocationPrimer {
     private const val KEY_ACCURACY = "accuracy"
     private const val KEY_BEARING = "bearing"
     private const val KEY_HAS_BEARING = "has_bearing"
+    private const val BOOTSTRAP_LISTEN_MS = 20_000L
+    private const val MAX_NETWORK_ACCURACY_M = 2_500f
 
     fun prime(context: Context, map: RideSmoothMapWebView) {
         if (!hasLocationPermission(context)) return
-        val location = newestSystemLastKnown(context) ?: readFallback(context) ?: return
-        saveFallback(context, location)
-        injectWhenReady(map, location, 0)
+
+        // Show something immediately if Android or Copilot already knows a location.
+        val cached = newestSystemLastKnown(context) ?: readFallback(context)
+        if (cached != null) {
+            remember(context, cached)
+            injectWhenReady(map, cached, 0)
+        }
+
+        // GPS is requested by RideSmoothMapWebView. In parallel, ask Android's network/passive
+        // providers for a short startup window so an indoor launch can still get a usable position.
+        requestIndoorBootstrap(context, map)
     }
 
     private fun hasLocationPermission(context: Context): Boolean =
@@ -58,11 +72,72 @@ object StartupLocationPrimer {
         )
     }
 
+    private fun requestIndoorBootstrap(context: Context, map: RideSmoothMapWebView) {
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
+        if (!hasLocationPermission(context)) return
+
+        var firstFreshInjected = false
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                if (!isUsable(location)) return
+                if (location.hasAccuracy() && location.accuracy > MAX_NETWORK_ACCURACY_M) return
+
+                // Persist every usable startup fix. This gives us our own fallback next launch,
+                // even if Android happens to return an empty last-known cache later.
+                remember(context, location)
+
+                // Only the first fresh assisted fix is injected. Real GPS continues independently
+                // in RideSmoothMapWebView and will overwrite this visual anchor as soon as it arrives.
+                if (!firstFreshInjected) {
+                    firstFreshInjected = true
+                    injectWhenReady(map, location, 0)
+                }
+            }
+        }
+
+        var registered = false
+        try {
+            if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                manager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    1000L,
+                    0f,
+                    listener,
+                    Looper.getMainLooper()
+                )
+                registered = true
+            }
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
+        }
+
+        // Passive updates can contain a location already being produced by Android/system apps,
+        // and add no extra GNSS demand of their own.
+        try {
+            manager.requestLocationUpdates(
+                LocationManager.PASSIVE_PROVIDER,
+                1000L,
+                0f,
+                listener,
+                Looper.getMainLooper()
+            )
+            registered = true
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
+        }
+
+        if (registered) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                runCatching { manager.removeUpdates(listener) }
+            }, BOOTSTRAP_LISTEN_MS)
+        }
+    }
+
     private fun isUsable(location: Location): Boolean =
         location.latitude.isFinite() && location.longitude.isFinite() &&
             location.latitude in -90.0..90.0 && location.longitude in -180.0..180.0
 
-    private fun saveFallback(context: Context, location: Location) {
+    fun remember(context: Context, location: Location) {
         if (!isUsable(location)) return
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putLong(KEY_LAT, java.lang.Double.doubleToRawLongBits(location.latitude))
@@ -94,7 +169,7 @@ object StartupLocationPrimer {
     }
 
     private fun injectWhenReady(map: RideSmoothMapWebView, location: Location, attempt: Int) {
-        if (!map.isAttachedToWindow || attempt > 20) return
+        if (!map.isAttachedToWindow || attempt > 24) return
         map.evaluateJavascript("typeof window.rcSetFix === 'function'") { raw ->
             if (raw == "true") {
                 val heading = if (location.hasBearing()) location.bearing.toDouble() else 0.0
