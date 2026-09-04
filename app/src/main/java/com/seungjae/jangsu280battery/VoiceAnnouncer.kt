@@ -1,13 +1,22 @@
 package com.seungjae.jangsu280battery
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
-    private val tts = TextToSpeech(context.applicationContext, this)
+    private val appContext = context.applicationContext
+    private val tts = TextToSpeech(appContext, this)
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val volumeLock = Any()
+    private val activeUtterances = mutableSetOf<String>()
+    private var originalMusicVolume: Int? = null
+
     private var ready = false
     private var lastPeriodicKm = 0.0
     private var lastPeriodicAtMs = System.currentTimeMillis()
@@ -24,6 +33,70 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
             val result = tts.setLanguage(Locale.KOREA)
             ready = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
             tts.setSpeechRate(1.03f)
+            runCatching {
+                tts.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+            }
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    utteranceId?.let { boostVoiceVolume(it) }
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    utteranceId?.let { releaseVoiceVolume(it) }
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    utteranceId?.let { releaseVoiceVolume(it) }
+                }
+
+                override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                    utteranceId?.let { releaseVoiceVolume(it) }
+                }
+            })
+        }
+    }
+
+    /**
+     * v0.33.3: riding guidance temporarily uses the top media volume so the phone's external
+     * speaker is easier to hear outdoors. The user's previous volume is restored after TTS.
+     * This never attempts to exceed the hardware/Android maximum.
+     */
+    private fun boostVoiceVolume(utteranceId: String) {
+        synchronized(volumeLock) {
+            activeUtterances += utteranceId
+            if (originalMusicVolume == null) {
+                originalMusicVolume = runCatching { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrNull()
+            }
+            runCatching {
+                val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+            }
+        }
+    }
+
+    private fun releaseVoiceVolume(utteranceId: String) {
+        synchronized(volumeLock) {
+            activeUtterances.remove(utteranceId)
+            if (activeUtterances.isEmpty()) restoreVoiceVolumeLocked()
+        }
+    }
+
+    private fun restoreVoiceVolumeLocked() {
+        val original = originalMusicVolume ?: return
+        runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, original, 0) }
+        originalMusicVolume = null
+    }
+
+    private fun forceRestoreVoiceVolume() {
+        synchronized(volumeLock) {
+            activeUtterances.clear()
+            restoreVoiceVolumeLocked()
         }
     }
 
@@ -45,6 +118,7 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
         lastRiskLabel = ""
         announced.clear()
         tts.stop()
+        forceRestoreVoiceVolume()
     }
 
     fun speakNow(text: String) {
@@ -179,6 +253,7 @@ class VoiceAnnouncer(context: Context) : TextToSpeech.OnInitListener {
 
     fun shutdown() {
         tts.stop()
+        forceRestoreVoiceVolume()
         tts.shutdown()
     }
 }

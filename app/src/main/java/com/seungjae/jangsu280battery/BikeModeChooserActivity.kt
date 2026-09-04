@@ -52,7 +52,6 @@ class BikeModeChooserActivity : Activity() {
             else refreshAdminVisibility()
         }
 
-        // Hidden bootstrap: non-admin phones never show an admin menu.
         tvVersion.setOnLongClickListener {
             showAdminPhonePairDialog()
             true
@@ -61,12 +60,14 @@ class BikeModeChooserActivity : Activity() {
         refreshServerHealth()
         repairPreferredPcServerIfNeeded(force = true)
         UpdateManager.resumePendingInstall(this)
-        // 일반 사용자도 앱 실행 시 하루 1회 안정판 업데이트를 자동 확인한다.
         UpdateManager.maybeCheckOnLaunch(this)
     }
 
     override fun onResume() {
         super.onResume()
+        // v0.33.3: swiping the task away intentionally stops the foreground RideService.
+        // If a ride session was still marked active, reopening the app resumes that same session.
+        resumeActiveRideServiceIfNeeded()
         UpdateManager.resumePendingInstall(this)
         refreshAdminVisibility()
         refreshServerHealth()
@@ -83,11 +84,19 @@ class BikeModeChooserActivity : Activity() {
         }
     }
 
-    /**
-     * v0.32.8 self-heal: if the phone still points at an older RCC server, read the
-     * current public PC URL from rcc-server.json and adopt it only after /api/health
-     * confirms the PC entrypoint. Existing Device Token/profile settings are preserved.
-     */
+    private fun resumeActiveRideServiceIfNeeded() {
+        val store = runCatching { RideLogManager(this) }.getOrNull() ?: return
+        if (!store.isActive()) return
+        val intent = Intent(this, RideService::class.java).apply { action = RideService.ACTION_START }
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        }
+    }
+
     private fun repairPreferredPcServerIfNeeded(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && now - lastServerRepairAttemptMs < 30_000L) return
@@ -205,7 +214,6 @@ class BikeModeChooserActivity : Activity() {
 
         Thread {
             val result = runCatching { probePcHealth(base) }
-
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 val health = result.getOrNull()

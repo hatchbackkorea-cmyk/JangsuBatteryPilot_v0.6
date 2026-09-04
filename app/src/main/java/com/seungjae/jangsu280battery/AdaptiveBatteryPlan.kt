@@ -51,9 +51,6 @@ class AdaptiveBatteryPlan(
 
         val plannedLong = base.plannedConsumption(startKm, latest.routeKm)
         val actualLong = startPct - latest.percent
-        // 완충 직후 100→99%는 BMS 표시 상단 버퍼/라운딩 때문에 다른 1%보다 오래 유지될 수 있다.
-        // 이 1%만으로 소비계수를 만들면 초반 예상거리를 과도하게 늘릴 수 있으므로 100% 출발 epoch는
-        // 최소 2% 하락(98% 도달) 뒤부터 실시간 소비 보정을 시작한다.
         val minimumReliableDrop = if (startPct >= 99.5) 2.0 else 0.8
         if (plannedLong < 1.0 || actualLong < minimumReliableDrop) return null
         var longFactor = actualLong / plannedLong
@@ -103,6 +100,30 @@ class AdaptiveBatteryPlan(
         )
     }
 
+    /**
+     * v0.33.3 future-terrain guard.
+     *
+     * A very efficient recent section (often descent/flat) must not discount a known upcoming
+     * GPX climb by the same amount. base.plannedConsumption already contains the remaining
+     * distance/ascent profile, so high planned %/km is treated as a terrain-intensive section
+     * and the optimistic live calibration gets a conservative floor.
+     */
+    private fun futureFactor(currentKm: Double, targetKm: Double, plannedDrop: Double): Double {
+        val raw = calibration(currentKm)?.factor ?: 1.0
+        if (raw >= 1.0) return raw.coerceAtMost(1.80)
+        val spanKm = (targetKm - currentKm).coerceAtLeast(0.05)
+        val plannedPctPerKm = plannedDrop / spanKm
+        val floor = when {
+            plannedPctPerKm >= 1.60 -> 0.97
+            plannedPctPerKm >= 1.10 -> 0.93
+            plannedPctPerKm >= 0.80 -> 0.90
+            spanKm >= 8.0 -> 0.88
+            spanKm >= 4.0 -> 0.85
+            else -> 0.82
+        }
+        return raw.coerceAtLeast(floor)
+    }
+
     fun forecast(currentKm: Double, targetKm: Double): BatteryEstimate {
         val current = currentKm.coerceAtLeast(0.0)
         val target = targetKm.coerceAtLeast(current)
@@ -110,10 +131,10 @@ class AdaptiveBatteryPlan(
         val currentEstimate = estimate(current)
         val plannedDrop = base.plannedConsumption(current, target)
         if (plannedDrop <= 0.0 && target > current + 0.2) return base.estimate(target)
-        val factor = calibration(current)?.factor ?: 1.0
+        val factor = futureFactor(current, target, plannedDrop)
         return BatteryEstimate(
             percent = (currentEstimate.percent - plannedDrop * factor).coerceIn(0.0, 100.0),
-            note = "현재 소비율 ${String.format(java.util.Locale.US, "%.2f", factor)}배 적용",
+            note = "남은 GPX 지형 반영 · 미래 소비계수 ${String.format(java.util.Locale.US, "%.2f", factor)}x",
             calibrated = currentEstimate.calibrated || factor != 1.0
         )
     }
@@ -134,8 +155,6 @@ class AdaptiveBatteryPlan(
         val cp = base.currentOrNextCheckpoint(currentKm) ?: base.checkpoints.last()
         val isChargeTarget = cp.chargeToPct != null
         val targetName = if (isChargeTarget) "다음 충전 · ${cp.name}" else "종점"
-        // 사용자 지정 충전소의 도착 최소잔량은 전역 목표잔량을 사용한다.
-        // 장수 내장 고정 계획은 기존 도착 계획값을 유지한다.
         val targetPct = if (isChargeTarget && base.isLegacyPlannedCourse) cp.arrivalPct else finishTargetPct.coerceIn(1.0, 99.0)
         val targetKm = cp.km
         val predicted = forecast(currentKm, targetKm).percent
@@ -145,7 +164,8 @@ class AdaptiveBatteryPlan(
             diff >= -2.0 -> "주의"
             else -> "위험"
         }
-        return ReserveStatus(label, predicted, targetPct, diff, targetName, calibration(currentKm)?.factor ?: 1.0)
+        val plannedDrop = base.plannedConsumption(currentKm.coerceAtLeast(0.0), targetKm.coerceAtLeast(currentKm))
+        return ReserveStatus(label, predicted, targetPct, diff, targetName, futureFactor(currentKm, targetKm, plannedDrop))
     }
 
     fun latestStatus(currentKm: Double): ActualBatteryStatus? {
@@ -165,5 +185,4 @@ class AdaptiveBatteryPlan(
     fun predictedTotalUsePct(): Double = base.predictedTotalUsePct()
     fun modelLabel(): String = base.modelLabel()
     fun isLegacyPlan(): Boolean = base.isLegacyPlannedCourse
-
 }
