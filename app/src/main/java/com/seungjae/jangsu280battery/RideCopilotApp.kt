@@ -7,21 +7,36 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Switch
 import android.widget.TextView
+import com.kakao.vectormap.KakaoMapSdk
 
 /**
- * v0.33.4: injects the voice-volume boost control into both settings surfaces without
- * duplicating the preference logic in MainActivity and SettingsActivity.
+ * Application-level UI helpers plus Kakao Maps SDK initialization.
  */
 class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.KAKAO_NATIVE_APP_KEY.isNotBlank()) {
+            KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_APP_KEY)
+        }
         registerActivityLifecycleCallbacks(this)
     }
 
     override fun onActivityResumed(activity: Activity) {
         when (activity) {
-            is MainActivity, is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
+            is MainActivity -> activity.window.decorView.post {
+                installVoiceBoostControl(activity)
+                RideMapProviderController.install(activity)
+            }
+            is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
         }
+    }
+
+    override fun onActivityPaused(activity: Activity) {
+        if (activity is MainActivity) RideMapProviderController.pause(activity)
+    }
+
+    override fun onActivityDestroyed(activity: Activity) {
+        if (activity is MainActivity) RideMapProviderController.destroy(activity)
     }
 
     private fun installVoiceBoostControl(activity: Activity) {
@@ -63,10 +78,8 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
     override fun onActivityStarted(activity: Activity) = Unit
-    override fun onActivityPaused(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-    override fun onActivityDestroyed(activity: Activity) = Unit
 
     companion object {
         private const val TAG_SWITCH = "voice_volume_boost_switch_v0334"
