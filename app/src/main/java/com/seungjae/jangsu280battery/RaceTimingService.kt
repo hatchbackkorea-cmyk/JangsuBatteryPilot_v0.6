@@ -11,6 +11,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
@@ -18,7 +19,8 @@ import java.util.UUID
 import kotlin.math.max
 
 /**
- * Foreground RACE timing owner. Timing continues with the screen off and survives Activity recreation.
+ * Foreground RACE timing owner. Timing continues when the Activity is closed or the screen is off.
+ * Swiping the app away still stops the service through AndroidManifest stopWithTask=true.
  * Raw GPS is journaled locally; FINISH is saved locally before any server upload.
  */
 class RaceTimingService : Service(), LocationListener {
@@ -34,6 +36,7 @@ class RaceTimingService : Service(), LocationListener {
     private lateinit var locationManager: LocationManager
     private lateinit var store: RaceDataStore
     private lateinit var client: RaceServerClient
+    private var wakeLock: PowerManager.WakeLock? = null
     private var config: RaceEventConfig? = null
     private var course: CourseData? = null
     private var courseId = ""
@@ -77,6 +80,16 @@ class RaceTimingService : Service(), LocationListener {
         return START_STICKY
     }
 
+    private fun acquireTimingWakeLock() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        val wl = wakeLock ?: pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:RACE_TIMING").also { wakeLock = it }
+        if (!wl.isHeld) runCatching { wl.acquire() }
+    }
+
+    private fun releaseTimingWakeLock() {
+        wakeLock?.let { if (it.isHeld) runCatching { it.release() } }
+    }
+
     private fun arm(input: RaceEventConfig, cid: String) {
         val loaded = runCatching { CourseRepository(this).loadCourse(cid) }.getOrElse {
             writeError("코스를 열 수 없습니다: ${it.message}"); return
@@ -89,7 +102,8 @@ class RaceTimingService : Service(), LocationListener {
         sectors.clear(); referenceSamples.clear(); lastReferenceM = -1000.0; lastReferenceT = -1000L
         maxSpeedKph = 0.0; maxAccuracyM = 0.0; maxOffRouteM = 0.0; jumpCount = 0; lastLiveSendAt = 0L
         store.saveActiveConfig(normalized, cid, normalized.reference)
-        writeSnapshot(routeM = 0.0, accuracy = 0.0, delta = null, serverStatus = if (normalized.eventCode == "PRACTICE") "연습 · 로컬 기록" else "LIVE 준비")
+        writeSnapshot(routeM = 0.0, accuracy = 0.0, delta = null, serverStatus = if (normalized.eventCode == "PRACTICE") "연습 · 로컬 기록" else "START 대기")
+        acquireTimingWakeLock()
         startForeground(NOTIFICATION_ID, notification("RACE 준비 · START 게이트를 통과하면 자동 계측"))
         requestGps()
         Thread { runCatching { client.flushPending() } }.start()
@@ -104,6 +118,7 @@ class RaceTimingService : Service(), LocationListener {
         state = snap.state; runId = snap.runId; runNumber = snap.runNumber; startAt = snap.startedAtMs; lastGateAt = snap.lastGateAtMs
         nextGateIndex = snap.nextGateIndex; sectors.clear(); sectors.addAll(snap.sectors)
         maxSpeedKph = snap.maxSpeedKph; maxAccuracyM = snap.maxGpsAccuracyM; maxOffRouteM = snap.maxOffRouteM; jumpCount = snap.jumpCount
+        acquireTimingWakeLock()
         startForeground(NOTIFICATION_ID, notification(if (state == "RUNNING") "RACE 계측 복구 · 기록 중" else "RACE 준비 복구"))
         requestGps()
     }
@@ -169,7 +184,7 @@ class RaceTimingService : Service(), LocationListener {
         sectors += result; lastGateAt = crossAt; nextGateIndex++
         if (cfg.eventCode != "PRACTICE") {
             val payload = JSONObject().apply {
-                put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("sector_index", idx)
+                put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("started_at_ms", startAt); put("sector_index", idx)
                 put("sector_name", result.name); put("sector_ms", result.sectorMs); put("split_ms", result.splitMs); put("crossed_at_ms", crossAt)
             }
             store.enqueue("SECTOR", cfg.eventCode, payload)
@@ -184,24 +199,17 @@ class RaceTimingService : Service(), LocationListener {
         val elapsed = (crossAt - startAt).coerceAtLeast(0L)
         referenceSamples += RaceReferencePoint(cfg.distanceM.coerceAtLeast(routeM), elapsed)
         val validation = validationStatus()
-        val summary = RaceRunSummary(
-            runId, runNumber, cfg.eventCode, cfg.name, courseId, loaded.name, startAt, crossAt, elapsed, validation,
-            sectors.toList(), referenceSamples.distinctBy { it.routeM.toInt() }, maxSpeedKph, maxAccuracyM, maxOffRouteM
-        )
-        // The official local result is durable before attempting any network operation.
+        val summary = RaceRunSummary(runId, runNumber, cfg.eventCode, cfg.name, courseId, loaded.name, startAt, crossAt, elapsed, validation, sectors.toList(), referenceSamples.distinctBy { it.routeM.toInt() }, maxSpeedKph, maxAccuracyM, maxOffRouteM)
         store.saveCompleted(summary)
         if (cfg.eventCode != "PRACTICE") {
             val profile = RaceProfileStore.profile(this)
-            val payload = summary.toJson().apply {
-                put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname)
-            }
+            val payload = summary.toJson().apply { put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname) }
             store.enqueue("FINISH", cfg.eventCode, payload)
             Thread { runCatching { client.flushPending() } }.start()
         }
         state = "FINISHED"
-        writeSnapshot(cfg.distanceM, maxAccuracyM, null, serverStatus = if (cfg.eventCode == "PRACTICE") "✓ 휴대폰 저장 완료" else "✓ 휴대폰 저장 완료 · 서버 동기화 중")
-        store.clearActiveConfig()
-        runCatching { locationManager.removeUpdates(this) }
+        writeSnapshot(cfg.distanceM, maxAccuracyM, null, serverStatus = if (cfg.eventCode == "PRACTICE") "✓ 휴대폰 저장 완료" else "✓ 휴대폰 저장 완료 · 서버 분류/동기화 중")
+        store.clearActiveConfig(); runCatching { locationManager.removeUpdates(this) }; releaseTimingWakeLock()
         updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation")
         stopForeground(false); stopSelf()
     }
@@ -213,7 +221,7 @@ class RaceTimingService : Service(), LocationListener {
         val joined = store.joined(cfg.eventCode) ?: return
         val profile = RaceProfileStore.profile(this)
         val payload = JSONObject().apply {
-            put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("state", state)
+            put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("state", state); put("started_at_ms", startAt)
             put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname)
             put("route_m", routeM); put("elapsed_ms", (location.time - startAt).coerceAtLeast(0L)); put("sector_index", sectors.size + 1)
             put("speed_kph", if (location.hasSpeed()) location.speed * 3.6 else 0.0); put("gps_accuracy_m", if (location.hasAccuracy()) location.accuracy else 99f)
@@ -232,34 +240,20 @@ class RaceTimingService : Service(), LocationListener {
         val cfg = config
         val elapsed = if (state == "RUNNING" && startAt > 0L) (System.currentTimeMillis() - startAt).coerceAtLeast(0L) else store.snapshot().elapsedMs
         val currentName = if (cfg != null && nextGateIndex in cfg.gates.indices) cfg.gates[nextGateIndex].name else ""
-        store.writeSnapshot(RaceDataStore.Snapshot(
-            state = state, eventCode = cfg?.eventCode.orEmpty(), eventName = cfg?.name.orEmpty(), courseId = courseId, courseName = course?.name.orEmpty(),
-            runId = runId, runNumber = runNumber, startedAtMs = startAt, lastGateAtMs = lastGateAt, elapsedMs = elapsed,
-            routeM = routeM, totalM = cfg?.distanceM ?: 0.0, deltaMs = delta, nextGateIndex = nextGateIndex, currentSector = currentName,
-            gpsAccuracyM = accuracy, maxSpeedKph = maxSpeedKph, maxGpsAccuracyM = maxAccuracyM, maxOffRouteM = maxOffRouteM,
-            jumpCount = jumpCount, validation = validationStatus(), sectors = sectors.toList(), serverStatus = serverStatus ?: store.snapshot().serverStatus
-        ))
+        store.writeSnapshot(RaceDataStore.Snapshot(state = state, eventCode = cfg?.eventCode.orEmpty(), eventName = cfg?.name.orEmpty(), courseId = courseId, courseName = course?.name.orEmpty(), runId = runId, runNumber = runNumber, startedAtMs = startAt, lastGateAtMs = lastGateAt, elapsedMs = elapsed, routeM = routeM, totalM = cfg?.distanceM ?: 0.0, deltaMs = delta, nextGateIndex = nextGateIndex, currentSector = currentName, gpsAccuracyM = accuracy, maxSpeedKph = maxSpeedKph, maxGpsAccuracyM = maxAccuracyM, maxOffRouteM = maxOffRouteM, jumpCount = jumpCount, validation = validationStatus(), sectors = sectors.toList(), serverStatus = serverStatus ?: store.snapshot().serverStatus))
     }
 
-    private fun writeError(message: String) {
-        store.writeSnapshot(store.snapshot().copy(state = "STOPPED", serverStatus = message))
-    }
+    private fun writeError(message: String) { releaseTimingWakeLock(); store.writeSnapshot(store.snapshot().copy(state = "STOPPED", serverStatus = message)) }
 
     private fun stopRace() {
-        runCatching { locationManager.removeUpdates(this) }
+        runCatching { locationManager.removeUpdates(this) }; releaseTimingWakeLock()
         state = "STOPPED"; store.writeSnapshot(store.snapshot().copy(state = "STOPPED", serverStatus = "계측 정지")); store.clearActiveConfig()
         stopForeground(true); stopSelf()
     }
 
-    private fun createChannel() {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "RACE 계측", NotificationManager.IMPORTANCE_LOW))
-    }
-    private fun notification(text: String) = NotificationCompat.Builder(this, CHANNEL)
-        .setSmallIcon(R.drawable.ic_battery_pilot).setContentTitle("Ride Copilot · RACE").setContentText(text).setOngoing(true)
-        .setContentIntent(PendingIntent.getActivity(this, 8803, Intent(this, RaceActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-        .build()
+    private fun createChannel() { (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL, "RACE 계측", NotificationManager.IMPORTANCE_LOW)) }
+    private fun notification(text: String) = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_battery_pilot).setContentTitle("Ride Copilot · RACE").setContentText(text).setOngoing(true).setContentIntent(PendingIntent.getActivity(this, 8803, Intent(this, RaceActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).build()
     private fun updateNotification(text: String) { (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, notification(text)) }
 
-    override fun onDestroy() { runCatching { locationManager.removeUpdates(this) }; super.onDestroy() }
+    override fun onDestroy() { runCatching { locationManager.removeUpdates(this) }; releaseTimingWakeLock(); super.onDestroy() }
 }
