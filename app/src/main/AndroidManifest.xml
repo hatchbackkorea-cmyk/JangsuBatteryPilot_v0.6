@@ -47,6 +47,7 @@
                 <data android:scheme="jangsubatterypilot" android:host="race" />
             </intent-filter>
         </activity>
+        <activity android:name=".RaceTrackBuilderActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <activity android:name=".AdminCenterActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".MainActivity" android:exported="false" android:screenOrientation="portrait" />
@@ -114,6 +115,13 @@
 
         <service
             android:name=".RaceTimingService"
+            android:enabled="true"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="location" />
+
+        <service
+            android:name=".RaceTrackRecorderService"
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="true"
