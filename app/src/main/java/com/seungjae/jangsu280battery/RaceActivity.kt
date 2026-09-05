@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
@@ -25,7 +26,7 @@ import android.widget.Toast
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** RACE UI v0.34.9: field QR join, waiting/practice/official phases, local-first timing. */
+/** RACE UI: field QR join, waiting/practice/official phases, local-first timing. */
 class RaceActivity : Activity() {
     private lateinit var store: RaceDataStore
     private lateinit var client: RaceServerClient
@@ -33,6 +34,8 @@ class RaceActivity : Activity() {
 
     private var mode = MODE_HOME
     private var currentEventCode = ""
+    private var swipeDownX = 0f
+    private var swipeDownY = 0f
     private var startButton: Button? = null
     private var homeEventStatus: TextView? = null
     private var registrationStatus: TextView? = null
@@ -70,6 +73,23 @@ class RaceActivity : Activity() {
         handler.post(poller)
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (mode == MODE_HOME) {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { swipeDownX = ev.x; swipeDownY = ev.y }
+                MotionEvent.ACTION_UP -> {
+                    val dx = swipeDownX - ev.x
+                    val dy = abs(swipeDownY - ev.y)
+                    if (dx >= dp(90) && dy <= dp(140)) {
+                        openBroadcast()
+                        return true
+                    }
+                }
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onDestroy() { handler.removeCallbacks(poller); super.onDestroy() }
 
     @Deprecated("Deprecated in Java")
@@ -78,6 +98,18 @@ class RaceActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_LOCATION && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startRace()
+    }
+
+    private fun openBroadcast() {
+        val joined = currentJoined()
+        if (joined == null) {
+            Toast.makeText(this, "먼저 대회 참가를 완료해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startActivity(Intent(this, RaceBroadcastActivity::class.java).apply {
+            putExtra(RaceBroadcastActivity.EXTRA_EVENT_CODE, joined.config.eventCode)
+            putExtra(RaceBroadcastActivity.EXTRA_SERVER_URL, client.baseUrl())
+        })
     }
 
     private fun showHome() {
@@ -94,7 +126,7 @@ class RaceActivity : Activity() {
             gravity = Gravity.CENTER; textSize = 22.5f; setTypeface(typeface, Typeface.BOLD)
             setPadding(dp(12), dp(10), dp(12), dp(10)); setTextColor(if (joined != null) GOOD else Color.LTGRAY)
             text = if (joined != null) {
-                "✓ 참가완료 · ${joined.config.name} · ${joined.config.eventCode}\n배번 ${profile.bib} · 아이디 ${profile.name} · 닉네임 ${profile.nickname}"
+                "✓ 참가완료 · ${joined.config.name} · ${joined.config.eventCode}\n배번 ${profile.bib} · 이름 ${profile.name} · 닉네임 ${profile.nickname}"
             } else if (profile.isReady) {
                 "선수등록 완료 · 배번 ${profile.bib}\n대회 참가 메뉴에서 참가할 대회를 선택하세요."
             } else "먼저 선수 등록을 완료하세요."
@@ -109,7 +141,11 @@ class RaceActivity : Activity() {
             setOnClickListener { val s = store.snapshot(); if (s.state == "ARMED" || s.state == "RUNNING") showLive() else startRace() }
         }
         body.addView(startButton, LinearLayout.LayoutParams(dp(216), dp(216)))
-        body.addView(View(this), LinearLayout.LayoutParams(1, dp(24)))
+        body.addView(TextView(this).apply {
+            text = if (joined != null) "← 화면을 왼쪽으로 밀면 실시간 중계" else ""
+            textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.rgb(115, 185, 255)); setPadding(0, dp(10), 0, dp(4)); setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(-1, -2))
+        body.addView(View(this), LinearLayout.LayoutParams(1, dp(12)))
 
         val menuRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         menuRow.addView(menuButton(if (profile.isReady) "✓ 선수 등록" else "선수 등록") { showRegistration() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { marginEnd = dp(6) })
@@ -128,9 +164,9 @@ class RaceActivity : Activity() {
         setContentView(root); addTopBar(root, "선수 등록", true)
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(24), dp(22), dp(24)) }
         root.addView(body, LinearLayout.LayoutParams(-1, -1))
-        body.addView(TextView(this).apply { text = "아이디 · 닉네임 · 배번"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) })
+        body.addView(TextView(this).apply { text = "이름 · 닉네임 · 배번"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) })
         body.addView(TextView(this).apply { text = "여기서는 선수 정보만 저장합니다. 저장 후 ‘대회 참가’에서 참가할 대회를 선택합니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(4), 0, dp(12)) })
-        riderIdInput = darkInput("아이디", profile.name).also { body.addView(it, inputLp()) }
+        riderIdInput = darkInput("이름", profile.name).also { body.addView(it, inputLp()) }
         nicknameInput = darkInput("닉네임", profile.nickname).also { body.addView(it, inputLp()) }
         bibInput = darkInput("배번", profile.bib).apply { inputType = InputType.TYPE_CLASS_NUMBER }.also { body.addView(it, inputLp()) }
         body.addView(Button(this).apply { text = "선수 정보 저장"; textSize = 17f; setTypeface(typeface, Typeface.BOLD); setOnClickListener { saveProfileOnly() } }, LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(12) })
@@ -140,7 +176,7 @@ class RaceActivity : Activity() {
 
     private fun saveProfileOnly() {
         val riderId = riderIdInput?.text?.toString().orEmpty().trim(); val nickname = nicknameInput?.text?.toString().orEmpty().trim(); val bib = bibInput?.text?.toString().orEmpty().trim()
-        if (riderId.isBlank() || nickname.isBlank() || bib.isBlank()) { registrationStatus?.setTextColor(WARN); registrationStatus?.text = "아이디, 닉네임, 배번을 모두 입력해 주세요."; return }
+        if (riderId.isBlank() || nickname.isBlank() || bib.isBlank()) { registrationStatus?.setTextColor(WARN); registrationStatus?.text = "이름, 닉네임, 배번을 모두 입력해 주세요."; return }
         val saved = RaceProfileStore.save(this, riderId, nickname, bib); hideKeyboard(); registrationStatus?.setTextColor(GOOD); registrationStatus?.text = "✓ 선수등록 저장 완료 · 배번 ${saved.bib} · ${saved.nickname} (${saved.name})"; Toast.makeText(this, "선수등록이 저장되었습니다.", Toast.LENGTH_SHORT).show()
     }
 
@@ -152,7 +188,7 @@ class RaceActivity : Activity() {
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.BLACK) }
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(18), dp(18), dp(28)) }
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        body.addView(TextView(this).apply { text = if (profile.isReady) "배번 ${profile.bib} · 아이디 ${profile.name} · 닉네임 ${profile.nickname}" else "선수등록이 필요합니다."; textSize = 16f; setTextColor(if (profile.isReady) GOOD else WARN); setTypeface(typeface, Typeface.BOLD) })
+        body.addView(TextView(this).apply { text = if (profile.isReady) "배번 ${profile.bib} · 이름 ${profile.name} · 닉네임 ${profile.nickname}" else "선수등록이 필요합니다."; textSize = 16f; setTextColor(if (profile.isReady) GOOD else WARN); setTypeface(typeface, Typeface.BOLD) })
         body.addView(TextView(this).apply { text = "QR로 들어온 경우 현장 서버와 대회코드가 자동 설정됩니다. 대기중인 방은 운영자가 오픈할 때까지 참가할 수 없습니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(5), 0, dp(10)) })
         body.addView(Button(this).apply { text = "새로고침"; setOnClickListener { loadEventsAsync() } }, LinearLayout.LayoutParams(-1, dp(48)))
         joinStatus = TextView(this).apply { text = "개설된 대회를 불러오는 중…"; textSize = 13f; setTextColor(Color.LTGRAY); setPadding(0, dp(10), 0, dp(8)) }
@@ -205,13 +241,13 @@ class RaceActivity : Activity() {
 
     private fun joinEvent(item: RaceServerClient.EventListItem) {
         val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 아이디, 닉네임, 배번을 선수 등록 메뉴에서 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
+        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 이름, 닉네임, 배번을 선수 등록 메뉴에서 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
         if (!item.joinable) { AlertDialog.Builder(this).setTitle("대회 오픈 대기").setMessage(item.notice.ifBlank { "현재는 대회 서버가 오픈되지 않았습니다. 운영자 오픈 후 이용해 주세요." }).setPositiveButton("확인", null).show(); return }
         joinStatus?.setTextColor(Color.LTGRAY); joinStatus?.text = "${item.config.name} 참가 처리 중…\n서버 참가 등록 → GPX 확인"
         Thread {
             val result = runCatching {
                 val joined = client.join(item.config.eventCode, profile); val old = store.joined(item.config.eventCode); val localCourses = repo.listCourses()
-                val oldLocal = old?.localCourseId?.takeIf { id -> localCourses.any { it.id == id } }
+                val oldLocal = old?.localCourseId?.takeIf { id -> localCourses.any { it.id == id } && old.config.courseServerId == joined.config.courseServerId }
                 val matchingLocal = localCourses.firstOrNull { m -> m.name.trim().equals(joined.config.courseName.trim(), true) && abs(m.totalKm * 1000.0 - joined.config.distanceM) <= 40.0 }?.id
                 val localId = oldLocal ?: matchingLocal ?: run { val tmp = client.downloadCourse(item.config.eventCode); try { repo.importGpxFile(tmp, joined.config.courseName, enqueueServer = false).id } finally { tmp.delete() } }
                 repo.setActive(localId); store.saveJoined(joined.config, joined.participantToken, localId); Triple(joined.config, localId, joined.phase)
@@ -230,11 +266,13 @@ class RaceActivity : Activity() {
 
     private fun startRace() {
         val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 선수 등록 메뉴에서 아이디, 닉네임, 배번을 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
+        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 선수 등록 메뉴에서 이름, 닉네임, 배번을 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
         val joined = currentJoined() ?: run { AlertDialog.Builder(this).setTitle("대회 참가 필요").setMessage("START 전에 대회 참가 메뉴에서 참가할 대회를 선택해 주세요.").setPositiveButton("대회 참가") { _, _ -> showEvents() }.setNegativeButton("취소", null).show(); return }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION); return }
-        currentEventCode = joined.config.eventCode; val localCourseId = joined.localCourseId; val baseConfig = joined.config
-        homeEventStatus?.setTextColor(Color.LTGRAY); homeEventStatus?.text = "${baseConfig.name} · 세션 상태 확인 중…"
+        currentEventCode = joined.config.eventCode
+        val oldLocalCourseId = joined.localCourseId
+        val baseConfig = joined.config
+        homeEventStatus?.setTextColor(Color.LTGRAY); homeEventStatus?.text = "${baseConfig.name} · 세션/코스 상태 확인 중…"
         Thread {
             val stateResult = runCatching { client.eventState(baseConfig.eventCode) }
             if (stateResult.isSuccess) {
@@ -244,12 +282,33 @@ class RaceActivity : Activity() {
                     return@Thread
                 }
             }
-            val reference = runCatching { client.fetchReference(baseConfig.eventCode) }.getOrDefault(baseConfig.reference)
-            val cfg = baseConfig.copy(reference = reference)
+
+            val serverConfig = stateResult.getOrNull()?.config ?: baseConfig
+            var resolvedCourseId = oldLocalCourseId
+            var courseRefreshed = false
+            val localExists = repo.listCourses().any { it.id == oldLocalCourseId }
+            val courseChanged = serverConfig.courseServerId != baseConfig.courseServerId ||
+                serverConfig.courseName.trim() != baseConfig.courseName.trim() ||
+                abs(serverConfig.distanceM - baseConfig.distanceM) > 20.0
+            if (stateResult.isSuccess && (courseChanged || !localExists)) {
+                val tmp = client.downloadCourse(serverConfig.eventCode)
+                try {
+                    resolvedCourseId = repo.importGpxFile(tmp, serverConfig.courseName, enqueueServer = false).id
+                    courseRefreshed = true
+                } finally { tmp.delete() }
+                repo.setActive(resolvedCourseId)
+                store.saveJoined(serverConfig, joined.token, resolvedCourseId, joined.serverUrl.ifBlank { client.baseUrl() })
+            } else if (localExists) {
+                runCatching { repo.setActive(resolvedCourseId) }
+            }
+
+            val reference = runCatching { client.fetchReference(baseConfig.eventCode) }.getOrDefault(serverConfig.reference)
+            val cfg = serverConfig.copy(reference = reference)
             runOnUiThread {
-                store.saveActiveConfig(cfg, localCourseId, reference)
-                startForegroundService(Intent(this, RaceTimingService::class.java).apply { action = RaceTimingService.ACTION_ARM; putExtra(RaceTimingService.EXTRA_CONFIG, cfg.toJson().toString()); putExtra(RaceTimingService.EXTRA_COURSE_ID, localCourseId) })
+                store.saveActiveConfig(cfg, resolvedCourseId, reference)
+                startForegroundService(Intent(this, RaceTimingService::class.java).apply { action = RaceTimingService.ACTION_ARM; putExtra(RaceTimingService.EXTRA_CONFIG, cfg.toJson().toString()); putExtra(RaceTimingService.EXTRA_COURSE_ID, resolvedCourseId) })
                 currentEventCode = cfg.eventCode; showLive()
+                if (courseRefreshed) Toast.makeText(this, "관리자가 변경한 최신 대회 코스를 적용했습니다.", Toast.LENGTH_LONG).show()
                 if (stateResult.isFailure) Toast.makeText(this, "서버 상태 확인이 안 되어도 휴대폰 로컬 계측은 계속합니다. 연결 복구 후 자동 분류됩니다.", Toast.LENGTH_LONG).show()
             }
         }.start()
