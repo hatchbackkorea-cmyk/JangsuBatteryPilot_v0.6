@@ -6,8 +6,12 @@ import java.lang.ref.WeakReference
 
 /**
  * Keeps the already-joined server participant row aligned with the profile saved on the phone.
- * This is intentionally lightweight: a successful profile is sent once per Activity resume and
- * again only when name/nickname/bib changes. Network failures are retried later without blocking UI.
+ *
+ * Normal path: authenticated participant-profile update.
+ * Recovery path: if that token became stale (for example after a re-join), re-join the same event
+ * with the persistent profileId, refresh name/nickname/bib on the server, receive a fresh token,
+ * and save that token locally. This prevents the phone from showing the new profile while the
+ * RACE admin page remains stuck on the old participant information.
  */
 object RaceProfileServerSync {
     private val handler = Handler(Looper.getMainLooper())
@@ -22,17 +26,42 @@ object RaceProfileServerSync {
             val activity = activityRef.get() ?: return
             val profile = RaceProfileStore.profile(activity)
             val client = RaceServerClient(activity)
-            val joined = if (client.available()) RaceDataStore(activity).lastJoined(client.baseUrl()) else null
+            val store = RaceDataStore(activity)
+            val joined = if (client.available()) store.lastJoined(client.baseUrl()) else null
+
             if (profile.isReady && joined != null && joined.token.isNotBlank()) {
-                val signature = listOf(client.baseUrl(), joined.config.eventCode, profile.name, profile.nickname, profile.bib).joinToString("|")
+                val signature = listOf(
+                    client.baseUrl(), joined.config.eventCode,
+                    profile.profileId, profile.name, profile.nickname, profile.bib
+                ).joinToString("|")
                 val now = System.currentTimeMillis()
                 val canRetry = signature != lastFailed || now - lastFailedAt >= 4_000L
+
                 if (!inFlight && signature != lastSynced && canRetry) {
                     inFlight = true
                     Thread {
-                        val ok = runCatching {
+                        val direct = runCatching {
                             client.updateParticipantProfile(joined.config.eventCode, joined.token, profile)
-                        }.isSuccess
+                        }
+
+                        val ok = if (direct.isSuccess) {
+                            true
+                        } else {
+                            // The most common reason here is an old participant token. Re-joining the
+                            // same event updates the server row by persistent profileId and returns a
+                            // fresh token. If the event is not currently joinable this simply fails and
+                            // the normal retry loop will try the authenticated path again later.
+                            runCatching {
+                                val refreshed = client.join(joined.config.eventCode, profile)
+                                store.saveJoined(
+                                    refreshed.config,
+                                    refreshed.participantToken,
+                                    joined.localCourseId,
+                                    client.baseUrl()
+                                )
+                            }.isSuccess
+                        }
+
                         if (ok) {
                             lastSynced = signature
                             lastFailed = ""
@@ -50,9 +79,12 @@ object RaceProfileServerSync {
 
     fun resume(activity: RaceActivity) {
         activityRef = WeakReference(activity)
-        lastSynced = "" // Re-confirm server state whenever the RACE screen comes back.
+        // Re-confirm server identity on every RACE screen resume. This also repairs profiles that
+        // were edited before this version was installed.
+        lastSynced = ""
+        lastFailed = ""
         handler.removeCallbacks(tick)
-        handler.postDelayed(tick, 250L)
+        handler.postDelayed(tick, 150L)
     }
 
     fun pause(activity: RaceActivity) {
