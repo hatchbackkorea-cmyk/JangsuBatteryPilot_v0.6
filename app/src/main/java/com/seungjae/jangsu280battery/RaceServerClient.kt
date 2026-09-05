@@ -69,9 +69,11 @@ class RaceServerClient(context: Context) {
 
     fun flushPending() {
         if (!available()) return
-        val currentServer = baseUrl()
+        val currentServer = baseUrl(); val fieldOverrideActive = eventServerOverride().isNotBlank()
         for (item in store.queued()) {
             val queuedServer = item.optString("server_url")
+            // Old queue entries were created before server scoping. Never send them into a QR-selected field server.
+            if (queuedServer.isBlank() && fieldOverrideActive) continue
             if (queuedServer.isNotBlank() && norm(queuedServer) != norm(currentServer)) continue
             val key = item.optString("key"); val type = item.optString("type"); val eventCode = item.optString("event_code"); val payload = item.optJSONObject("payload") ?: continue
             val token = store.joined(eventCode, currentServer)?.token.orEmpty()
