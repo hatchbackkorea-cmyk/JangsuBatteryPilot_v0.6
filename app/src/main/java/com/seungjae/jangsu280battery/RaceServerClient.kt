@@ -49,6 +49,14 @@ class RaceServerClient(context: Context) {
         return JoinResult(RaceEventConfig.fromJson(eventObj), x.getString("participant_token"), eventObj.optString("phase", eventObj.optString("status", "PRACTICE")).uppercase())
     }
 
+    fun updateParticipantProfile(eventCode: String, token: String, profile: RaceProfileStore.Profile): JSONObject {
+        require(available()) { "Rider Control Center 서버가 연결되지 않았습니다." }
+        require(eventCode.isNotBlank() && token.isNotBlank()) { "대회 참가 정보가 없습니다." }
+        val code = URLEncoder.encode(eventCode.trim().uppercase(), "UTF-8")
+        val body = JSONObject().apply { put("name", profile.name); put("nickname", profile.nickname); put("bib", profile.bib) }
+        return request("PUT", "/api/race/events/$code/participant-profile", body, token)
+    }
+
     fun downloadCourse(eventCode: String): File {
         require(available()) { "서버 미연결" }; val code = URLEncoder.encode(eventCode.trim().uppercase(), "UTF-8")
         val conn = URL("${baseUrl()}/api/race/events/$code/gpx").openConnection() as HttpURLConnection
