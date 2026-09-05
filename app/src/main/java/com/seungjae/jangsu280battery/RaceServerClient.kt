@@ -13,10 +13,33 @@ class RaceServerClient(context: Context) {
     private val app = context.applicationContext
     private val sync = RiderServerSync(app)
     private val store = RaceDataStore(app)
+
     data class JoinResult(val config: RaceEventConfig, val participantToken: String)
+    data class EventListItem(
+        val config: RaceEventConfig,
+        val status: String,
+        val participants: Int,
+        val joinable: Boolean
+    )
 
     fun baseUrl(): String = sync.serverUrl().trim().trimEnd('/')
     fun available(): Boolean = baseUrl().startsWith("http://") || baseUrl().startsWith("https://")
+
+    fun listEvents(): List<EventListItem> {
+        require(available()) { "Rider Control Center 서버가 연결되지 않았습니다." }
+        val x = request("GET", "/api/race/events", null, null)
+        val a = x.optJSONArray("events") ?: JSONArray()
+        return (0 until a.length()).mapNotNull { i ->
+            a.optJSONObject(i)?.let { o ->
+                EventListItem(
+                    config = RaceEventConfig.fromJson(o),
+                    status = o.optString("status", "OPEN").uppercase(),
+                    participants = o.optInt("participants", 0),
+                    joinable = o.optBoolean("joinable", true)
+                )
+            }
+        }
+    }
 
     fun join(eventCode: String, profile: RaceProfileStore.Profile): JoinResult {
         require(available()) { "Rider Control Center 서버가 연결되지 않았습니다." }
@@ -71,12 +94,18 @@ class RaceServerClient(context: Context) {
     fun flushPending() {
         if (!available()) return
         for (item in store.queued()) {
-            val key = item.optString("key"); val type = item.optString("type"); val eventCode = item.optString("event_code")
+            val key = item.optString("key")
+            val type = item.optString("type")
+            val eventCode = item.optString("event_code")
             val payload = item.optJSONObject("payload") ?: continue
             val token = store.joined(eventCode)?.token.orEmpty()
             if (eventCode != "PRACTICE" && token.isBlank()) continue
             val ok = runCatching {
-                when (type) { "SECTOR" -> sendSector(eventCode, token, payload); "FINISH" -> sendFinish(eventCode, token, payload); else -> JSONObject() }
+                when (type) {
+                    "SECTOR" -> sendSector(eventCode, token, payload)
+                    "FINISH" -> sendFinish(eventCode, token, payload)
+                    else -> JSONObject()
+                }
             }.isSuccess
             if (ok) store.removeQueued(key) else break
         }
@@ -84,11 +113,14 @@ class RaceServerClient(context: Context) {
 
     private fun request(method: String, path: String, body: JSONObject?, token: String?): JSONObject {
         val conn = URL(baseUrl() + path).openConnection() as HttpURLConnection
-        conn.requestMethod = method; conn.connectTimeout = 8000; conn.readTimeout = 15000
+        conn.requestMethod = method
+        conn.connectTimeout = 8000
+        conn.readTimeout = 15000
         conn.setRequestProperty("Accept", "application/json")
         if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
         if (body != null) {
-            conn.doOutput = true; conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
         }
         val code = conn.responseCode
