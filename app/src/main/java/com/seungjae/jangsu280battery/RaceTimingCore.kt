@@ -21,7 +21,6 @@ class RaceRouteMatcher(private val course: CourseData) {
         var best = projectRange(location.latitude, location.longitude, start, end)
         if (best.distanceM > 85.0 && last == null) best = projectRange(location.latitude, location.longitude, 0, track.lastIndex - 1)
         if (best.distanceM > 120.0 && last != null) {
-            // Lost-course recovery still rejects implausible folded-trail jumps by clamping the search to +/-800m.
             start = course.indexAtKm(((last / 1000.0) - 0.25).coerceAtLeast(0.0)).coerceAtMost(track.lastIndex - 1)
             end = course.indexAtKm(((last / 1000.0) + 0.80).coerceAtMost(course.totalKm)).coerceIn(start, track.lastIndex - 1)
             best = projectRange(location.latitude, location.longitude, start, end)
@@ -73,19 +72,20 @@ object RaceGateMath {
 
     fun normalize(config: RaceEventConfig, course: CourseData): RaceEventConfig {
         val gates = config.gates.map { g ->
-            if (abs(g.lat) > 0.00001 || abs(g.lon) > 0.00001) g
-            else gateAt(course, g.routeM.coerceIn(0.0, course.totalKm * 1000.0), g.name, g.type, g.widthM)
+            val width = g.widthM.coerceIn(1.0, 20.0)
+            if (abs(g.lat) > 0.00001 || abs(g.lon) > 0.00001) g.copy(widthM = width)
+            else gateAt(course, g.routeM.coerceIn(0.0, course.totalKm * 1000.0), g.name, g.type, width)
         }.sortedBy { it.routeM }
         return config.copy(distanceM = if (config.distanceM > 10.0) config.distanceM else course.totalKm * 1000.0, gates = gates)
     }
 
-    fun gateAt(course: CourseData, routeM: Double, name: String, type: String, widthM: Double = 30.0): RaceGate {
+    fun gateAt(course: CourseData, routeM: Double, name: String, type: String, widthM: Double = 5.0): RaceGate {
         val m = routeM.coerceIn(0.0, course.totalKm * 1000.0)
         val p = course.pointAtKm(m / 1000.0)
         val before = course.pointAtKm(((m - 12.0).coerceAtLeast(0.0)) / 1000.0)
         val after = course.pointAtKm(((m + 12.0).coerceAtMost(course.totalKm * 1000.0)) / 1000.0)
         val bearing = bearingDeg(before.lat, before.lon, after.lat, after.lon)
-        return RaceGate(name, type, m, p.lat, p.lon, bearing, widthM.coerceIn(8.0, 100.0))
+        return RaceGate(name, type, m, p.lat, p.lon, bearing, widthM.coerceIn(1.0, 20.0))
     }
 
     private fun embeddedGates(course: CourseData): List<RaceGate> {
@@ -96,10 +96,10 @@ object RaceGateMath {
                 "RACE_SECTOR" -> "SECTOR"
                 else -> return@mapNotNull null
             }
-            val fallback = gateAt(course, p.routeKm * 1000.0, p.name, t, 50.0)
+            val fallback = gateAt(course, p.routeKm * 1000.0, p.name, t, 5.0)
             val bearing = Regex("(?:^|;)bearing=([-+0-9.]+)").find(p.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: fallback.bearingDeg
             val width = Regex("(?:^|;)width=([-+0-9.]+)").find(p.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: fallback.widthM
-            RaceGate(p.name.ifBlank { t }, t, p.routeKm * 1000.0, p.lat, p.lon, bearing, width.coerceIn(8.0, 100.0))
+            RaceGate(p.name.ifBlank { t }, t, p.routeKm * 1000.0, p.lat, p.lon, bearing, width.coerceIn(1.0, 20.0))
         }.sortedBy { it.routeM }
         if (out.count { it.type == "START" } != 1 || out.count { it.type == "FINISH" } != 1) return emptyList()
         val start = out.firstOrNull { it.type == "START" } ?: return emptyList()
