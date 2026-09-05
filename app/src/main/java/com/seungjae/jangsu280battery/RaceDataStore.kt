@@ -10,6 +10,7 @@ import java.io.File
 class RaceDataStore(context: Context) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("race_runtime_v1", Context.MODE_PRIVATE)
+    private val routePrefs = app.getSharedPreferences("race_server_route_v1", Context.MODE_PRIVATE)
     private val dir = File(app.filesDir, "race").apply { mkdirs() }
     private val rawDir = File(dir, "raw").apply { mkdirs() }
     private val completedFile = File(dir, "completed_runs.json")
@@ -75,8 +76,9 @@ class RaceDataStore(context: Context) {
     fun nextRunNumber(eventCode: String): Int = completed().count { it.eventCode == eventCode } + 1
 
     private fun normServer(value: String): String = value.trim().trimEnd('/').lowercase()
+    private fun currentServer(): String = routePrefs.getString("event_server", "").orEmpty().trim().trimEnd('/').ifBlank { RiderServerSync(app).serverUrl().trim().trimEnd('/') }
 
-    fun saveJoined(config: RaceEventConfig, token: String, localCourseId: String, serverUrl: String = "") {
+    fun saveJoined(config: RaceEventConfig, token: String, localCourseId: String, serverUrl: String = currentServer()) {
         prefs.edit().putString("joined_${config.eventCode}", JSONObject().apply {
             put("config", config.toJson()); put("token", token); put("local_course_id", localCourseId); put("server_url", serverUrl.trim().trimEnd('/'))
         }.toString()).putString("last_event_code", config.eventCode).apply()
@@ -84,14 +86,16 @@ class RaceDataStore(context: Context) {
 
     data class Joined(val config: RaceEventConfig, val token: String, val localCourseId: String, val serverUrl: String = "")
 
-    fun joined(eventCode: String, expectedServerUrl: String? = null): Joined? = runCatching {
+    fun joined(eventCode: String, expectedServerUrl: String? = currentServer()): Joined? = runCatching {
         val o = JSONObject(prefs.getString("joined_${eventCode.uppercase()}", "")); val storedServer = o.optString("server_url")
-        if (!expectedServerUrl.isNullOrBlank() && normServer(storedServer) != normServer(expectedServerUrl)) return null
+        // Legacy joins had no server field. They remain usable only when no field-server override is active.
+        if (!expectedServerUrl.isNullOrBlank() && storedServer.isNotBlank() && normServer(storedServer) != normServer(expectedServerUrl)) return null
+        if (!expectedServerUrl.isNullOrBlank() && storedServer.isBlank() && routePrefs.getString("event_server", "").orEmpty().isNotBlank()) return null
         Joined(RaceEventConfig.fromJson(o.getJSONObject("config")), o.optString("token"), o.optString("local_course_id"), storedServer)
     }.getOrNull()
-    fun lastJoined(expectedServerUrl: String? = null): Joined? = prefs.getString("last_event_code", null)?.let { joined(it, expectedServerUrl) }
+    fun lastJoined(expectedServerUrl: String? = currentServer()): Joined? = prefs.getString("last_event_code", null)?.let { joined(it, expectedServerUrl) }
 
-    @Synchronized fun enqueue(type: String, eventCode: String, payload: JSONObject, serverUrl: String = "") {
+    @Synchronized fun enqueue(type: String, eventCode: String, payload: JSONObject, serverUrl: String = currentServer()) {
         val a = runCatching { JSONArray(prefs.getString("network_queue", "[]")) }.getOrDefault(JSONArray())
         val key = "$type:${payload.optString("run_id")}:${payload.optInt("sector_index", -1)}"; val out = JSONArray(); var replaced = false
         fun item() = JSONObject().apply { put("key", key); put("type", type); put("event_code", eventCode); put("server_url", serverUrl.trim().trimEnd('/')); put("payload", payload) }
