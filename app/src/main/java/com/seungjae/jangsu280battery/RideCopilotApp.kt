@@ -29,6 +29,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             is RaceActivity -> activity.window.decorView.post {
                 RaceTrackBuilderUiInstaller.install(activity)
                 RaceNameLabelUiInstaller.install(activity)
+                RaceProfileServerSync.resume(activity)
             }
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
@@ -41,6 +42,9 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityPaused(activity: Activity) {
+        if (activity is RaceActivity) {
+            RaceProfileServerSync.pause(activity)
+        }
         if (activity is MainActivity) {
             RideLiveLocationBridge.pause(activity)
             RideMapProviderController.pause(activity)
@@ -49,6 +53,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onActivityDestroyed(activity: Activity) {
         if (activity is RaceActivity) {
+            RaceProfileServerSync.pause(activity)
             RaceNameLabelUiInstaller.uninstall(activity)
         }
         if (activity is MainActivity) {
