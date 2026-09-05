@@ -21,7 +21,7 @@ data class RaceGate(
         fun fromJson(o: JSONObject) = RaceGate(
             o.optString("name", "Gate"), o.optString("type", "SECTOR").uppercase(),
             o.optDouble("route_m", 0.0), o.optDouble("lat", 0.0), o.optDouble("lon", 0.0),
-            o.optDouble("bearing_deg", 0.0), o.optDouble("width_m", 30.0).coerceIn(8.0, 100.0)
+            o.optDouble("bearing_deg", 0.0), o.optDouble("width_m", 5.0).coerceIn(1.0, 20.0)
         )
     }
 }
