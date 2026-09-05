@@ -123,12 +123,12 @@ class RaceActivity : Activity() {
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         homeEventStatus = TextView(this).apply {
-            gravity = Gravity.CENTER; textSize = 22.5f; setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER; textSize = if (joined != null) 16f else 18f; setTypeface(typeface, Typeface.BOLD)
             setPadding(dp(12), dp(10), dp(12), dp(10)); setTextColor(if (joined != null) GOOD else Color.LTGRAY)
             text = if (joined != null) {
-                "✓ 참가완료 · ${joined.config.name} · ${joined.config.eventCode}\n배번 ${profile.bib} · 이름 ${profile.name} · 닉네임 ${profile.nickname}"
+                "✓ 참가완료 · ${joined.config.name} · ${joined.config.eventCode}\nNO.${profile.bib} · ${profile.name}(${profile.nickname})"
             } else if (profile.isReady) {
-                "선수등록 완료 · 배번 ${profile.bib}\n대회 참가 메뉴에서 참가할 대회를 선택하세요."
+                "선수등록 완료 · NO.${profile.bib}\n대회 참가 메뉴에서 참가할 대회를 선택하세요."
             } else "먼저 선수 등록을 완료하세요."
         }
         body.addView(homeEventStatus, LinearLayout.LayoutParams(-1, -2))
