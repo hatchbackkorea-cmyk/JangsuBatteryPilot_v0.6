@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -17,56 +18,15 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
-    <application
-        android:name=".RideCopilotApp"
-        android:allowBackup="true"
-        android:usesCleartextTraffic="true"
-        android:icon="@drawable/ic_battery_pilot"
-        android:label="GPX 배터리 코파일럿"
-        android:supportsRtl="true"
-        android:theme="@style/AppTheme">
-
-        <activity
-            android:name=".BikeModeChooserActivity"
-            android:exported="true"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
-        <activity
-            android:name=".RaceActivity"
-            android:exported="true"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="jangsubatterypilot" android:host="race" />
-            </intent-filter>
-        </activity>
+    <application android:name=".RideCopilotApp" android:allowBackup="true" android:usesCleartextTraffic="true" android:icon="@drawable/ic_battery_pilot" android:label="GPX 배터리 코파일럿" android:supportsRtl="true" android:theme="@style/AppTheme">
+        <activity android:name=".BikeModeChooserActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+        <activity android:name=".RaceActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="race"/></intent-filter></activity>
         <activity android:name=".RaceTrackBuilderActivity" android:exported="false" android:screenOrientation="portrait" />
-
         <activity android:name=".AdminCenterActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".MainActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RoadGranfondoActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RoadRaceSimulationActivity" android:exported="false" android:screenOrientation="unspecified" />
-
-        <activity
-            android:name=".StravaReviewActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="jangsubatterypilot" android:host="localhost" android:pathPrefix="/strava" />
-            </intent-filter>
-        </activity>
-
+        <activity android:name=".StravaReviewActivity" android:exported="true" android:launchMode="singleTop" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="localhost" android:pathPrefix="/strava"/></intent-filter></activity>
         <activity android:name=".CourseActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".ChargeScenarioSimulatorActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".SettingsActivity" android:exported="false" android:screenOrientation="portrait" />
@@ -75,62 +35,14 @@
         <activity android:name=".HistoricalRideActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RideInsightsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".SramBleActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ReleaseUploaderActivity" android:exported="false" android:launchMode="singleTop" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/zip"/><data android:mimeType="application/x-zip-compressed"/><data android:mimeType="application/octet-stream"/></intent-filter></activity>
 
-        <activity
-            android:name=".ReleaseUploaderActivity"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/zip" />
-                <data android:mimeType="application/x-zip-compressed" />
-                <data android:mimeType="application/octet-stream" />
-            </intent-filter>
-        </activity>
+        <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" /></provider>
 
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" />
-        </provider>
-
-        <service
-            android:name=".RideService"
-            android:enabled="true"
-            android:exported="false"
-            android:stopWithTask="true"
-            android:foregroundServiceType="location" />
-
-        <service
-            android:name=".RaceTimingService"
-            android:enabled="true"
-            android:exported="false"
-            android:stopWithTask="true"
-            android:foregroundServiceType="location" />
-
-        <service
-            android:name=".RaceTrackRecorderService"
-            android:enabled="true"
-            android:exported="false"
-            android:stopWithTask="true"
-            android:foregroundServiceType="location" />
-
-        <service
-            android:name=".ReleaseDeployService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+        <service android:name=".RideService" android:enabled="true" android:exported="false" android:stopWithTask="true" android:foregroundServiceType="location" />
+        <service android:name=".RaceTimingService" android:enabled="true" android:exported="false" android:stopWithTask="true" android:foregroundServiceType="location" />
+        <service android:name=".RaceTrackRecorderService" android:enabled="true" android:exported="false" android:stopWithTask="true" android:foregroundServiceType="location" />
+        <service android:name=".ReleaseDeployService" android:enabled="true" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
