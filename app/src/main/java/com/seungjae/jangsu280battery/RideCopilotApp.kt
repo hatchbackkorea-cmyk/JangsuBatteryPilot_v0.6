@@ -28,6 +28,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             }
             is RaceActivity -> activity.window.decorView.post {
                 RaceTrackBuilderUiInstaller.install(activity)
+                RaceNameLabelUiInstaller.install(activity)
             }
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
@@ -47,6 +48,9 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityDestroyed(activity: Activity) {
+        if (activity is RaceActivity) {
+            RaceNameLabelUiInstaller.uninstall(activity)
+        }
         if (activity is MainActivity) {
             RideLiveLocationBridge.destroy(activity)
             RideWarningOverlayController.destroy(activity)
