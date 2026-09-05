@@ -37,7 +37,12 @@ import kotlin.math.sin
  * rest of Ride Copilot can use it immediately. Administrator phones may explicitly publish it.
  */
 class RaceTrackBuilderActivity : Activity() {
-    companion object { private const val REQ_LOCATION = 8841 }
+    companion object {
+        private const val REQ_LOCATION = 8841
+        private const val DEFAULT_GATE_WIDTH_M = 5.0
+        private const val MIN_GATE_WIDTH_M = 1.0
+        private const val MAX_GATE_WIDTH_M = 20.0
+    }
 
     private lateinit var drafts: RaceTrackDraftStore
     private lateinit var repo: CourseRepository
@@ -170,7 +175,7 @@ class RaceTrackBuilderActivity : Activity() {
         body.addView(trapActions)
 
         body.addView(TextView(this).apply {
-            text = "RaceChrono 방식: 주행 중 트랩을 찍어도 되고, 기록을 끝낸 뒤 아래 목록에서 위치·이름·폭을 다시 편집할 수 있습니다. 기본 트랩 폭은 50m입니다."
+            text = "산악 MTB 기준 트랩 폭 기본 5m · 조절 범위 1~20m. 주행 중 트랩을 찍거나 기록 종료 후 위치·이름·폭을 다시 편집할 수 있습니다."
             textSize = 10.5f; setTextColor(Color.GRAY); setPadding(0, dp(8), 0, dp(5))
         })
         trapContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -240,7 +245,7 @@ class RaceTrackBuilderActivity : Activity() {
         }
         if (type == "START") gates.removeAll { it.type == "START" }
         if (type == "FINISH") gates.removeAll { it.type == "FINISH" }
-        gates += gateAt(m, name, type, 50.0)
+        gates += gateAt(m, name, type, DEFAULT_GATE_WIDTH_M)
         gates.sortBy { it.routeM }
         draft?.let { drafts.writeTraps(it.id, gates) }
         refreshUi(false)
@@ -249,7 +254,7 @@ class RaceTrackBuilderActivity : Activity() {
     private fun gateAt(routeM: Double, name: String, type: String, width: Double): RaceGate {
         val i = nearestPointIndex(routeM)
         val p = points[i]
-        return RaceGate(name, type, p.routeM, p.lat, p.lon, bearingAt(i), width.coerceIn(8.0, 100.0))
+        return RaceGate(name, type, p.routeM, p.lat, p.lon, bearingAt(i), width.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M))
     }
 
     private fun nearestPointIndex(routeM: Double): Int {
@@ -278,7 +283,7 @@ class RaceTrackBuilderActivity : Activity() {
         }
         gates.sortedBy { it.routeM }.forEach { gate ->
             val b = Button(this).apply {
-                text = "${gate.type} · ${gate.name} · ${"%.3f".format(Locale.US, gate.routeM / 1000.0)}km · 폭 ${gate.widthM.toInt()}m"
+                text = "${gate.type} · ${gate.name} · ${"%.3f".format(Locale.US, gate.routeM / 1000.0)}km · 폭 ${"%.1f".format(Locale.US, gate.widthM)}m"
                 textSize = 12f; isAllCaps = false; gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setOnClickListener { editTrap(gate) }
             }
@@ -289,12 +294,16 @@ class RaceTrackBuilderActivity : Activity() {
     private fun editTrap(original: RaceGate) {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), 0, dp(18), 0) }
         val name = EditText(this).apply { hint = "트랩 이름"; setText(original.name); setSingleLine(true) }
-        val width = EditText(this).apply { hint = "폭(m)"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL; setText(original.widthM.toInt().toString()) }
+        val width = EditText(this).apply {
+            hint = "폭(m) · 1~20"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText("%.1f".format(Locale.US, original.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)))
+        }
         val label = TextView(this).apply { textSize = 13f; setTextColor(Color.DKGRAY) }
         val slider = SeekBar(this).apply { max = 1000 }
         val total = points.lastOrNull()?.routeM?.coerceAtLeast(1.0) ?: 1.0
         slider.progress = ((original.routeM / total) * 1000.0).toInt().coerceIn(0, 1000)
-        fun updateLabel(progress: Int) { label.text = "위치 ${"%.3f".format(Locale.US, total * progress / 1000.0 / 1000.0)} km" }
+        fun updateLabel(progress: Int) { label.text = "위치 ${"%.3f".format(Locale.US, total * progress / 1000.0 / 1000.0)} km · 폭 1~20m" }
         updateLabel(slider.progress)
         slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { updateLabel(progress); if (fromUser) { selectedRouteM = total * progress / 1000.0; refreshMap(false) } }
@@ -305,7 +314,7 @@ class RaceTrackBuilderActivity : Activity() {
         AlertDialog.Builder(this).setTitle("${original.type} 트랩 편집").setView(root)
             .setPositiveButton("저장") { _, _ ->
                 val m = total * slider.progress / 1000.0
-                val w = width.text.toString().toDoubleOrNull()?.coerceIn(8.0, 100.0) ?: original.widthM
+                val w = width.text.toString().toDoubleOrNull()?.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M) ?: original.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)
                 val replacement = gateAt(m, name.text.toString().trim().ifBlank { original.name }, original.type, w)
                 val idx = gates.indexOf(original); if (idx >= 0) gates[idx] = replacement
                 gates.sortBy { it.routeM }; draft?.let { drafts.writeTraps(it.id, gates) }; selectedRouteM = replacement.routeM; refreshUi(false)
@@ -342,7 +351,7 @@ class RaceTrackBuilderActivity : Activity() {
         val file = repo.sourceFile(meta.id) ?: run { Toast.makeText(this, "GPX 파일을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show(); return }
         btnPublish.isEnabled = false
         status.setTextColor(Color.LTGRAY); status.text = "관리자 서버에 RACE 코스와 트랩 등록 중…"
-        RaceCoursePublisher(sync).publishAsync(meta, file, gates) { result ->
+        RaceCoursePublisher(sync).publishAsync(meta, file, gates.map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) }) { result ->
             runOnUiThread {
                 btnPublish.isEnabled = true
                 status.setTextColor(if (result.ok) GOOD else WARN)
@@ -353,7 +362,7 @@ class RaceTrackBuilderActivity : Activity() {
     }
 
     private fun writeGpx(target: File, name: String) {
-        val sortedGates = gates.sortedBy { it.routeM }
+        val sortedGates = gates.sortedBy { it.routeM }.map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) }
         target.bufferedWriter(Charsets.UTF_8).use { w ->
             w.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
             w.append("<gpx version=\"1.1\" creator=\"Ride Copilot RACE\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
@@ -373,7 +382,11 @@ class RaceTrackBuilderActivity : Activity() {
     private fun restoreDraft() {
         val d = drafts.active()
         if (d != null && draft?.id != d.id) {
-            draft = d; points.clear(); points.addAll(drafts.points(d.id)); gates.clear(); gates.addAll(drafts.traps(d.id)); selectedRouteM = points.lastOrNull()?.routeM
+            draft = d
+            points.clear(); points.addAll(drafts.points(d.id))
+            gates.clear(); gates.addAll(drafts.traps(d.id).map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) })
+            drafts.writeTraps(d.id, gates)
+            selectedRouteM = points.lastOrNull()?.routeM
         } else if (d != null) draft = d
         refreshUi(d?.state == RaceTrackDraftStore.STATE_RECORDING)
     }
