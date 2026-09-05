@@ -55,15 +55,20 @@ class RaceRouteMatcher(private val course: CourseData) {
 
 object RaceGateMath {
     fun practiceConfig(courseId: String, course: CourseData, sectorCount: Int = 4): RaceEventConfig {
-        val count = sectorCount.coerceIn(2, 8)
         val totalM = course.totalKm * 1000.0
-        val gates = mutableListOf<RaceGate>()
-        gates += gateAt(course, 0.0, "START", "START")
-        for (i in 1 until count) {
-            gates += gateAt(course, totalM * i / count, "S$i", "SECTOR")
+        val embedded = embeddedGates(course)
+        val gates = if (embedded.size >= 2 && embedded.first().type == "START" && embedded.last().type == "FINISH") {
+            embedded
+        } else {
+            val count = sectorCount.coerceIn(2, 8)
+            mutableListOf<RaceGate>().apply {
+                add(gateAt(course, 0.0, "START", "START"))
+                for (i in 1 until count) add(gateAt(course, totalM * i / count, "S$i", "SECTOR"))
+                add(gateAt(course, totalM, "FINISH", "FINISH"))
+            }
         }
-        gates += gateAt(course, totalM, "FINISH", "FINISH")
-        return RaceEventConfig(0L, "PRACTICE", "연습 RACE", null, course.name, totalM, gates)
+        val name = if (embedded.isNotEmpty()) "연습 RACE · 저장 트랩" else "연습 RACE"
+        return RaceEventConfig(0L, "PRACTICE", name, null, course.name, totalM, gates)
     }
 
     fun normalize(config: RaceEventConfig, course: CourseData): RaceEventConfig {
@@ -81,6 +86,26 @@ object RaceGateMath {
         val after = course.pointAtKm(((m + 12.0).coerceAtMost(course.totalKm * 1000.0)) / 1000.0)
         val bearing = bearingDeg(before.lat, before.lon, after.lat, after.lon)
         return RaceGate(name, type, m, p.lat, p.lon, bearing, widthM.coerceIn(8.0, 100.0))
+    }
+
+    private fun embeddedGates(course: CourseData): List<RaceGate> {
+        val out = course.pois.mapNotNull { p ->
+            val t = when (p.type.uppercase()) {
+                "RACE_START" -> "START"
+                "RACE_FINISH" -> "FINISH"
+                "RACE_SECTOR" -> "SECTOR"
+                else -> return@mapNotNull null
+            }
+            val fallback = gateAt(course, p.routeKm * 1000.0, p.name, t, 50.0)
+            val bearing = Regex("(?:^|;)bearing=([-+0-9.]+)").find(p.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: fallback.bearingDeg
+            val width = Regex("(?:^|;)width=([-+0-9.]+)").find(p.desc)?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: fallback.widthM
+            RaceGate(p.name.ifBlank { t }, t, p.routeKm * 1000.0, p.lat, p.lon, bearing, width.coerceIn(8.0, 100.0))
+        }.sortedBy { it.routeM }
+        if (out.count { it.type == "START" } != 1 || out.count { it.type == "FINISH" } != 1) return emptyList()
+        val start = out.firstOrNull { it.type == "START" } ?: return emptyList()
+        val finish = out.lastOrNull { it.type == "FINISH" } ?: return emptyList()
+        if (start.routeM >= finish.routeM) return emptyList()
+        return out.filter { it.routeM in start.routeM..finish.routeM }.sortedBy { it.routeM }
     }
 
     fun crossingFraction(prev: Location, cur: Location, gate: RaceGate): Double? {
