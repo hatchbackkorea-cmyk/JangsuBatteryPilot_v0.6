@@ -21,6 +21,7 @@
     <application android:name=".RideCopilotApp" android:allowBackup="true" android:usesCleartextTraffic="true" android:icon="@drawable/ic_battery_pilot" android:label="GPX 배터리 코파일럿" android:supportsRtl="true" android:theme="@style/AppTheme">
         <activity android:name=".BikeModeChooserActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
         <activity android:name=".RaceActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="race"/></intent-filter></activity>
+        <activity android:name=".RaceBroadcastActivity" android:exported="false" android:screenOrientation="landscape" />
         <activity android:name=".RaceTrackBuilderActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".AdminCenterActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".MainActivity" android:exported="false" android:screenOrientation="portrait" />
