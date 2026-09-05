@@ -53,7 +53,14 @@ class RaceServerClient(context: Context) {
         require(available()) { "Rider Control Center 서버가 연결되지 않았습니다." }
         require(eventCode.isNotBlank() && token.isNotBlank()) { "대회 참가 정보가 없습니다." }
         val code = URLEncoder.encode(eventCode.trim().uppercase(), "UTF-8")
-        val body = JSONObject().apply { put("name", profile.name); put("nickname", profile.nickname); put("bib", profile.bib) }
+        val body = JSONObject().apply {
+            put("profile_id", profile.profileId)
+            put("name", profile.name)
+            put("nickname", profile.nickname)
+            put("bib", profile.bib)
+            put("platform", "ANDROID")
+            put("app_version", UpdateManager.currentVersion(app))
+        }
         return request("PUT", "/api/race/events/$code/participant-profile", body, token)
     }
 
