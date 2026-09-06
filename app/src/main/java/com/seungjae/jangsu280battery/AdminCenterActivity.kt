@@ -90,6 +90,17 @@ class AdminCenterActivity : Activity() {
         tvUpdate = findViewById(R.id.tvAdminUpdateStatus)
         tvSync = findViewById(R.id.tvAdminSyncStatus)
         etServer = findViewById(R.id.etAdminServerUrl)
+        etServer.apply {
+            // Read-only, but the full URL must remain visible/selectable/copyable for field diagnostics.
+            keyListener = null
+            setTextIsSelectable(true)
+            isLongClickable = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setSingleLine(false)
+            maxLines = 2
+            setHorizontallyScrolling(false)
+        }
         etToken = findViewById(R.id.etAdminDeviceToken)
         etName = findViewById(R.id.etAdminRiderName)
         etWeight = findViewById(R.id.etAdminWeight)
@@ -189,7 +200,8 @@ class AdminCenterActivity : Activity() {
             findViewById(R.id.btnAdminBleDiagnostic),
             findViewById(R.id.btnAdminSramDiagnostic)
         ).forEach { it.isEnabled = enabled }
-        etServer.isEnabled = false
+        // Keep server URL read-only via keyListener=null, but never disable it: disabled text cannot be selected or scrolled.
+        etServer.isEnabled = true
         etToken.visibility = View.GONE
     }
 
@@ -228,7 +240,7 @@ class AdminCenterActivity : Activity() {
                 refreshSync(result.message)
                 Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
             }
-        }
+        }.start()
     }
 
     private fun refreshSync(extra: String? = null) {
