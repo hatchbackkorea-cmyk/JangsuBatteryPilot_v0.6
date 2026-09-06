@@ -38,6 +38,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
                 RaceSavedCourseBackfill.sync(activity)
                 RaceSavedCourseBrowserLauncher.install(activity)
                 RaceSavedCourseBrowserBottomFix.apply(activity)
+                RaceSavedCourseInlineFix.apply(activity)
             }
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
