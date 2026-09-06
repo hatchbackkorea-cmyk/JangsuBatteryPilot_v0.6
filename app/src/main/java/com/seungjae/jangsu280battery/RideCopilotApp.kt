@@ -33,6 +33,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             }
             is RaceTrackBuilderActivity -> activity.window.decorView.post {
                 RaceTrackGpsQualityOverlay.install(activity)
+                RaceTrackDraftAutoSync.install(activity)
             }
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
@@ -50,6 +51,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         }
         if (activity is RaceTrackBuilderActivity) {
             RaceTrackGpsQualityOverlay.pause(activity)
+            RaceTrackDraftAutoSync.pause(activity)
         }
         if (activity is MainActivity) {
             RideLiveLocationBridge.pause(activity)
@@ -64,6 +66,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         }
         if (activity is RaceTrackBuilderActivity) {
             RaceTrackGpsQualityOverlay.destroy(activity)
+            RaceTrackDraftAutoSync.pause(activity)
         }
         if (activity is MainActivity) {
             RideLiveLocationBridge.destroy(activity)
