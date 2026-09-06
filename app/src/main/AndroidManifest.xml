@@ -25,6 +25,7 @@
         <activity android:name=".RaceTrackBuilderActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RaceSavedCoursesActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".AdminCenterActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".SystemDiagnosticsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".MainActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RoadGranfondoActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RoadRaceSimulationActivity" android:exported="false" android:screenOrientation="unspecified" />
