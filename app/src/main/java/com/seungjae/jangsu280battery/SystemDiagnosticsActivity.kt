@@ -15,23 +15,35 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-/** Dedicated diagnostics screen to avoid modal/dialog lifecycle crashes in AdminCenterActivity. */
+/** Dedicated diagnostics screen. It never auto-closes and persists progress/results immediately. */
 class SystemDiagnosticsActivity : Activity() {
     private lateinit var resultText: TextView
     private lateinit var diagnoseButton: Button
     private lateinit var repairButton: Button
     private lateinit var copyButton: Button
     private var latestReport: String = ""
+    private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         latestReport = prefs().getString(KEY_REPORT, "").orEmpty()
         setContentView(buildUi())
 
-        when (intent.getStringExtra(EXTRA_MODE)) {
-            MODE_REPAIR -> runDiagnostic(true)
-            MODE_DIAGNOSE -> runDiagnostic(false)
+        val mode = intent.getStringExtra(EXTRA_MODE)
+        if (savedInstanceState == null) {
+            when (mode) {
+                MODE_REPAIR -> runDiagnostic(true)
+                MODE_DIAGNOSE -> runDiagnostic(false)
+            }
         }
+    }
+
+    override fun onBackPressed() {
+        if (running) {
+            Toast.makeText(this, "진단이 끝날 때까지 잠시 기다려 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        super.onBackPressed()
     }
 
     private fun buildUi(): LinearLayout {
@@ -47,7 +59,10 @@ class SystemDiagnosticsActivity : Activity() {
         }
         val back = Button(this).apply {
             text = "←"
-            setOnClickListener { finish() }
+            setOnClickListener {
+                if (running) Toast.makeText(this@SystemDiagnosticsActivity, "진단이 끝날 때까지 잠시 기다려 주세요.", Toast.LENGTH_SHORT).show()
+                else finish()
+            }
         }
         val title = TextView(this).apply {
             text = "🩺 전체 시스템 진단"
@@ -61,7 +76,7 @@ class SystemDiagnosticsActivity : Activity() {
         root.addView(header)
 
         val hint = TextView(this).apply {
-            text = "휴대폰과 Rider Control Center를 한 번에 검사합니다. 문제가 있어도 이 화면을 벗어나지 않고 결과와 복구 내역을 확인할 수 있습니다."
+            text = "이 화면은 진단이 끝날 때까지 자동으로 닫히지 않습니다. 중간 오류도 보고서로 저장합니다."
             textSize = 12f
             setTextColor(Color.LTGRAY)
             setPadding(0, dp(8), 0, dp(10))
@@ -107,38 +122,63 @@ class SystemDiagnosticsActivity : Activity() {
     }
 
     private fun runDiagnostic(repair: Boolean) {
+        if (running) return
+        running = true
         diagnoseButton.isEnabled = false
         repairButton.isEnabled = false
+
+        val started = if (repair) {
+            "자동복구 시작됨\n\n진행 중입니다. 이 문구가 마지막으로 남아 있으면 진단 도중 앱이 중단된 것입니다."
+        } else {
+            "전체 시스템 진단 시작됨\n\n진행 중입니다. 이 문구가 마지막으로 남아 있으면 진단 도중 앱이 중단된 것입니다."
+        }
+        latestReport = started
+        prefs().edit().putString(KEY_REPORT, latestReport).commit()
+        copyButton.isEnabled = true
         resultText.setTextColor(Color.LTGRAY)
-        resultText.text = if (repair) "안전 자동복구를 실행 중입니다…\n완료될 때까지 이 화면에서 기다려 주세요." else "전체 시스템 진단 중입니다…\n완료될 때까지 이 화면에서 기다려 주세요."
+        resultText.text = started + "\n\n1/3 휴대폰 상태 확인\n2/3 Rider Control Center 연결 확인\n3/3 결과 저장"
 
         val done: (SystemDiagnosticsClient.Result) -> Unit = { result ->
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                diagnoseButton.isEnabled = true
-                repairButton.isEnabled = true
-                latestReport = buildString {
-                    append(result.title).append("\n\n").append(result.text)
-                    if (result.raw.isNotBlank()) append("\n\n[RAW JSON]\n").append(result.raw)
+                try {
+                    latestReport = buildString {
+                        append(result.title).append("\n\n").append(result.text)
+                        if (result.raw.isNotBlank()) append("\n\n[RAW JSON]\n").append(result.raw)
+                    }
+                    prefs().edit().putString(KEY_REPORT, latestReport).commit()
+                    copyButton.isEnabled = true
+                    resultText.setTextColor(if (result.ok) Color.rgb(210, 255, 220) else Color.rgb(255, 220, 180))
+                    resultText.text = latestReport
+                } catch (t: Throwable) {
+                    latestReport = "진단 결과 표시 실패\n\n${t.javaClass.simpleName}: ${t.message ?: "메시지 없음"}"
+                    prefs().edit().putString(KEY_REPORT, latestReport).commit()
+                    resultText.text = latestReport
+                    copyButton.isEnabled = true
+                } finally {
+                    running = false
+                    diagnoseButton.isEnabled = true
+                    repairButton.isEnabled = true
                 }
-                prefs().edit().putString(KEY_REPORT, latestReport).apply()
-                copyButton.isEnabled = true
-                resultText.setTextColor(if (result.ok) Color.rgb(210, 255, 220) else Color.rgb(255, 220, 180))
-                resultText.text = latestReport
             }
         }
 
-        if (repair) SystemDiagnosticsClient(this).safeRepairAsync(done)
-        else SystemDiagnosticsClient(this).diagnoseAsync(done)
+        try {
+            val client = SystemDiagnosticsClient(applicationContext)
+            if (repair) client.safeRepairAsync(done) else client.diagnoseAsync(done)
+        } catch (t: Throwable) {
+            done(SystemDiagnosticsClient.Result(false, "진단 시작 실패", "${t.javaClass.simpleName}: ${t.message ?: "메시지 없음"}"))
+        }
     }
 
     private fun copyReport() {
-        if (latestReport.isBlank()) {
-            Toast.makeText(this, "먼저 진단을 실행해 주세요.", Toast.LENGTH_SHORT).show()
+        val report = prefs().getString(KEY_REPORT, latestReport).orEmpty()
+        if (report.isBlank()) {
+            Toast.makeText(this, "아직 저장된 진단이 없습니다.", Toast.LENGTH_SHORT).show()
             return
         }
+        latestReport = report
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("Ride Copilot 진단보고서", latestReport))
+        cm.setPrimaryClip(ClipData.newPlainText("Ride Copilot 진단보고서", report))
         Toast.makeText(this, "진단보고서를 복사했습니다. ChatGPT에 그대로 붙여넣으세요.", Toast.LENGTH_LONG).show()
     }
 
