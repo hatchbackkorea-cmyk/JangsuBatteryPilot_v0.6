@@ -3,6 +3,7 @@ package com.seungjae.jangsu280battery
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -15,6 +16,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -33,8 +35,9 @@ import kotlin.math.sin
 /**
  * Phone RACE course builder inspired by RaceChrono's Create New Track workflow.
  * Raw GPS is recorded first. START/FINISH/Sector traps can be dropped while riding or edited
- * afterwards by moving them along the recorded route. Saving creates a normal local GPX so the
- * rest of Ride Copilot can use it immediately. Administrator phones may explicitly publish it.
+ * afterwards. The large-map editor can freely move each trap off the GPX route and directly edit
+ * direction and gate width. Saving creates a normal local GPX so the rest of Ride Copilot can use
+ * it immediately. Administrator phones may explicitly publish it.
  *
  * Course type:
  * - OPEN: START and FINISH are independent.
@@ -68,6 +71,7 @@ class RaceTrackBuilderActivity : Activity() {
     private lateinit var btnSave: Button
     private lateinit var btnPublish: Button
     private lateinit var btnCourseType: Button
+    private lateinit var btnMapEdit: Button
 
     private var draft: RaceTrackDraftStore.Draft? = null
     private val points = mutableListOf<RaceTrackDraftStore.Point>()
@@ -158,6 +162,15 @@ class RaceTrackBuilderActivity : Activity() {
         }
         body.addView(btnCourseType, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(6) })
 
+        btnMapEdit = Button(this).apply {
+            isAllCaps = false
+            text = "↗ 큰 지도에서 위치 · 방향 · 폭 자유 편집"
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setOnClickListener { openFullscreenTrapEditor() }
+        }
+        body.addView(btnMapEdit, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(7) })
+
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         btnRecord = Button(this).apply { text = "● 새 기록"; setOnClickListener { startNewDraft() } }
         btnPause = Button(this).apply { text = "Ⅱ 일시정지"; setOnClickListener { togglePause() } }
@@ -195,7 +208,7 @@ class RaceTrackBuilderActivity : Activity() {
         body.addView(trapActions)
 
         body.addView(TextView(this).apply {
-            text = "산악 MTB 기준 트랩 폭 기본 5m · 조절 범위 1~20m. 폐쇄형은 START 위치를 FINISH와 자동 공유하고, 진행거리만 마지막 지점으로 유지합니다."
+            text = "산악 MTB 기준 트랩 폭 기본 5m · 조절 범위 1~20m. 큰 지도에서는 코스선에 붙이지 않고 화살표를 원하는 위치·방향·폭으로 직접 편집합니다. 폐쇄형은 START 위치를 FINISH와 자동 공유합니다."
             textSize = 10.5f; setTextColor(Color.GRAY); setPadding(0, dp(8), 0, dp(5))
         })
         trapContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -231,6 +244,83 @@ class RaceTrackBuilderActivity : Activity() {
             }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    private fun openFullscreenTrapEditor() {
+        if (points.size < 2) {
+            Toast.makeText(this, "GPS 코스가 아직 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (gates.isEmpty()) {
+            Toast.makeText(this, "START/CP/FINISH를 하나 이상 먼저 추가해 주세요.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(7, 16, 26))
+        }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(8), dp(6))
+            setBackgroundColor(Color.rgb(13, 21, 32))
+        }
+        bar.addView(TextView(this).apply {
+            text = "RACE 큰 지도 편집"
+            textSize = 19f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, dp(50), 1f))
+        bar.addView(Button(this).apply {
+            text = "완료"
+            isAllCaps = false
+            setTypeface(typeface, Typeface.BOLD)
+            setOnClickListener { dialog.dismiss() }
+        }, LinearLayout.LayoutParams(dp(88), dp(44)))
+        root.addView(bar)
+
+        root.addView(TextView(this).apply {
+            text = "화살표 몸통 드래그 = 위치 · 화살표 끝 흰 점 = 방향 · 옆 흰 점 = 폭 1~20m · 코스선 자동보정 없음"
+            textSize = 12f
+            setTextColor(Color.rgb(200, 216, 235))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundColor(Color.rgb(10, 28, 43))
+        }, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        lateinit var editorMap: RaceTrackBuilderMapView
+        editorMap = RaceTrackBuilderMapView(this)
+        editorMap.setTrapEditListener(RaceTrackBuilderMapView.TrapEditListener { index, lat, lon, bearingDeg, widthM ->
+            if (index !in gates.indices) return@TrapEditListener
+            val original = gates[index]
+            if (courseType == TYPE_CLOSED && original.type == "FINISH") {
+                Toast.makeText(this, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show()
+                editorMap.render(points, gates, selectedRouteM, false)
+                return@TrapEditListener
+            }
+            gates[index] = original.copy(
+                lat = lat,
+                lon = lon,
+                bearingDeg = ((bearingDeg % 360.0) + 360.0) % 360.0,
+                widthM = widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)
+            )
+            selectedRouteM = original.routeM
+            if (courseType == TYPE_CLOSED && original.type == "START") {
+                syncClosedLoopFinish(persist = true)
+            } else {
+                draft?.let { drafts.writeTraps(it.id, gates) }
+            }
+            editorMap.render(points, gates, selectedRouteM, false)
+        })
+        root.addView(editorMap, LinearLayout.LayoutParams(-1, 0, 1f))
+        dialog.setContentView(root)
+        dialog.setOnShowListener { editorMap.render(points, gates, selectedRouteM, false) }
+        dialog.setOnDismissListener {
+            editorMap.setTrapEditListener(null, false)
+            refreshUi(false)
+        }
+        dialog.show()
     }
 
     private fun startNewDraft() {
@@ -355,7 +445,7 @@ class RaceTrackBuilderActivity : Activity() {
         gates.sortedBy { it.routeM }.forEach { gate ->
             val lockedFinish = courseType == TYPE_CLOSED && gate.type == "FINISH"
             val b = Button(this).apply {
-                text = "${gate.type} · ${gate.name} · ${"%.3f".format(Locale.US, gate.routeM / 1000.0)}km · 폭 ${"%.1f".format(Locale.US, gate.widthM)}m${if (lockedFinish) " · START와 동일" else ""}"
+                text = "${gate.type} · ${gate.name} · ${"%.3f".format(Locale.US, gate.routeM / 1000.0)}km · 폭 ${"%.1f".format(Locale.US, gate.widthM)}m · 방향 ${Math.round(gate.bearingDeg)}°${if (lockedFinish) " · START와 동일" else ""}"
                 textSize = 12f; isAllCaps = false; gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setOnClickListener {
                     if (lockedFinish) Toast.makeText(this@RaceTrackBuilderActivity, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show()
@@ -510,6 +600,7 @@ class RaceTrackBuilderActivity : Activity() {
         btnFinish.isEnabled = d != null && state != RaceTrackDraftStore.STATE_STOPPED
         btnAddTrap.text = if (courseType == TYPE_CLOSED) "+ START / SECTOR" else "+ 트랩 추가"
         btnAddTrap.isEnabled = points.size >= 2
+        btnMapEdit.isEnabled = points.size >= 2 && gates.isNotEmpty()
         btnSave.isEnabled = points.size >= 2
         btnPublish.visibility = if (sync.isAdminDeviceCached()) View.VISIBLE else View.GONE
         btnPublish.isEnabled = sync.isAdminDeviceCached() && savedMeta != null
