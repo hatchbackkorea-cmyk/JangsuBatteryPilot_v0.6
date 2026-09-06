@@ -40,6 +40,9 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
                 RaceSavedCourseBrowserBottomFix.apply(activity)
                 RaceSavedCourseInlineFix.apply(activity)
             }
+            is AdminCenterActivity -> activity.window.decorView.post {
+                SystemDiagnosticsUiInstaller.install(activity)
+            }
             is MainActivity -> activity.window.decorView.post {
                 installVoiceBoostControl(activity)
                 RideWarningOverlayController.install(activity)
