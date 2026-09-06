@@ -34,6 +34,7 @@ class RaceActivity : Activity() {
 
     private var mode = MODE_HOME
     private var currentEventCode = ""
+    private var qrTargetEventCode = ""
     private var swipeDownX = 0f
     private var swipeDownY = 0f
     private var startButton: Button? = null
@@ -67,8 +68,9 @@ class RaceActivity : Activity() {
         val deepServer = intent?.data?.getQueryParameter("server").orEmpty().trim()
         if (deepServer.isNotBlank()) client.setEventServer(deepServer)
         val deepEvent = intent?.data?.getQueryParameter("event")?.trim()?.uppercase().orEmpty()
+        qrTargetEventCode = deepEvent
         currentEventCode = deepEvent.ifBlank { store.lastJoined()?.config?.eventCode.orEmpty() }
-        if (deepEvent.isNotBlank()) showEvents() else showHome()
+        if (deepEvent.isNotBlank()) showEvents(qrOnly = true) else showHome()
         Thread { runCatching { client.flushPending() } }.start()
         handler.post(poller)
     }
@@ -180,8 +182,9 @@ class RaceActivity : Activity() {
         val saved = RaceProfileStore.save(this, riderId, nickname, bib); hideKeyboard(); registrationStatus?.setTextColor(GOOD); registrationStatus?.text = "✓ 선수등록 저장 완료 · 배번 ${saved.bib} · ${saved.nickname} (${saved.name})"; Toast.makeText(this, "선수등록이 저장되었습니다.", Toast.LENGTH_SHORT).show()
     }
 
-    private fun showEvents() {
+    private fun showEvents(qrOnly: Boolean = false) {
         mode = MODE_EVENTS
+        if (!qrOnly) qrTargetEventCode = ""
         val profile = RaceProfileStore.profile(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
         setContentView(root); addTopBar(root, "대회 참가", true)
@@ -189,7 +192,7 @@ class RaceActivity : Activity() {
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(18), dp(18), dp(28)) }
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         body.addView(TextView(this).apply { text = if (profile.isReady) "배번 ${profile.bib} · 이름 ${profile.name} · 닉네임 ${profile.nickname}" else "선수등록이 필요합니다."; textSize = 16f; setTextColor(if (profile.isReady) GOOD else WARN); setTypeface(typeface, Typeface.BOLD) })
-        body.addView(TextView(this).apply { text = "QR로 들어온 경우 현장 서버와 대회코드가 자동 설정됩니다. 대기중인 방은 운영자가 오픈할 때까지 참가할 수 없습니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(5), 0, dp(10)) })
+        body.addView(TextView(this).apply { text = if (qrTargetEventCode.isNotBlank()) "QR에서 선택한 대회 ${qrTargetEventCode}만 표시합니다. 다른 대회가 아니라 이 QR의 대회에 참가하게 됩니다." else "QR로 들어온 경우 현장 서버와 대회코드가 자동 설정됩니다. 대기중인 방은 운영자가 오픈할 때까지 참가할 수 없습니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(5), 0, dp(10)) })
         body.addView(Button(this).apply { text = "새로고침"; setOnClickListener { loadEventsAsync() } }, LinearLayout.LayoutParams(-1, dp(48)))
         joinStatus = TextView(this).apply { text = "개설된 대회를 불러오는 중…"; textSize = 13f; setTextColor(Color.LTGRAY); setPadding(0, dp(10), 0, dp(8)) }
         body.addView(joinStatus); eventsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }; body.addView(eventsContainer, LinearLayout.LayoutParams(-1, -2)); loadEventsAsync()
@@ -198,14 +201,15 @@ class RaceActivity : Activity() {
     private fun loadEventsAsync() {
         if (mode != MODE_EVENTS) return
         joinStatus?.setTextColor(Color.LTGRAY); joinStatus?.text = "개설된 대회를 불러오는 중…"; eventsContainer?.removeAllViews()
+        val qrCode = qrTargetEventCode
         Thread {
-            val result = runCatching { client.listEvents() }
+            val result = if (qrCode.isNotBlank()) runCatching { listOf(client.eventState(qrCode)) } else runCatching { client.listEvents() }
             runOnUiThread {
                 if (mode != MODE_EVENTS) return@runOnUiThread
                 result.onSuccess { events ->
                     if (events.isEmpty()) { joinStatus?.text = "현재 표시할 대회가 없습니다."; return@onSuccess }
                     val selected = currentEventCode.takeIf { it.isNotBlank() }?.let { code -> events.firstOrNull { it.config.eventCode == code } }
-                    joinStatus?.text = selected?.notice?.takeIf { it.isNotBlank() } ?: "개설된 대회 ${events.size}개"
+                    joinStatus?.text = if (qrCode.isNotBlank()) "QR 대회 · ${events.first().config.name} · ${events.first().config.eventCode}" else selected?.notice?.takeIf { it.isNotBlank() } ?: "개설된 대회 ${events.size}개"
                     joinStatus?.setTextColor(if (selected?.phase == "WAITING") WARN else Color.LTGRAY)
                     events.forEach { addEventCard(it) }
                 }.onFailure { e -> joinStatus?.setTextColor(WARN); joinStatus?.text = "대회 목록을 불러오지 못했습니다.\n${e.message ?: "서버 연결을 확인하세요."}\n서버: ${client.baseUrl()}" }
