@@ -134,8 +134,8 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
               function clearGates(){gateMarkers.forEach(x=>x.marker.remove());gateMarkers=[];if(cursor){cursor.remove();cursor=null;}}
               function visual(rec){
                 const s=rec.state,el=rec.el,vec=el.querySelector('.gateVector'),line=el.querySelector('.widthLine'),wh=el.querySelector('.widthHandle');
-                vec.style.transform=`rotate(${norm(s.bearing)}deg)`;
-                const span=12+clamp(Number(s.width),1,20)*1.6;line.style.left=`${-span}px`;line.style.width=`${span*2}px`;wh.style.left=`${span-9}px`;
+                vec.style.transform='rotate('+norm(s.bearing)+'deg)';
+                const span=12+clamp(Number(s.width),1,20)*1.6;line.style.left=(-span)+'px';line.style.width=(span*2)+'px';wh.style.left=(span-9)+'px';
               }
               function selectGate(index){selectedIndex=index;gateMarkers.forEach(rec=>{rec.el.classList.toggle('selected',rec.state.index===selectedIndex);visual(rec)});}
               function beginHandle(e,rec,role){
@@ -151,7 +151,8 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
               document.addEventListener('pointermove',moveHandle,{passive:false});document.addEventListener('pointerup',endHandle,{passive:false});document.addEventListener('pointercancel',endHandle,{passive:false});
               function makeGate(f){
                 const p=f.properties||{},idx=Number(p.index||0),typ=String(p.gateType||'SECTOR'),c=colorFor(typ),el=document.createElement('div');el.className='gateWrap';el.style.setProperty('--gate',c);
-                el.innerHTML=`<div class="gateVector"><div class="gateShaft"></div><div class="gateTip"></div><div class="widthLine"></div><div class="widthHandle"></div><div class="directionHandle"></div></div><div class="gateCenter"></div><div class="gateHit"></div><div class="gateLabel">${typ==='START'?'▶ ':typ==='FINISH'?'■ ':'◆ '}${String(p.name||'')}</div>`;
+                const prefix=typ==='START'?'▶ ':typ==='FINISH'?'■ ':'◆ ';
+                el.innerHTML='<div class="gateVector"><div class="gateShaft"></div><div class="gateTip"></div><div class="widthLine"></div><div class="widthHandle"></div><div class="directionHandle"></div></div><div class="gateCenter"></div><div class="gateHit"></div><div class="gateLabel">'+prefix+String(p.name||'')+'</div>';
                 const state={index:idx,lat:Number(f.geometry.coordinates[1]),lon:Number(f.geometry.coordinates[0]),bearing:norm(p.bearingDeg),width:clamp(Number(p.widthM||5),1,20)};
                 const marker=new maplibregl.Marker({element:el,anchor:'center',draggable:editMode}).setLngLat([state.lon,state.lat]).addTo(map),rec={marker,el,state};
                 marker.on('dragstart',()=>selectGate(idx));marker.on('dragend',()=>{const ll=marker.getLngLat();state.lat=ll.lat;state.lon=ll.lng;emit(state)});
@@ -162,7 +163,6 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
               }
               function redrawGates(){
                 clearGates();(lastFeatures||[]).forEach(f=>gateMarkers.push(makeGate(f)));if(selectedIndex<0&&gateMarkers.length)selectedIndex=gateMarkers[0].state.index;selectGate(selectedIndex);
-                if(!editMode&&lastCoords&&lastCoords.length){const selected=null;}
               }
               window.setRaceTrackEditMode=function(on){editMode=!!on;document.getElementById('editHint').classList.toggle('on',editMode);if(loaded&&lastFeatures.length)redrawGates();};
               window.renderRaceTrack=function(coords,features,selected,follow){
