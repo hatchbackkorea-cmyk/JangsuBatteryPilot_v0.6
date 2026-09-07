@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#080D12</color>
-    <color name="panel">#111A23</color>
-    <color name="panel2">#172330</color>
-    <color name="text_primary">#F7FAFC</color>
-    <color name="text_secondary">#9EAFBF</color>
-    <color name="line">#263746</color>
-    <color name="accent">#5AC8FA</color>
-    <color name="accent_dark">#123346</color>
-    <color name="good">#67D77D</color>
-    <color name="warn">#F2C84B</color>
-    <color name="orange">#F39A4A</color>
-    <color name="danger">#F26161</color>
-    <!-- v0.20.0 Avinox mode HUD -->
-    <color name="assist_idle">#263746</color>
+    <color name="bg">#FFFFFF</color>
+    <color name="panel">#F7F9FC</color>
+    <color name="panel2">#EEF3F9</color>
+    <color name="text_primary">#080A0D</color>
+    <color name="text_secondary">#5E6978</color>
+    <color name="line">#D7DFEA</color>
+    <color name="accent">#0C5BEB</color>
+    <color name="accent_dark">#E8F0FF</color>
+    <color name="good">#11864B</color>
+    <color name="warn">#FF1238</color>
+    <color name="orange">#E26B18</color>
+    <color name="danger">#D91635</color>
+    <!-- Avinox mode HUD keeps semantic colors while the surrounding app uses the TimeGate light palette. -->
+    <color name="assist_idle">#D7DFEA</color>
     <color name="assist_eco">#239B56</color>
-    <color name="assist_auto">#1976D2</color>
-    <color name="assist_trail">#F2C84B</color>
+    <color name="assist_auto">#0C5BEB</color>
+    <color name="assist_trail">#E7A80D</color>
     <color name="assist_turbo">#F57C00</color>
     <color name="assist_dark_text">#101820</color>
-    <color name="profile_line">#D5E3ED</color>
-    <color name="profile_fill">#263746</color>
-    <color name="preview_band">#263B4C</color>
+    <color name="profile_line">#C6D3E1</color>
+    <color name="profile_fill">#EEF3F9</color>
+    <color name="preview_band">#E8F0FF</color>
 </resources>
