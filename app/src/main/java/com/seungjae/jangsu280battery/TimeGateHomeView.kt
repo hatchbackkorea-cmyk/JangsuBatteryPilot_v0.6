@@ -7,29 +7,21 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import kotlin.math.cos
-import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
- * TimeGate launcher/home screen.
+ * TimeGate home screen v0.34.31.
  *
- * The UI intentionally stays drawable/code based so the approved visual scales cleanly across
- * Android phones without shipping a screenshot as the interface. Colors are limited to the
- * approved white / blue / red / black palette.
+ * The approved 941x1672 mock-up is treated as one fixed background canvas.
+ * Only invisible hit areas are layered above it, so widgets can no longer drift away
+ * from the approved composition. Coordinates below are taken from the approved mock-up.
  */
 class TimeGateHomeView(context: Context) : FrameLayout(context) {
     var onTimingClick: (() -> Unit)? = null
@@ -38,506 +30,195 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
     var onSettingsLongClick: (() -> Unit)? = null
     var onBrandLongClick: (() -> Unit)? = null
 
-    private val blue = Color.rgb(12, 91, 235)
-    private val red = Color.rgb(255, 18, 56)
-    private val black = Color.rgb(8, 10, 13)
-    private val white = Color.WHITE
+    private val art = HomeBackgroundView(context)
 
     init {
-        setBackgroundColor(white)
-        build()
+        setBackgroundColor(Color.WHITE)
+        addView(art, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        addHotspot(58f, 670f, 585f, 821f) { onTimingClick?.invoke() }
+        addHotspot(58f, 840f, 585f, 987f) { onWatchClick?.invoke() }
+        addHotspot(58f, 1007f, 574f, 1155f, longClick = { onSettingsLongClick?.invoke() }) { onSettingsClick?.invoke() }
+        addHotspot(55f, 120f, 610f, 305f, longClick = { onBrandLongClick?.invoke() }) { }
+
+        // Compatibility plumbing used by BikeModeChooserActivity. Hidden from the public home UI.
+        addView(TextView(context).apply { id = R.id.tvBikeModeVersion; visibility = View.GONE }, LayoutParams(1, 1))
+        addView(TextView(context).apply { id = R.id.tvBikeModeServerStatus; visibility = View.GONE }, LayoutParams(1, 1))
+        addView(Button(context).apply { id = R.id.btnBikeModeCheckUpdate; visibility = View.GONE }, LayoutParams(1, 1))
+        addView(Button(context).apply { id = R.id.btnBikeModeAdmin; visibility = View.GONE }, LayoutParams(1, 1))
     }
 
-    private fun build() {
-        val metrics = resources.displayMetrics
-        val widthDp = metrics.widthPixels / metrics.density
-        val scale = (widthDp / 390f).coerceIn(0.88f, 1.12f)
-        fun s(v: Int): Int = dp((v * scale).roundToInt())
-
-        val scroll = ScrollView(context).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            setBackgroundColor(white)
-        }
-        addView(scroll, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-
-        val contentHeight = max(metrics.heightPixels - dp(24), s(820))
-        val content = FrameLayout(context).apply {
-            setBackgroundColor(white)
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, contentHeight)
-        }
-        scroll.addView(content)
-
-        content.addView(
-            TimeGateArtView(context),
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        )
-
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+    private fun addHotspot(
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        longClick: (() -> Unit)? = null,
+        click: () -> Unit
+    ) {
+        val v = View(context).apply {
             isClickable = true
             isFocusable = true
-            contentDescription = "TimeGate"
-            setOnLongClickListener {
-                onBrandLongClick?.invoke()
-                true
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { click() }
+            if (longClick != null) {
+                setOnLongClickListener { longClick(); true }
             }
         }
-        header.addView(StopwatchLogoView(context), LinearLayout.LayoutParams(s(56), s(56)))
-
-        val brandBox = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(s(7), 0, 0, 0)
-        }
-        val brandRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.BOTTOM
-        }
-        brandRow.addView(TextView(context).apply {
-            text = "Time"
-            setTextColor(blue)
-            textSize = 34f * scale
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            includeFontPadding = false
-        })
-        brandRow.addView(TextView(context).apply {
-            text = "Gate"
-            setTextColor(red)
-            textSize = 34f * scale
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            includeFontPadding = false
-        })
-        brandBox.addView(brandRow)
-
-        val slogan = SpannableString("생동감 있는 실시간 라이브중계").apply {
-            setSpan(ForegroundColorSpan(blue), 0, 6, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            setSpan(ForegroundColorSpan(red), 6, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-        brandBox.addView(TextView(context).apply {
-            text = slogan
-            textSize = 12.5f * scale
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            includeFontPadding = false
-        })
-        header.addView(brandBox)
-        content.addView(header, frameParams(s(292), s(74), s(22), s(22)))
-
-        val hero = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.START
-        }
-        hero.addView(TextView(context).apply {
-            text = "LIVE"
-            setTextColor(red)
-            textSize = 46f * scale
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            includeFontPadding = false
-        })
-        hero.addView(TextView(context).apply {
-            text = "랩타이머"
-            setTextColor(black)
-            textSize = 45f * scale
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            includeFontPadding = false
-        })
-        content.addView(hero, frameParams(s(258), s(132), s(24), s(164)))
-
-        val timing = makeMenuCard(
-            title = "기록측정",
-            subtitle = "지금 시작하세요",
-            fill = blue,
-            foreground = white,
-            icon = MenuIcon.PLAY
-        ).apply { setOnClickListener { onTimingClick?.invoke() } }
-        content.addView(timing, frameParams(s(236), s(72), s(22), s(350)))
-
-        val watch = makeMenuCard(
-            title = "관전하기",
-            subtitle = "실시간 기록을 확인하세요",
-            fill = red,
-            foreground = white,
-            icon = MenuIcon.MONITOR
-        ).apply { setOnClickListener { onWatchClick?.invoke() } }
-        content.addView(watch, frameParams(s(236), s(72), s(22), s(432)))
-
-        val settings = makeMenuCard(
-            title = "설정",
-            subtitle = "앱 설정을 관리하세요",
-            fill = white,
-            foreground = black,
-            icon = MenuIcon.SETTINGS,
-            stroke = black
-        ).apply {
-            setOnClickListener { onSettingsClick?.invoke() }
-            setOnLongClickListener {
-                onSettingsLongClick?.invoke()
-                true
-            }
-        }
-        content.addView(settings, frameParams(s(236), s(72), s(22), s(514)))
-
-        // Compatibility plumbing: BikeModeChooserActivity keeps server/update/admin logic alive,
-        // but these maintenance views no longer clutter the public TimeGate home screen.
-        content.addView(TextView(context).apply {
-            id = R.id.tvBikeModeVersion
-            visibility = View.GONE
-        }, frameParams(1, 1, 0, 0))
-        content.addView(TextView(context).apply {
-            id = R.id.tvBikeModeServerStatus
-            visibility = View.GONE
-        }, frameParams(1, 1, 0, 0))
-        content.addView(Button(context).apply {
-            id = R.id.btnBikeModeCheckUpdate
-            visibility = View.GONE
-            text = "⬆ 앱 업데이트 확인"
-        }, frameParams(1, 1, 0, 0))
-        content.addView(Button(context).apply {
-            id = R.id.btnBikeModeAdmin
-            visibility = View.GONE
-            text = "관리자"
-        }, frameParams(1, 1, 0, 0))
+        addView(v)
+        v.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ -> positionHotspot(view, x1, y1, x2, y2) }
+        post { positionHotspot(v, x1, y1, x2, y2) }
     }
 
-    private fun makeMenuCard(
-        title: String,
-        subtitle: String,
-        fill: Int,
-        foreground: Int,
-        icon: MenuIcon,
-        stroke: Int? = null
-    ): LinearLayout {
-        val density = resources.displayMetrics.density
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(8), dp(12), dp(8))
-            isClickable = true
-            isFocusable = true
-            background = GradientDrawable().apply {
-                cornerRadius = 18f * density
-                setColor(fill)
-                stroke?.let { setStroke(dp(1), it) }
-            }
-
-            addView(MenuIconView(context, icon, foreground), LinearLayout.LayoutParams(dp(48), dp(48)))
-
-            val textBox = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(10), 0, 0, 0)
-            }
-            textBox.addView(TextView(context).apply {
-                text = title
-                setTextColor(foreground)
-                textSize = 20f
-                setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-                includeFontPadding = false
-            })
-            textBox.addView(TextView(context).apply {
-                text = subtitle
-                setTextColor(foreground)
-                alpha = 0.88f
-                textSize = 12f
-                includeFontPadding = false
-            })
-            addView(textBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-
-            addView(TextView(context).apply {
-                text = "›"
-                setTextColor(foreground)
-                textSize = 38f
-                gravity = Gravity.CENTER
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.MATCH_PARENT))
+    private fun positionHotspot(v: View, x1: Float, y1: Float, x2: Float, y2: Float) {
+        if (width <= 0 || height <= 0) return
+        val s = min(width / REF_W, height / REF_H)
+        val drawnW = REF_W * s
+        val drawnH = REF_H * s
+        val ox = (width - drawnW) / 2f
+        val oy = (height - drawnH) / 2f
+        v.layoutParams = LayoutParams(((x2 - x1) * s).roundToInt(), ((y2 - y1) * s).roundToInt()).apply {
+            leftMargin = (ox + x1 * s).roundToInt()
+            topMargin = (oy + y1 * s).roundToInt()
         }
     }
 
-    private fun frameParams(w: Int, h: Int, left: Int, top: Int) = FrameLayout.LayoutParams(w, h).apply {
-        leftMargin = left
-        topMargin = top
-    }
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).roundToInt()
-
-    private enum class MenuIcon { PLAY, MONITOR, SETTINGS }
-
-    private inner class StopwatchLogoView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        override fun onDraw(canvas: Canvas) {
-            val cx = width * 0.48f
-            val cy = height * 0.55f
-            val r = width * 0.34f
-
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = width * 0.075f
-            paint.color = blue
-            canvas.drawCircle(cx, cy, r, paint)
-
-            paint.style = Paint.Style.FILL
-            canvas.drawRoundRect(
-                RectF(cx - width * 0.10f, cy - r - height * 0.16f, cx + width * 0.10f, cy - r - height * 0.07f),
-                width * 0.03f,
-                width * 0.03f,
-                paint
-            )
-
-            paint.color = red
-            canvas.save()
-            canvas.rotate(43f, cx + r * 0.72f, cy - r * 0.72f)
-            canvas.drawRoundRect(
-                RectF(cx + r * 0.57f, cy - r * 0.88f, cx + r * 0.92f, cy - r * 0.65f),
-                width * 0.02f,
-                width * 0.02f,
-                paint
-            )
-            canvas.restore()
-
-            paint.strokeWidth = width * 0.055f
-            paint.strokeCap = Paint.Cap.ROUND
-            canvas.drawLine(cx, cy, cx + r * 0.40f, cy - r * 0.42f, paint)
-            canvas.drawCircle(cx, cy, width * 0.045f, paint)
-        }
-    }
-
-    private inner class MenuIconView(context: Context, private val icon: MenuIcon, private val color: Int) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            val cx = width / 2f
-            val cy = height / 2f
-            val r = width * 0.34f
-            paint.color = color
-            paint.strokeWidth = width * 0.07f
-
-            when (icon) {
-                MenuIcon.PLAY -> {
-                    paint.style = Paint.Style.STROKE
-                    canvas.drawCircle(cx, cy, r, paint)
-                    paint.style = Paint.Style.FILL
-                    val path = Path().apply {
-                        moveTo(cx - r * 0.32f, cy - r * 0.48f)
-                        lineTo(cx + r * 0.58f, cy)
-                        lineTo(cx - r * 0.32f, cy + r * 0.48f)
-                        close()
-                    }
-                    canvas.drawPath(path, paint)
-                }
-                MenuIcon.MONITOR -> {
-                    paint.style = Paint.Style.STROKE
-                    val box = RectF(cx - r, cy - r * 0.72f, cx + r, cy + r * 0.45f)
-                    canvas.drawRoundRect(box, width * 0.06f, width * 0.06f, paint)
-                    canvas.drawLine(cx, cy + r * 0.45f, cx, cy + r * 0.82f, paint)
-                    canvas.drawLine(cx - r * 0.42f, cy + r * 0.82f, cx + r * 0.42f, cy + r * 0.82f, paint)
-                }
-                MenuIcon.SETTINGS -> {
-                    paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = width * 0.075f
-                    canvas.drawCircle(cx, cy, r * 0.48f, paint)
-                    for (i in 0 until 8) {
-                        val a = Math.toRadians(i * 45.0)
-                        val x1 = cx + cos(a).toFloat() * r * 0.68f
-                        val y1 = cy + sin(a).toFloat() * r * 0.68f
-                        val x2 = cx + cos(a).toFloat() * r
-                        val y2 = cy + sin(a).toFloat() * r
-                        canvas.drawLine(x1, y1, x2, y2, paint)
-                    }
-                }
-            }
-        }
-    }
-
-    private inner class TimeGateArtView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val routePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            color = blue
-        }
+    private inner class HomeBackgroundView(context: Context) : View(context) {
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val blue = Color.rgb(12, 91, 235)
+        private val red = Color.rgb(255, 18, 56)
+        private val black = Color.rgb(4, 5, 8)
+        private val gray = Color.rgb(238, 243, 249)
+        private val darkGray = Color.rgb(39, 49, 64)
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val w = width.toFloat()
-            val h = height.toFloat()
-            if (w <= 0f || h <= 0f) return
-
-            routePaint.strokeWidth = w * 0.018f
-            val startX = w * 0.80f
-            val startY = h * 0.135f
-            val cpX = w * 0.82f
-            val cpY = h * 0.325f
-            val finishX = w * 0.75f
-            val finishY = h * 0.545f
-
-            val route = Path().apply {
-                moveTo(startX, startY)
-                cubicTo(w * 0.70f, h * 0.18f, w * 0.91f, h * 0.23f, cpX, cpY)
-                cubicTo(w * 0.70f, h * 0.38f, w * 0.90f, h * 0.45f, finishX, finishY)
-            }
-            canvas.drawPath(route, routePaint)
-
-            drawStart(canvas, startX, startY - h * 0.025f, w)
-            drawCheckpoint(canvas, cpX, cpY, w)
-            drawFinish(canvas, finishX, finishY, w)
-            drawStopwatch(canvas, w, h)
-        }
-
-        private fun drawStart(canvas: Canvas, x: Float, y: Float, w: Float) {
-            val r = w * 0.026f
-            paint.style = Paint.Style.FILL
-            paint.color = red
-            canvas.drawCircle(x, y, r, paint)
-            val pin = Path().apply {
-                moveTo(x - r * 0.72f, y + r * 0.55f)
-                lineTo(x + r * 0.72f, y + r * 0.55f)
-                lineTo(x, y + r * 1.65f)
-                close()
-            }
-            canvas.drawPath(pin, paint)
-            paint.color = white
-            canvas.drawCircle(x, y, r * 0.38f, paint)
-            drawText(canvas, "START", x + r * 1.55f, y + r * 0.45f, w * 0.036f, black, Paint.Align.LEFT)
-        }
-
-        private fun drawCheckpoint(canvas: Canvas, x: Float, y: Float, w: Float) {
-            val r = w * 0.030f
-            paint.style = Paint.Style.FILL
-            paint.color = blue
-            canvas.drawCircle(x, y, r, paint)
-            paint.color = white
-            canvas.drawCircle(x, y, r * 0.70f, paint)
-            paint.color = red
-            canvas.drawCircle(x, y, r * 0.42f, paint)
-            drawText(canvas, "CP1", x + r * 1.35f, y + r * 0.45f, w * 0.036f, black, Paint.Align.LEFT)
-        }
-
-        private fun drawFinish(canvas: Canvas, x: Float, y: Float, w: Float) {
-            val flagW = w * 0.085f
-            val flagH = flagW * 0.65f
-            paint.style = Paint.Style.FILL
-            paint.color = black
-            canvas.drawRoundRect(
-                RectF(x - flagW * 0.65f, y - flagH * 0.80f, x - flagW * 0.58f, y + flagH * 0.75f),
-                2f,
-                2f,
-                paint
-            )
-
-            val left = x - flagW * 0.58f
-            val top = y - flagH * 0.75f
-            val cellW = flagW / 4f
-            val cellH = flagH / 3f
-            for (row in 0 until 3) {
-                for (col in 0 until 4) {
-                    paint.color = if ((row + col) % 2 == 0) black else white
-                    canvas.drawRect(
-                        left + col * cellW,
-                        top + row * cellH,
-                        left + (col + 1) * cellW,
-                        top + (row + 1) * cellH,
-                        paint
-                    )
-                }
-            }
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = max(2f, w * 0.004f)
-            paint.color = black
-            canvas.drawRect(left, top, left + flagW, top + flagH, paint)
-
-            paint.style = Paint.Style.FILL
-            paint.color = red
-            canvas.drawCircle(x - flagW * 0.62f, y + flagH * 0.82f, w * 0.012f, paint)
-            drawText(canvas, "FINISH", x + flagW * 0.72f, y + flagH * 0.23f, w * 0.036f, black, Paint.Align.LEFT)
-        }
-
-        private fun drawStopwatch(canvas: Canvas, w: Float, h: Float) {
-            val sw = w * 0.70f
-            val sh = h * 0.31f
-            val left = w * 0.48f
-            val top = h * 0.625f
-            val cx = left + sw * 0.50f
-            val cy = top + sh * 0.47f
-
+            canvas.drawColor(Color.WHITE)
+            val s = min(width / REF_W, height / REF_H)
+            val ox = (width - REF_W * s) / 2f
+            val oy = (height - REF_H * s) / 2f
             canvas.save()
-            canvas.rotate(-7f, cx, cy)
+            canvas.translate(ox, oy)
+            canvas.scale(s, s)
 
-            paint.style = Paint.Style.FILL
-            paint.color = blue
-            canvas.drawRoundRect(RectF(left, top, left + sw, top + sh), w * 0.055f, w * 0.055f, paint)
-            paint.color = black
-            canvas.drawRoundRect(
-                RectF(left + w * 0.018f, top + h * 0.015f, left + sw - w * 0.018f, top + sh - h * 0.015f),
-                w * 0.045f,
-                w * 0.045f,
-                paint
-            )
-            paint.color = blue
-            canvas.drawRoundRect(
-                RectF(left + w * 0.032f, top + h * 0.028f, left + sw - w * 0.032f, top + sh - h * 0.028f),
-                w * 0.040f,
-                w * 0.040f,
-                paint
-            )
-            paint.color = white
-            val face = RectF(
-                left + w * 0.070f,
-                top + h * 0.075f,
-                left + sw - w * 0.055f,
-                top + sh - h * 0.038f
-            )
-            canvas.drawRoundRect(face, w * 0.030f, w * 0.030f, paint)
-
-            paint.color = red
-            canvas.drawRoundRect(
-                RectF(left + sw * 0.29f, top - h * 0.035f, left + sw * 0.52f, top + h * 0.008f),
-                w * 0.025f,
-                w * 0.025f,
-                paint
-            )
-            canvas.drawRoundRect(
-                RectF(left + sw * 0.05f, top + h * 0.008f, left + sw * 0.17f, top + h * 0.055f),
-                w * 0.018f,
-                w * 0.018f,
-                paint
-            )
-
-            drawText(canvas, "TIME", face.left + w * 0.030f, face.top + h * 0.055f, w * 0.036f, black, Paint.Align.LEFT)
-            drawText(canvas, "00:12.34", face.left + w * 0.025f, face.top + h * 0.135f, w * 0.073f, black, Paint.Align.LEFT)
-            drawText(canvas, "BEST", face.left + w * 0.030f, face.top + h * 0.205f, w * 0.032f, black, Paint.Align.LEFT)
-            drawText(canvas, "00:09.87", face.right - w * 0.030f, face.top + h * 0.205f, w * 0.031f, black, Paint.Align.RIGHT)
-            drawText(canvas, "TOTAL", face.left + w * 0.030f, face.top + h * 0.245f, w * 0.032f, black, Paint.Align.LEFT)
-            drawText(canvas, "01:23.56", face.right - w * 0.030f, face.top + h * 0.245f, w * 0.031f, black, Paint.Align.RIGHT)
-
+            drawStatus(canvas)
+            drawBrand(canvas)
+            drawHero(canvas)
+            drawRoute(canvas)
+            drawMenu(canvas, 58f, 670f, 585f, 821f, red, Color.WHITE, "기록측정", "지금 시작하세요", 0)
+            drawMenu(canvas, 58f, 840f, 585f, 987f, blue, Color.WHITE, "관전하기", "실시간 기록을 확인하세요", 1)
+            drawMenu(canvas, 58f, 1007f, 574f, 1155f, gray, black, "설정", "앱 설정을 관리하세요", 2)
+            drawStopwatch(canvas)
             canvas.restore()
-
-            paint.color = red
-            paint.style = Paint.Style.STROKE
-            paint.strokeCap = Paint.Cap.ROUND
-            paint.strokeWidth = w * 0.010f
-            canvas.drawLine(w * 0.64f, h * 0.610f, w * 0.62f, h * 0.585f, paint)
-            canvas.drawLine(w * 0.68f, h * 0.600f, w * 0.68f, h * 0.570f, paint)
-            canvas.drawLine(w * 0.72f, h * 0.610f, w * 0.74f, h * 0.585f, paint)
         }
 
-        private fun drawText(
-            canvas: Canvas,
-            value: String,
-            x: Float,
-            y: Float,
-            size: Float,
-            color: Int,
-            align: Paint.Align
-        ) {
-            paint.style = Paint.Style.FILL
-            paint.color = color
-            paint.textSize = size
-            paint.textAlign = align
-            paint.typeface = Typeface.DEFAULT_BOLD
-            canvas.drawText(value, x, y, paint)
+        private fun drawStatus(c: Canvas) {
+            text(c, "9:41", 70f, 62f, 39f, black, Paint.Align.LEFT, true)
+            p.color = black; p.style = Paint.Style.FILL
+            for (i in 0..3) c.drawRoundRect(RectF(691f + i*13f, 52f-i*7f, 701f+i*13f, 67f), 4f, 4f, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 6f; p.strokeCap = Paint.Cap.ROUND
+            c.drawArc(RectF(754f, 37f, 812f, 86f), 215f, 110f, false, p)
+            c.drawArc(RectF(765f, 50f, 801f, 83f), 215f, 110f, false, p)
+            p.style = Paint.Style.FILL; c.drawCircle(783f, 76f, 5f, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 4f
+            c.drawRoundRect(RectF(817f, 37f, 869f, 67f), 6f, 6f, p)
+            p.style = Paint.Style.FILL; c.drawRoundRect(RectF(823f, 42f, 862f, 62f), 3f, 3f, p); c.drawRect(870f, 45f, 875f, 59f, p)
+        }
+
+        private fun drawBrand(c: Canvas) {
+            // Stopwatch logo
+            p.style = Paint.Style.STROKE; p.strokeWidth = 9f; p.color = blue
+            c.drawCircle(112f, 194f, 48f, p)
+            p.style = Paint.Style.FILL; c.drawRoundRect(RectF(100f, 128f, 124f, 142f), 4f, 4f, p)
+            p.color = red; c.save(); c.rotate(43f, 157f, 157f); c.drawRoundRect(RectF(150f, 148f, 165f, 161f), 2f, 2f, p); c.restore()
+            p.style = Paint.Style.STROKE; p.strokeWidth = 7f; p.strokeCap = Paint.Cap.ROUND; c.drawLine(112f,194f,139f,169f,p)
+            text(c, "Time", 182f, 215f, 72f, blue, Paint.Align.LEFT, true)
+            text(c, "Gate", 355f, 215f, 72f, red, Paint.Align.LEFT, true)
+            text(c, "생동감 있는", 185f, 262f, 27f, blue, Paint.Align.LEFT, true)
+            text(c, "실시간 라이브중계", 336f, 262f, 27f, red, Paint.Align.LEFT, true)
+            p.style = Paint.Style.STROKE; p.color = red; p.strokeWidth = 3f
+            val under = Path().apply { moveTo(335f, 284f); cubicTo(390f, 264f, 505f, 272f, 568f, 281f) }
+            c.drawPath(under, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 5f
+            c.drawArc(RectF(570f,210f,609f,256f),-70f,140f,false,p); c.drawArc(RectF(580f,202f,623f,264f),-70f,140f,false,p)
+        }
+
+        private fun drawHero(c: Canvas) {
+            text(c, "LIVE", 58f, 455f, 126f, red, Paint.Align.LEFT, true)
+            text(c, "랩타이머", 56f, 625f, 112f, black, Paint.Align.LEFT, true)
+        }
+
+        private fun drawRoute(c: Canvas) {
+            p.style = Paint.Style.STROKE; p.strokeWidth = 16f; p.strokeCap = Paint.Cap.ROUND; p.strokeJoin = Paint.Join.ROUND; p.color = blue
+            val path = Path().apply {
+                moveTo(720f, 276f)
+                cubicTo(661f,327f,766f,387f,747f,482f)
+                cubicTo(731f,557f,675f,576f,743f,648f)
+                cubicTo(786f,696f,692f,744f,711f,813f)
+            }
+            c.drawPath(path,p)
+
+            // Start pin
+            p.style = Paint.Style.FILL; p.color = red
+            c.drawCircle(720f,224f,32f,p)
+            val pin=Path().apply{moveTo(696f,240f);lineTo(744f,240f);lineTo(720f,280f);close()};c.drawPath(pin,p)
+            p.color=Color.WHITE;c.drawCircle(720f,224f,12f,p)
+            text(c,"START",765f,242f,35f,black,Paint.Align.LEFT,true)
+
+            // CP1
+            p.color=blue;c.drawCircle(746f,540f,31f,p);p.color=Color.WHITE;c.drawCircle(746f,540f,22f,p);p.color=red;c.drawCircle(746f,540f,14f,p)
+            text(c,"CP1",786f,553f,34f,black,Paint.Align.LEFT,true)
+
+            // Finish marker + flag
+            p.color=red;c.drawCircle(674f,900f,14f,p)
+            p.color=black;c.drawRoundRect(RectF(672f,812f,680f,895f),3f,3f,p)
+            val left=679f;val top=820f;val cw=18f;val ch=18f
+            for(r in 0..2)for(col in 0..3){p.color=if((r+col)%2==0)black else Color.WHITE;c.drawRect(left+col*cw,top+r*ch,left+(col+1)*cw,top+(r+1)*ch,p)}
+            p.style=Paint.Style.STROKE;p.color=black;p.strokeWidth=3f;c.drawRect(left,top,left+72f,top+54f,p)
+            text(c,"FINISH",765f,895f,34f,black,Paint.Align.LEFT,true)
+        }
+
+        private fun drawMenu(c: Canvas,l:Float,t:Float,r:Float,b:Float,fill:Int,fg:Int,title:String,sub:String,icon:Int){
+            p.style=Paint.Style.FILL;p.color=fill;c.drawRoundRect(RectF(l,t,r,b),27f,27f,p)
+            val ix=143f;val iy=(t+b)/2f
+            p.color=fg;p.style=Paint.Style.STROKE;p.strokeWidth=9f;p.strokeCap=Paint.Cap.ROUND;p.strokeJoin=Paint.Join.ROUND
+            when(icon){
+                0->{c.drawCircle(ix,iy,42f,p);p.style=Paint.Style.FILL;val q=Path().apply{moveTo(ix-12f,iy-22f);lineTo(ix+25f,iy);lineTo(ix-12f,iy+22f);close()};c.drawPath(q,p)}
+                1->{c.drawRoundRect(RectF(ix-43f,iy-31f,ix+43f,iy+22f),5f,5f,p);c.drawLine(ix,iy+22f,ix,iy+43f,p);c.drawLine(ix-26f,iy+43f,ix+26f,iy+43f,p)}
+                2->{c.drawCircle(ix,iy,21f,p);for(k in 0..7){val a=Math.toRadians(k*45.0);val x1=(ix+kotlin.math.cos(a).toFloat()*30f);val y1=(iy+kotlin.math.sin(a).toFloat()*30f);val x2=(ix+kotlin.math.cos(a).toFloat()*43f);val y2=(iy+kotlin.math.sin(a).toFloat()*43f);c.drawLine(x1,y1,x2,y2,p)}}
+            }
+            p.style=Paint.Style.STROKE;p.strokeWidth=2f;p.color=if(icon==2)Color.rgb(195,205,218) else Color.argb(120,255,255,255);c.drawLine(226f,t+35f,226f,b-35f,p)
+            text(c,title,250f,t+73f,43f,fg,Paint.Align.LEFT,true);text(c,sub,250f,t+119f,25f,if(icon==2)darkGray else fg,Paint.Align.LEFT,false)
+            text(c,"›",538f,t+102f,66f,fg,Paint.Align.CENTER,false)
+        }
+
+        private fun drawStopwatch(c: Canvas){
+            // Approved mock-up: large chunky blue digital stopwatch, cropped at right/bottom.
+            c.save();c.rotate(-8f,760f,1375f)
+            p.style=Paint.Style.FILL
+            p.color=Color.rgb(3,77,205);c.drawRoundRect(RectF(390f,1040f,1085f,1715f),90f,90f,p)
+            p.color=Color.rgb(0,55,170);c.drawRoundRect(RectF(425f,1085f,1050f,1680f),74f,74f,p)
+            p.color=Color.rgb(9,92,238);c.drawRoundRect(RectF(452f,1116f,1030f,1650f),66f,66f,p)
+            // red top controls
+            p.color=red;c.drawRoundRect(RectF(600f,1010f,760f,1070f),28f,28f,p);c.drawRoundRect(RectF(405f,1110f,495f,1190f),22f,22f,p)
+            p.color=Color.rgb(0,54,150);c.drawRoundRect(RectF(615f,1060f,748f,1080f),8f,8f,p);c.drawRoundRect(RectF(435f,1170f,492f,1190f),8f,8f,p)
+            // screen
+            p.color=Color.rgb(238,247,255);c.drawRoundRect(RectF(520f,1200f,1000f,1605f),58f,58f,p)
+            p.style=Paint.Style.STROKE;p.strokeWidth=3f;p.color=Color.rgb(15,69,139);c.drawLine(565f,1480f,960f,1480f,p)
+            text(c,"TIME",570f,1323f,37f,Color.rgb(12,69,139),Paint.Align.LEFT,true)
+            text(c,"00:12",570f,1445f,87f,black,Paint.Align.LEFT,false)
+            text(c,".34",848f,1445f,63f,black,Paint.Align.LEFT,false)
+            text(c,"BEST",580f,1535f,32f,Color.rgb(12,69,139),Paint.Align.LEFT,true)
+            text(c,"00:09.87",945f,1535f,30f,Color.rgb(12,69,139),Paint.Align.RIGHT,true)
+            text(c,"TOTAL",580f,1580f,32f,Color.rgb(12,69,139),Paint.Align.LEFT,true)
+            text(c,"01:23.56",945f,1580f,30f,Color.rgb(12,69,139),Paint.Align.RIGHT,true)
+            // battery icon
+            p.style=Paint.Style.STROKE;p.strokeWidth=5f;p.color=Color.rgb(12,69,139);c.drawRoundRect(RectF(895f,1240f,955f,1275f),5f,5f,p);c.drawRect(957f,1249f,964f,1266f,p)
+            c.restore()
+            p.style=Paint.Style.STROKE;p.strokeWidth=10f;p.color=red;p.strokeCap=Paint.Cap.ROUND;c.drawLine(579f,1005f,559f,975f,p);c.drawLine(608f,991f,604f,953f,p);c.drawLine(550f,1028f,520f,1010f,p)
+        }
+
+        private fun text(c:Canvas,s:String,x:Float,y:Float,size:Float,color:Int,align:Paint.Align,bold:Boolean){
+            p.style=Paint.Style.FILL;p.color=color;p.textSize=size;p.textAlign=align;p.typeface=if(bold)Typeface.create(Typeface.DEFAULT,Typeface.BOLD) else Typeface.DEFAULT;p.isSubpixelText=true;c.drawText(s,x,y,p)
         }
     }
+
+    companion object { const val REF_W = 941f; const val REF_H = 1672f }
 }
