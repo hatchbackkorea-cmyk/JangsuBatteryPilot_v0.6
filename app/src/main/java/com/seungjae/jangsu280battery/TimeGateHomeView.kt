@@ -1,6 +1,5 @@
 package com.seungjae.jangsu280battery
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
@@ -10,7 +9,6 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
-import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -35,10 +33,8 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
     private val art = HomeArt(context)
 
     init {
-        (context as? Activity)?.window?.setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-        )
+        // Do not hide Android system bars. The real clock/network/battery row at the top and
+        // Back/Home/Recents controls at the bottom remain visible above the white TimeGate canvas.
         setBackgroundColor(Color.WHITE)
         addView(art, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
