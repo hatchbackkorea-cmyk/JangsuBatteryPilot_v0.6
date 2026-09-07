@@ -18,6 +18,7 @@ import java.net.URL
 
 class BikeModeChooserActivity : Activity() {
     private lateinit var sync: RiderServerSync
+    private lateinit var homeView: TimeGateHomeView
     private lateinit var btnAdmin: Button
     private lateinit var btnUpdate: Button
     private lateinit var tvVersion: TextView
@@ -39,16 +40,16 @@ class BikeModeChooserActivity : Activity() {
         run { window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR }
 
         sync = RiderServerSync(this)
-        val home = TimeGateHomeView(this).apply {
-            onTimingClick = {
-                startActivity(Intent(this@BikeModeChooserActivity, RaceActivity::class.java))
-            }
-            onWatchClick = {
-                startActivity(Intent(this@BikeModeChooserActivity, RaceBroadcastActivity::class.java))
-            }
-            onSettingsClick = {
-                startActivity(Intent(this@BikeModeChooserActivity, SettingsActivity::class.java))
-            }
+        homeView = TimeGateHomeView(this).apply {
+            setAdminUnlocked(sync.isAdminDeviceCached())
+            onTimingClick = { startActivity(Intent(this@BikeModeChooserActivity, RaceActivity::class.java)) }
+            onWatchClick = { startActivity(Intent(this@BikeModeChooserActivity, RaceSpectatorActivity::class.java)) }
+            onMapClick = { startActivity(Intent(this@BikeModeChooserActivity, RaceTrackBuilderActivity::class.java)) }
+            onEmtbClick = { startActivity(Intent(this@BikeModeChooserActivity, MainActivity::class.java)) }
+            onGranfondoClick = { startActivity(Intent(this@BikeModeChooserActivity, RoadGranfondoActivity::class.java)) }
+            onAvinoxClick = { startActivity(Intent(this@BikeModeChooserActivity, AvinoxSystemActivity::class.java)) }
+            onLabClick = { startActivity(Intent(this@BikeModeChooserActivity, TimeGateLabActivity::class.java)) }
+            onSettingsClick = { startActivity(Intent(this@BikeModeChooserActivity, TimeGateGeneralSettingsActivity::class.java)) }
             onSettingsLongClick = { showLegacyModeDialog() }
             onBrandLongClick = {
                 if (sync.isAdminDeviceCached()) {
@@ -58,7 +59,7 @@ class BikeModeChooserActivity : Activity() {
                 }
             }
         }
-        setContentView(home)
+        setContentView(homeView)
 
         btnAdmin = findViewById(R.id.btnBikeModeAdmin)
         btnUpdate = findViewById(R.id.btnBikeModeCheckUpdate)
@@ -101,8 +102,6 @@ class BikeModeChooserActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // v0.33.5: do NOT automatically revive an old ride service.
-        // Explicit app/task close means the next launch starts from a clean ride state.
         explicitExitHandled = false
         UpdateManager.resumePendingInstall(this)
         refreshAdminVisibility()
@@ -167,7 +166,6 @@ class BikeModeChooserActivity : Activity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 val v = candidateHealth.version.takeIf { it.isNotBlank() }?.let { " · v$it" }.orEmpty()
-                tvServerStatus.setTextColor(getColor(R.color.good))
                 tvServerStatus.text = "● 새 PC 서버 자동 연결$v · 동기화 대기 ${sync.pendingCount()}건"
                 Toast.makeText(this, "새 Rider Control Center PC 서버로 자동 전환했습니다.", Toast.LENGTH_SHORT).show()
             }
@@ -248,7 +246,6 @@ class BikeModeChooserActivity : Activity() {
         }
 
         tvServerStatus.text = "PC 서버 확인 중… · 동기화 대기 ${pending}건"
-
         Thread {
             val result = runCatching { probePcHealth(base) }
             runOnUiThread {
@@ -282,11 +279,8 @@ class BikeModeChooserActivity : Activity() {
             btnUpdate.isEnabled = true
             btnUpdate.text = "⬆ 앱 업데이트 확인"
             result.onSuccess { info ->
-                if (info == null) {
-                    Toast.makeText(this, "현재 v${UpdateManager.currentVersion(this)} · 최신 안정판입니다.", Toast.LENGTH_LONG).show()
-                } else {
-                    UpdateManager.showUpdateDialog(this, info)
-                }
+                if (info == null) Toast.makeText(this, "현재 v${UpdateManager.currentVersion(this)} · 최신 안정판입니다.", Toast.LENGTH_LONG).show()
+                else UpdateManager.showUpdateDialog(this, info)
             }.onFailure {
                 Toast.makeText(this, "업데이트 확인 실패: ${it.message ?: "네트워크를 확인하세요."}", Toast.LENGTH_LONG).show()
             }
@@ -294,8 +288,8 @@ class BikeModeChooserActivity : Activity() {
     }
 
     private fun refreshAdminVisibility() {
-        // Main screen stays visually identical for normal/admin users. Admin Center is hidden behind a logo long-press.
         btnAdmin.visibility = View.GONE
+        if (::homeView.isInitialized) homeView.setAdminUnlocked(sync.isAdminDeviceCached())
     }
 
     private fun showAdminPhonePairDialog() {
@@ -340,5 +334,4 @@ class BikeModeChooserActivity : Activity() {
         }
         dialog.show()
     }
-
 }
