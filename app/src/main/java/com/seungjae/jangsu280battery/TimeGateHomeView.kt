@@ -210,7 +210,7 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
                 Icon.BOLT -> { p.style = Paint.Style.FILL; val q=Path().apply{moveTo(x+6f,y-32f);lineTo(x-22f,y+3f);lineTo(x-2f,y+3f);lineTo(x-9f,y+32f);lineTo(x+24f,y-7f);lineTo(x+4f,y-7f);close()};c.drawPath(q,p) }
                 Icon.BIKE -> { p.style = Paint.Style.STROKE; c.drawCircle(x-23f,y+15f,17f,p);c.drawCircle(x+24f,y+15f,17f,p);c.drawLine(x-23f,y+15f,x-2f,y-10f,p);c.drawLine(x-2f,y-10f,x+12f,y+15f,p);c.drawLine(x+12f,y+15f,x-23f,y+15f,p) }
                 Icon.BATTERY -> { p.style = Paint.Style.STROKE; c.drawRoundRect(RectF(x-32f,y-20f,x+26f,y+20f),5f,5f,p);c.drawRect(x+26f,y-7f,x+34f,y+7f,p) }
-                Icon.LAB -> { p.style = Paint.Style.STROKE; c.drawLine(x-9f,y-31f,x+9f,y-31f,p);c.drawLine(x-6f,y-31f,x-6f,y-7f,p);c.drawLine(x+6f,y-31f,x+6f,y-7f,p);val q=Path().apply{moveTo(x-6f,y-7f);lineTo(x-25f,y+25f);quadraticTo(x,y+35f,x+25f,y+25f);lineTo(x+6f,y-7f)};c.drawPath(q,p) }
+                Icon.LAB -> { p.style = Paint.Style.STROKE; c.drawLine(x-9f,y-31f,x+9f,y-31f,p);c.drawLine(x-6f,y-31f,x-6f,y-7f,p);c.drawLine(x+6f,y-31f,x+6f,y-7f,p);val q=Path().apply{moveTo(x-6f,y-7f);lineTo(x-25f,y+25f);quadTo(x,y+35f,x+25f,y+25f);lineTo(x+6f,y-7f)};c.drawPath(q,p) }
                 Icon.SETTINGS -> { p.style = Paint.Style.STROKE; c.drawCircle(x,y,17f,p); c.drawCircle(x,y,31f,p) }
             }
         }
