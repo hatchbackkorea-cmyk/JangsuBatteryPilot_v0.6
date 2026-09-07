@@ -2,9 +2,12 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.Application
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Switch
 import android.widget.TextView
 import com.kakao.vectormap.KakaoMapSdk
@@ -21,7 +24,12 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         registerActivityLifecycleCallbacks(this)
     }
 
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+        applyTimeGateSystemBars(activity)
+    }
+
     override fun onActivityResumed(activity: Activity) {
+        applyTimeGateSystemBars(activity)
         when (activity) {
             is BikeModeChooserActivity -> activity.window.decorView.post {
                 RaceLauncherUiInstaller.install(activity)
@@ -50,6 +58,37 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
                 RideLiveLocationBridge.install(activity)
             }
             is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
+        }
+    }
+
+    private fun applyTimeGateSystemBars(activity: Activity) {
+        val window = activity.window
+        // The main TimeGate concept is a white canvas. Keep the real Android status/navigation
+        // regions visible and use dark system icons so time, signal, battery, Back/Home/Recents
+        // never disappear into the background.
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.statusBarColor = Color.WHITE
+        window.navigationBarColor = Color.WHITE
+        @Suppress("DEPRECATION")
+        run {
+            var flags = window.decorView.systemUiVisibility
+            flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+            window.decorView.systemUiVisibility = flags
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            window.insetsController?.setSystemBarsAppearance(
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+            )
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            window.insetsController?.setSystemBarsAppearance(
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            )
         }
     }
 
@@ -120,7 +159,6 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     private fun dp(activity: Activity, value: Float): Int =
         (value * activity.resources.displayMetrics.density).toInt()
 
-    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
     override fun onActivityStarted(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
