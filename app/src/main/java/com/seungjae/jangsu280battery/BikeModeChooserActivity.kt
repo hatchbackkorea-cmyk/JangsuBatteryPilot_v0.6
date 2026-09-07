@@ -3,6 +3,7 @@ package com.seungjae.jangsu280battery
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
 import android.view.View
@@ -32,36 +33,70 @@ class BikeModeChooserActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_bike_mode_chooser)
+        window.statusBarColor = Color.WHITE
+        window.navigationBarColor = Color.WHITE
+        @Suppress("DEPRECATION")
+        run { window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR }
+
         sync = RiderServerSync(this)
+        val home = TimeGateHomeView(this).apply {
+            onTimingClick = {
+                startActivity(Intent(this@BikeModeChooserActivity, RaceActivity::class.java))
+            }
+            onWatchClick = {
+                startActivity(Intent(this@BikeModeChooserActivity, RaceBroadcastActivity::class.java))
+            }
+            onSettingsClick = {
+                startActivity(Intent(this@BikeModeChooserActivity, SettingsActivity::class.java))
+            }
+            onSettingsLongClick = { showLegacyModeDialog() }
+            onBrandLongClick = {
+                if (sync.isAdminDeviceCached()) {
+                    startActivity(Intent(this@BikeModeChooserActivity, AdminCenterActivity::class.java))
+                } else {
+                    showAdminPhonePairDialog()
+                }
+            }
+        }
+        setContentView(home)
+
         btnAdmin = findViewById(R.id.btnBikeModeAdmin)
         btnUpdate = findViewById(R.id.btnBikeModeCheckUpdate)
         tvVersion = findViewById(R.id.tvBikeModeVersion)
         tvServerStatus = findViewById(R.id.tvBikeModeServerStatus)
 
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
-        tvVersion.text = "Ride Copilot v$version"
-        findViewById<Button>(R.id.btnBikeModeEmtb).setOnClickListener {
-            startActivity(Intent(this, MainActivity::class.java))
-        }
-        findViewById<Button>(R.id.btnBikeModeRoad).setOnClickListener {
-            startActivity(Intent(this, RoadGranfondoActivity::class.java))
-        }
+        tvVersion.text = "TimeGate v$version"
         btnUpdate.setOnClickListener { checkPublicUpdate() }
         btnAdmin.setOnClickListener {
             if (sync.isAdminDeviceCached()) startActivity(Intent(this, AdminCenterActivity::class.java))
             else refreshAdminVisibility()
         }
 
-        tvVersion.setOnLongClickListener {
-            showAdminPhonePairDialog()
-            true
-        }
         refreshAdminVisibility()
         refreshServerHealth()
         repairPreferredPcServerIfNeeded(force = true)
         UpdateManager.resumePendingInstall(this)
         UpdateManager.maybeCheckOnLaunch(this)
+    }
+
+    private fun showLegacyModeDialog() {
+        val options = arrayOf(
+            "⚡ eMTB · 배터리 코파일럿",
+            "🚴 ROAD · 그란폰도 페이스 코치",
+            "⬆ 앱 업데이트 확인"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("기존 Ride Copilot 기능")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> startActivity(Intent(this, MainActivity::class.java))
+                    1 -> startActivity(Intent(this, RoadGranfondoActivity::class.java))
+                    2 -> checkPublicUpdate()
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
     }
 
     override fun onResume() {
@@ -86,9 +121,6 @@ class BikeModeChooserActivity : Activity() {
     }
 
     override fun onStop() {
-        // When the root task is explicitly finished/removed, stop every app-owned background
-        // ride function. Merely opening MTB/ROAD puts this activity in the background without
-        // setting isFinishing, so normal riding is unaffected.
         if (!isChangingConfigurations && isFinishing) handleExplicitExit()
         super.onStop()
     }
@@ -147,7 +179,7 @@ class BikeModeChooserActivity : Activity() {
                         if (!auth.ok && !isFinishing && !isDestroyed) {
                             Toast.makeText(
                                 this,
-                                "새 PC 서버에서 관리자폰 재등록이 필요할 수 있습니다. Ride Copilot 버전 글자를 길게 눌러 등록할 수 있습니다.",
+                                "새 PC 서버에서 관리자폰 재등록이 필요할 수 있습니다. TimeGate 로고를 길게 눌러 등록할 수 있습니다.",
                                 Toast.LENGTH_LONG
                             ).show()
                         }
@@ -207,7 +239,6 @@ class BikeModeChooserActivity : Activity() {
         val base = sync.serverUrl().trim().trimEnd('/')
         val pending = sync.pendingCount()
         if (!base.startsWith("http://") && !base.startsWith("https://")) {
-            tvServerStatus.setTextColor(getColor(R.color.text_secondary))
             tvServerStatus.text = if (pending > 0) {
                 "PC 서버 미연결 · 앱 단독 사용 가능 · 동기화 대기 ${pending}건"
             } else {
@@ -216,7 +247,6 @@ class BikeModeChooserActivity : Activity() {
             return
         }
 
-        tvServerStatus.setTextColor(getColor(R.color.text_secondary))
         tvServerStatus.text = "PC 서버 확인 중… · 동기화 대기 ${pending}건"
 
         Thread {
@@ -225,28 +255,20 @@ class BikeModeChooserActivity : Activity() {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 val health = result.getOrNull()
                 val currentPending = sync.pendingCount()
-                when {
-                    health == null -> {
-                        tvServerStatus.setTextColor(getColor(R.color.warn))
-                        tvServerStatus.text = if (currentPending > 0) {
-                            "● PC 서버 응답 없음 · 앱 단독 사용 가능 · 동기화 대기 ${currentPending}건"
-                        } else {
-                            "● PC 서버 응답 없음 · 앱 단독 사용 가능"
-                        }
+                tvServerStatus.text = when {
+                    health == null -> if (currentPending > 0) {
+                        "● PC 서버 응답 없음 · 앱 단독 사용 가능 · 동기화 대기 ${currentPending}건"
+                    } else {
+                        "● PC 서버 응답 없음 · 앱 단독 사용 가능"
                     }
-                    !health.ok -> {
-                        tvServerStatus.setTextColor(getColor(R.color.warn))
-                        tvServerStatus.text = "● PC 서버 확인 필요 · 동기화 대기 ${currentPending}건"
-                    }
+                    !health.ok -> "● PC 서버 확인 필요 · 동기화 대기 ${currentPending}건"
                     health.pcEntry -> {
-                        tvServerStatus.setTextColor(getColor(R.color.good))
                         val versionText = health.version.takeIf { it.isNotBlank() }?.let { " · v$it" }.orEmpty()
-                        tvServerStatus.text = "● PC 서버 연결$versionText · 동기화 대기 ${currentPending}건"
+                        "● PC 서버 연결$versionText · 동기화 대기 ${currentPending}건"
                     }
                     else -> {
-                        tvServerStatus.setTextColor(getColor(R.color.warn))
                         val versionText = health.version.takeIf { it.isNotBlank() }?.let { " v$it" }.orEmpty()
-                        tvServerStatus.text = "● PC 서버 연결 · 구버전$versionText · 업데이트 권장 · 대기 ${currentPending}건"
+                        "● PC 서버 연결 · 구버전$versionText · 업데이트 권장 · 대기 ${currentPending}건"
                     }
                 }
             }
@@ -272,7 +294,8 @@ class BikeModeChooserActivity : Activity() {
     }
 
     private fun refreshAdminVisibility() {
-        btnAdmin.visibility = if (sync.isAdminDeviceCached()) View.VISIBLE else View.GONE
+        // Main screen stays visually identical for normal/admin users. Admin Center is hidden behind a logo long-press.
+        btnAdmin.visibility = View.GONE
     }
 
     private fun showAdminPhonePairDialog() {
@@ -293,7 +316,7 @@ class BikeModeChooserActivity : Activity() {
         box.addView(code)
         val dialog = AlertDialog.Builder(this)
             .setTitle("관리자폰 등록")
-            .setMessage("이 화면은 일반 사용자에게 표시되지 않는 숨은 등록 화면입니다. PC 관리자에서 발급한 8자리 코드는 5분 동안만 유효합니다.")
+            .setMessage("PC 관리자에서 발급한 8자리 코드는 5분 동안만 유효합니다.")
             .setView(box)
             .setPositiveButton("등록", null)
             .setNegativeButton("취소", null)
@@ -317,4 +340,5 @@ class BikeModeChooserActivity : Activity() {
         }
         dialog.show()
     }
+
 }
