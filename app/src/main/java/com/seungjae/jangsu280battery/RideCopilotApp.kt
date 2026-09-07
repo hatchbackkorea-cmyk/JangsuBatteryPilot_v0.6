@@ -2,9 +2,12 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.Application
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Switch
 import android.widget.TextView
 import com.kakao.vectormap.KakaoMapSdk
@@ -21,18 +24,25 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         registerActivityLifecycleCallbacks(this)
     }
 
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+        applyTimeGateSystemBars(activity)
+    }
+
     override fun onActivityResumed(activity: Activity) {
+        applyTimeGateSystemBars(activity)
         when (activity) {
             is BikeModeChooserActivity -> activity.window.decorView.post {
                 RaceLauncherUiInstaller.install(activity)
             }
             is RaceActivity -> activity.window.decorView.post {
+                TimeGateProgrammaticSkin.install(activity)
                 RaceTrackBuilderUiInstaller.install(activity)
                 RaceNameLabelUiInstaller.install(activity)
                 RaceProfileServerSync.resume(activity)
                 RaceSavedCourseBackfill.sync(activity)
             }
             is RaceTrackBuilderActivity -> activity.window.decorView.post {
+                TimeGateProgrammaticSkin.install(activity)
                 RaceTrackGpsQualityOverlay.install(activity)
                 RaceTrackDraftAutoSync.install(activity)
                 RaceSavedCourseBackfill.sync(activity)
@@ -53,10 +63,28 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         }
     }
 
-    override fun onActivityPaused(activity: Activity) {
-        if (activity is RaceActivity) {
-            RaceProfileServerSync.pause(activity)
+    private fun applyTimeGateSystemBars(activity: Activity) {
+        val window = activity.window
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.statusBarColor = Color.WHITE
+        window.navigationBarColor = Color.WHITE
+        @Suppress("DEPRECATION")
+        run {
+            var flags = window.decorView.systemUiVisibility
+            flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.decorView.systemUiVisibility = flags
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.insetsController?.setSystemBarsAppearance(
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            )
+        }
+    }
+
+    override fun onActivityPaused(activity: Activity) {
+        if (activity is RaceActivity) RaceProfileServerSync.pause(activity)
         if (activity is RaceTrackBuilderActivity) {
             RaceTrackGpsQualityOverlay.pause(activity)
             RaceTrackDraftAutoSync.pause(activity)
@@ -68,6 +96,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityDestroyed(activity: Activity) {
+        TimeGateProgrammaticSkin.uninstall(activity)
         if (activity is RaceActivity) {
             RaceProfileServerSync.pause(activity)
             RaceNameLabelUiInstaller.uninstall(activity)
@@ -99,9 +128,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             setTextColor(activity.getColor(R.color.text_primary))
             isChecked = AppSettings.voiceVolumeBoostEnabled(activity)
             setOnCheckedChangeListener { _, checked ->
-                AppSettings.prefs(activity).edit()
-                    .putBoolean(AppSettings.KEY_VOICE_VOLUME_BOOST, checked)
-                    .apply()
+                AppSettings.prefs(activity).edit().putBoolean(AppSettings.KEY_VOICE_VOLUME_BOOST, checked).apply()
             }
         }
         parent.addView(boostSwitch, index + 1)
@@ -117,10 +144,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         parent.addView(hint, index + 2)
     }
 
-    private fun dp(activity: Activity, value: Float): Int =
-        (value * activity.resources.displayMetrics.density).toInt()
-
-    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+    private fun dp(activity: Activity, value: Float): Int = (value * activity.resources.displayMetrics.density).toInt()
     override fun onActivityStarted(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit

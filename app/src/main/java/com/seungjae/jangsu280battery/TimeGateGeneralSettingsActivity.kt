@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.WindowManager
@@ -17,11 +18,15 @@ import kotlin.math.roundToInt
 
 /** Public TimeGate settings: voice, display, app update, version/changelog only. */
 class TimeGateGeneralSettingsActivity : Activity() {
-    private val bg = Color.rgb(8, 13, 18)
-    private val panel = Color.rgb(23, 35, 48)
-    private val accentPanel = Color.rgb(18, 49, 70)
-    private val primary = Color.rgb(247, 250, 252)
-    private val secondary = Color.rgb(158, 175, 191)
+    private val bg = Color.WHITE
+    private val panel = Color.rgb(247, 249, 252)
+    private val blueSoft = Color.rgb(232, 240, 255)
+    private val redSoft = Color.rgb(255, 236, 240)
+    private val blue = Color.rgb(12, 91, 235)
+    private val red = Color.rgb(255, 18, 56)
+    private val primary = Color.rgb(8, 10, 13)
+    private val secondary = Color.rgb(94, 105, 120)
+    private val line = Color.rgb(215, 223, 234)
 
     private lateinit var prefs: android.content.SharedPreferences
     private lateinit var tvUpdate: TextView
@@ -37,15 +42,15 @@ class TimeGateGeneralSettingsActivity : Activity() {
         val scroll = ScrollView(this).apply { setBackgroundColor(bg); isFillViewport = true }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(14), dp(14), dp(30))
+            setPadding(dp(16), dp(12), dp(16), dp(30))
         }
         scroll.addView(body)
         setContentView(scroll)
 
         body.addView(header("설정"))
 
-        val voice = panelBox(accent = true)
-        voice.addView(title("음성 안내"))
+        val voice = panelBox(blueSoft, blue)
+        voice.addView(title("음성 안내", blue))
         val swVoice = Switch(this).apply {
             text = "자동 음성 안내 사용"
             setTextColor(primary)
@@ -77,8 +82,8 @@ class TimeGateGeneralSettingsActivity : Activity() {
         voice.addView(note("거리/시간 중 먼저 설정 간격에 도달한 기준으로 안내합니다."))
         body.addView(voice, panelLp())
 
-        val screen = panelBox()
-        screen.addView(title("화면"))
+        val screen = panelBox(panel, line)
+        screen.addView(title("화면", primary))
         screen.addView(Switch(this).apply {
             text = "주행 화면 항상 켜기"
             setTextColor(primary)
@@ -92,13 +97,15 @@ class TimeGateGeneralSettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, dp(50)))
         body.addView(screen, panelLp())
 
-        val update = panelBox(accent = true)
-        update.addView(title("앱 업데이트"))
+        val update = panelBox(redSoft, red)
+        update.addView(title("앱 업데이트", red))
         tvUpdate = note("")
         update.addView(tvUpdate)
         btnUpdate = Button(this).apply {
             text = "⬆ 최신 안정판 업데이트 확인"
             isAllCaps = false
+            setTextColor(Color.WHITE)
+            background = rounded(red, red)
             setOnClickListener { checkUpdate() }
         }
         update.addView(btnUpdate, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
@@ -108,8 +115,10 @@ class TimeGateGeneralSettingsActivity : Activity() {
         body.addView(Button(this).apply {
             text = "버전 / 변경사항"
             isAllCaps = false
+            setTextColor(Color.WHITE)
+            background = rounded(blue, blue)
             setOnClickListener { showVersion() }
-        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(12) })
     }
 
     private fun checkUpdate() {
@@ -136,11 +145,10 @@ class TimeGateGeneralSettingsActivity : Activity() {
             .setTitle("TimeGate")
             .setMessage(
                 "v${UpdateManager.currentVersion(this)}\n\n" +
-                    "• TimeGate 메인 메뉴 재구성\n" +
-                    "• RACE 관전 전용 대회 선택 화면 추가\n" +
-                    "• 대회 서버 주소 자동 복구 강화\n" +
-                    "• AVINOX SYSTEM / 실험실 관리자 전용 분리\n" +
-                    "• 설정은 음성 · 화면 · 앱 업데이트 · 버전으로 정리"
+                    "• 흰색 기반 TimeGate 서브페이지 디자인 통일\n" +
+                    "• 상단 상태바 시간·통신·배터리 표시 복원\n" +
+                    "• 하단 Back/Home/최근 앱 버튼 대비 개선\n" +
+                    "• 파랑·빨강 포인트와 검정 텍스트를 공통 디자인 규칙으로 적용"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -156,26 +164,41 @@ class TimeGateGeneralSettingsActivity : Activity() {
         gravity = Gravity.CENTER_VERTICAL
         addView(Button(this@TimeGateGeneralSettingsActivity).apply {
             text = "‹"
-            textSize = 26f
+            textSize = 28f
+            setTextColor(blue)
+            setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { finish() }
-        }, LinearLayout.LayoutParams(dp(58), dp(52)))
+        }, LinearLayout.LayoutParams(dp(58), dp(54)))
         addView(TextView(this@TimeGateGeneralSettingsActivity).apply {
             text = name
-            textSize = 26f
+            textSize = 27f
             setTextColor(primary)
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER_VERTICAL
-        }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        }, LinearLayout.LayoutParams(0, dp(54), 1f))
+        addView(TextView(this@TimeGateGeneralSettingsActivity).apply {
+            text = "TimeGate"
+            textSize = 13f
+            setTextColor(red)
+            setTypeface(typeface, Typeface.BOLD)
+        })
     }
 
-    private fun panelBox(accent: Boolean = false) = LinearLayout(this).apply {
+    private fun panelBox(fill: Int, stroke: Int) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(15), dp(14), dp(15), dp(14))
-        setBackgroundColor(if (accent) accentPanel else panel)
+        setPadding(dp(16), dp(15), dp(16), dp(15))
+        background = rounded(fill, stroke)
     }
 
-    private fun panelLp() = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) }
-    private fun title(v: String) = TextView(this).apply { text = v; textSize = 19f; setTextColor(primary); setTypeface(typeface, Typeface.BOLD) }
+    private fun rounded(fill: Int, stroke: Int) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(18).toFloat()
+        setColor(fill)
+        setStroke(dp(1), stroke)
+    }
+
+    private fun panelLp() = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) }
+    private fun title(v: String, color: Int) = TextView(this).apply { text = v; textSize = 19f; setTextColor(color); setTypeface(typeface, Typeface.BOLD) }
     private fun label(v: String) = TextView(this).apply { text = v; textSize = 15f; setTextColor(primary); setTypeface(typeface, Typeface.BOLD); setPadding(0, dp(8), 0, 0) }
     private fun note(v: String) = TextView(this).apply { text = v; textSize = 11.5f; setTextColor(secondary); setPadding(0, dp(5), 0, 0) }
     private fun listener(block: (Int) -> Unit) = object : SeekBar.OnSeekBarChangeListener {
