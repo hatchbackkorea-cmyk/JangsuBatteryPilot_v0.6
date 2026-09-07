@@ -79,6 +79,7 @@ class TimeGateLabActivity : Activity() {
             setTextColor(primary)
             textSize = 15f
             isChecked = AppSettings.testMode(this@TimeGateLabActivity)
+            isEnabled = !logManager.isActive()
         }
         test.addView(switchTest, LinearLayout.LayoutParams(-1, dp(50)))
 
@@ -93,16 +94,8 @@ class TimeGateLabActivity : Activity() {
         test.addView(tvHint)
 
         switchTest.setOnCheckedChangeListener { _, checked ->
-            if (logManager.isActive() && !checked) {
-                switchTest.isChecked = true
-                Toast.makeText(this, "테스트 주행 종료 후 해제할 수 있습니다.", Toast.LENGTH_SHORT).show()
-            } else if (logManager.isActive() && checked && !AppSettings.testMode(this)) {
-                switchTest.isChecked = false
-                Toast.makeText(this, "실제 주행 기록 중에는 테스트 모드를 켤 수 없습니다.", Toast.LENGTH_SHORT).show()
-            } else {
-                prefs.edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
-                updateTestUi()
-            }
+            prefs.edit().putBoolean(AppSettings.KEY_TEST_MODE, checked).apply()
+            updateTestUi()
         }
         seekKm.setOnSeekBarChangeListener(listener {
             val km = (it / 10.0).coerceIn(0.0, totalKm)
@@ -136,8 +129,8 @@ class TimeGateLabActivity : Activity() {
         tvKm.text = "테스트 위치 ${RideFormatter.one(km)} km / ${RideFormatter.one(totalKm)} km"
         seekKm.isEnabled = switchTest.isChecked
         tvHint.text = when {
-            logManager.isActive() && switchTest.isChecked -> "테스트 주행 중 · 슬라이더 위치가 주행 화면에 반영됩니다."
-            logManager.isActive() -> "실제 주행 기록 중에는 테스트 모드를 켤 수 없습니다."
+            logManager.isActive() && switchTest.isChecked -> "테스트 주행 중 · 모드 전환은 잠겨 있고 슬라이더 위치만 주행 화면에 반영됩니다."
+            logManager.isActive() -> "실제 주행 기록 중에는 테스트 모드 전환이 잠깁니다."
             switchTest.isChecked -> "GPS 대신 이 위치를 주행 화면에 표시합니다."
             else -> "테스트 모드를 켜면 GPS 없이 코스 진행 상황을 확인할 수 있습니다."
         }
