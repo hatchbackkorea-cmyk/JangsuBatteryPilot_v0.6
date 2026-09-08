@@ -145,11 +145,11 @@ class TimeGateGeneralSettingsActivity : Activity() {
             .setTitle("TimeGate")
             .setMessage(
                 "v${UpdateManager.currentVersion(this)}\n\n" +
-                    "• eMTB의 주행·코스·설정·학습·피드백·배터리를 AVINOX SYSTEM에서 직접 진입\n" +
-                    "• 모바일 소스 배포 잔여 페이지와 런타임 코드까지 완전 제거\n" +
-                    "• 모든 페이지에서 상단/하단 Android 시스템 영역 보존\n" +
-                    "• 페이지 제목 위치를 공통 헤더 규격으로 통일\n" +
-                    "• 충전 기준/도달 알림을 콤팩트 드롭다운으로 변경"
+                    "• AVINOX SYSTEM: Avinox Ride 설치폰 또는 관리자폰에서 사용 가능\n" +
+                    "• 실험실: 관리자폰 전용 유지\n" +
+                    "• 앱 아이콘을 TimeGate 스톱워치 CI로 변경\n" +
+                    "• AVINOX BLE · SRAM AXS · 전체 시스템 진단을 실험실로 통합\n" +
+                    "• 관리자 페이지와 관리자용 앱 업데이트 화면 제거"
             )
             .setPositiveButton("확인", null)
             .show()
