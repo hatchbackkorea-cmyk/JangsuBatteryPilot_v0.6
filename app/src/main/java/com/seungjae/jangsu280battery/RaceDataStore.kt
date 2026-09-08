@@ -53,6 +53,10 @@ class RaceDataStore(context: Context) {
     fun saveActiveConfig(config: RaceEventConfig, courseId: String, reference: List<RaceReferencePoint>) {
         val o = config.copy(reference = reference).toJson().apply { put("local_course_id", courseId) }
         prefs.edit().putString("active_config", o.toString()).apply()
+        // The lap session is intentionally persistent. Leaving and re-entering the same race room
+        // must not reset lap numbering/history, so activating timing for the same event+course/day
+        // resumes the existing session instead of starting from lap 1 again.
+        RaceLapSessionStore(app).beginOrResume(config.eventCode, courseId)
     }
     fun activeConfig(): Pair<RaceEventConfig, String>? = runCatching { val o = JSONObject(prefs.getString("active_config", "")); RaceEventConfig.fromJson(o) to o.optString("local_course_id") }.getOrNull()
     fun clearActiveConfig() { prefs.edit().remove("active_config").apply() }
