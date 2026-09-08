@@ -42,6 +42,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
                 RaceNameLabelUiInstaller.install(activity)
                 RaceProfileServerSync.resume(activity)
                 RaceSavedCourseBackfill.sync(activity)
+                RaceLiveLapDisplayInstaller.install(activity)
             }
             is RaceTrackBuilderActivity -> activity.window.decorView.post {
                 TimeGateProgrammaticSkin.install(activity)
@@ -112,6 +113,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         if (activity is RaceActivity) {
             RaceProfileServerSync.pause(activity)
             RaceNameLabelUiInstaller.uninstall(activity)
+            RaceLiveLapDisplayInstaller.uninstall(activity)
         }
         if (activity is RaceTrackBuilderActivity) {
             RaceTrackGpsQualityOverlay.destroy(activity)
