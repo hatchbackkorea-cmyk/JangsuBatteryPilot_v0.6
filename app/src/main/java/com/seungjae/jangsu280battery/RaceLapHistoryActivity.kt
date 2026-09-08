@@ -12,26 +12,32 @@ import android.widget.ScrollView
 import android.widget.TableLayout
 import android.widget.TableRow
 import android.widget.TextView
-import java.util.Calendar
-import kotlin.math.abs
 
-/** Today's completed lap table for one course, including per-sector extrema and theoretical best. */
+/** Persistent event-session lap table, including per-sector extrema and theoretical best. */
 class RaceLapHistoryActivity : Activity() {
     companion object {
         const val EXTRA_COURSE_ID = "timegate_lap_history_course_id"
+        const val EXTRA_EVENT_CODE = "timegate_lap_history_event_code"
     }
 
     private lateinit var store: RaceDataStore
     private lateinit var repo: CourseRepository
+    private lateinit var sessionStore: RaceLapSessionStore
     private var courseId = ""
+    private var eventCode = "PRACTICE"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = RaceDataStore(this)
         repo = CourseRepository(this)
+        sessionStore = RaceLapSessionStore(this)
+        val active = store.activeConfig()
         courseId = intent.getStringExtra(EXTRA_COURSE_ID).orEmpty().ifBlank {
-            store.snapshot().courseId.ifBlank { store.activeConfig()?.second.orEmpty() }
+            store.snapshot().courseId.ifBlank { active?.second.orEmpty() }
         }
+        eventCode = intent.getStringExtra(EXTRA_EVENT_CODE).orEmpty().ifBlank {
+            store.snapshot().eventCode.ifBlank { active?.first?.eventCode.orEmpty() }
+        }.ifBlank { "PRACTICE" }.uppercase()
         render()
     }
 
@@ -52,11 +58,11 @@ class RaceLapHistoryActivity : Activity() {
             text = "‹"
             textSize = 30f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(12, 91, 235))
+            setTextColor(BLUE)
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(dp(56), dp(58)))
         top.addView(TextView(this).apply {
-            text = "랩 기록 · 오늘"
+            text = "랩 기록"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.rgb(8, 10, 13))
@@ -72,6 +78,7 @@ class RaceLapHistoryActivity : Activity() {
         scroll.addView(body)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
+        val session = sessionStore.matching(eventCode, courseId)
         val courseName = repo.listCourses().firstOrNull { it.id == courseId }?.name
             ?: store.completed().lastOrNull { it.courseId == courseId }?.courseName
             ?: "현재 코스"
@@ -82,21 +89,27 @@ class RaceLapHistoryActivity : Activity() {
             setTextColor(Color.rgb(8, 10, 13))
         })
         body.addView(TextView(this).apply {
-            text = "오늘 이 코스의 완료된 모든 랩입니다. 파랑 = 해당 구간 최속, 빨강 = 해당 구간 최저속. INVALID 랩은 표에는 남기지만 비교 계산에서는 제외합니다."
+            text = if (eventCode == "PRACTICE") "연습 세션" else "경기 $eventCode"
+            textSize = 13f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(BLUE)
+            setPadding(0, dp(3), 0, dp(3))
+        })
+        body.addView(TextView(this).apply {
+            text = "이 경기에서 처음 계측을 시작한 뒤의 랩만 이어서 표시합니다. 경기방을 나갔다 다시 들어와도 같은 세션이면 계속 누적됩니다. 파랑 = 해당 CP 구간 최속, 빨강 = 해당 CP 구간 최저속. INVALID 랩은 표에는 남기지만 BEST 계산에서는 제외합니다."
             textSize = 12f
             setTextColor(Color.rgb(94, 105, 120))
-            setPadding(0, dp(4), 0, dp(12))
+            setPadding(0, dp(3), 0, dp(12))
         })
 
-        val laps = todaysRuns(store.completed(), courseId)
+        if (session == null) {
+            body.addView(emptyMessage("현재 경기의 랩 세션이 없습니다."))
+            return
+        }
+
+        val laps = sessionRuns(store.completed(), eventCode, courseId, session.startedAtMs)
         if (laps.isEmpty()) {
-            body.addView(TextView(this).apply {
-                text = "오늘 완료된 랩 기록이 없습니다."
-                textSize = 17f
-                gravity = Gravity.CENTER
-                setTextColor(Color.GRAY)
-                setPadding(0, dp(48), 0, dp(48))
-            })
+            body.addView(emptyMessage("이 세션에서 완료된 랩 기록이 없습니다."))
             return
         }
 
@@ -123,10 +136,10 @@ class RaceLapHistoryActivity : Activity() {
         val summaryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         summaryRow.addView(summaryCard("실제 BEST", actualBest?.elapsedMs?.let(::formatTime) ?: "—", BLUE), LinearLayout.LayoutParams(0, dp(86), 1f))
         summaryRow.addView(summaryCard("THEORETICAL BEST", theoretical?.let(::formatTime) ?: "—", BLUE), LinearLayout.LayoutParams(0, dp(86), 1f).apply { marginStart = dp(6) })
-        summaryRow.addView(summaryCard("남은 가능성", if (actualBest != null && theoretical != null) "-${formatTime((actualBest.elapsedMs - theoretical).coerceAtLeast(0L))}" else "—", Color.rgb(60, 70, 82)), LinearLayout.LayoutParams(0, dp(86), 1f).apply { marginStart = dp(6) })
+        summaryRow.addView(summaryCard("개선 여지", if (actualBest != null && theoretical != null) formatTime((actualBest.elapsedMs - theoretical).coerceAtLeast(0L)) else "—", Color.rgb(60, 70, 82)), LinearLayout.LayoutParams(0, dp(86), 1f).apply { marginStart = dp(6) })
         body.addView(summaryRow)
         body.addView(TextView(this).apply {
-            text = "THEORETICAL BEST = 각 CP 구간에서 기록한 가장 빠른 구간시간들을 한 랩으로 조합한 이론상 최상 기록"
+            text = "THEORETICAL BEST = 이 세션의 각 CP 구간에서 나온 가장 빠른 구간시간만 조합한 이론상 최상 랩타임"
             textSize = 11f
             setTextColor(Color.rgb(94, 105, 120))
             setPadding(0, dp(6), 0, dp(12))
@@ -144,7 +157,7 @@ class RaceLapHistoryActivity : Activity() {
         val header = TableRow(this)
         header.addView(cell("LAP", true, Color.rgb(8, 10, 13), dp(62)))
         segmentLabels.forEach { header.addView(cell(it, true, Color.rgb(8, 10, 13), dp(118))) }
-        header.addView(cell("랩타임", true, Color.rgb(8, 10, 13), dp(108)))
+        header.addView(cell("FINISH", true, Color.rgb(8, 10, 13), dp(108)))
         header.addView(cell("상태", true, Color.rgb(8, 10, 13), dp(84)))
         table.addView(header)
 
@@ -169,7 +182,7 @@ class RaceLapHistoryActivity : Activity() {
             val finishColor = when {
                 invalid -> Color.GRAY
                 actualBest?.runId == run.runId -> BLUE
-                actualWorst?.runId == run.runId && actualWorst.runId != actualBest?.runId -> RED
+                actualWorst != null && actualWorst.runId == run.runId && actualWorst.runId != actualBest?.runId -> RED
                 else -> Color.rgb(8, 10, 13)
             }
             row.addView(cell(formatTime(run.elapsedMs), true, finishColor, dp(108)))
@@ -185,6 +198,14 @@ class RaceLapHistoryActivity : Activity() {
             row.addView(cell("이론상", true, BLUE, dp(84)))
             table.addView(row)
         }
+    }
+
+    private fun emptyMessage(value: String): TextView = TextView(this).apply {
+        text = value
+        textSize = 17f
+        gravity = Gravity.CENTER
+        setTextColor(Color.GRAY)
+        setPadding(0, dp(48), 0, dp(48))
     }
 
     private fun summaryCard(label: String, value: String, valueColor: Int): View = LinearLayout(this).apply {
@@ -226,27 +247,13 @@ class RaceLapHistoryActivity : Activity() {
         }
     }
 
-    private fun todaysRuns(all: List<RaceRunSummary>, targetCourseId: String): List<RaceRunSummary> {
-        val (start, end) = todayBounds()
-        return all.asSequence()
+    private fun sessionRuns(all: List<RaceRunSummary>, targetEventCode: String, targetCourseId: String, sessionStartMs: Long): List<RaceRunSummary> =
+        all.asSequence()
+            .filter { it.eventCode.equals(targetEventCode, ignoreCase = true) }
             .filter { it.courseId == targetCourseId }
-            .filter { it.finishedAtMs in start until end }
+            .filter { it.finishedAtMs >= sessionStartMs }
             .sortedBy { it.finishedAtMs }
             .toList()
-    }
-
-    private fun todayBounds(now: Long = System.currentTimeMillis()): Pair<Long, Long> {
-        val cal = Calendar.getInstance().apply {
-            timeInMillis = now
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        cal.add(Calendar.DAY_OF_YEAR, 1)
-        return start to cal.timeInMillis
-    }
 
     private fun formatTime(ms: Long): String {
         val safe = ms.coerceAtLeast(0L)
