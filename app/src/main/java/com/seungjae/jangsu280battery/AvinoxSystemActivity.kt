@@ -88,14 +88,14 @@ class AvinoxSystemActivity : Activity() {
 
         val compactRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            baselineAligned = false
+            isBaselineAligned = false
         }
 
         val reserve = panelBox(blueSoft, blue)
         reserve.addView(compactTitle("충전권장 기준잔량", blue))
         val reserveOptions = (1..99).map { "$it%" }
         val reserveSpinner = compactSpinner(reserveOptions)
-        reserveSpinner.setSelection((AppSettings.finishTarget(this).roundToInt().coerceIn(1, 99) - 1))
+        reserveSpinner.setSelection(AppSettings.finishTarget(this).roundToInt().coerceIn(1, 99) - 1)
         reserveSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 prefs.edit().putInt(AppSettings.KEY_FINISH_TARGET, position + 1).apply()
