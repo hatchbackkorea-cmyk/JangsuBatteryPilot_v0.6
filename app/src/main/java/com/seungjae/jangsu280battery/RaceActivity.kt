@@ -56,7 +56,10 @@ class RaceActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val poller = object : Runnable {
         override fun run() {
-            when (mode) { MODE_LIVE -> renderLive(); MODE_HOME -> renderHomeState() }
+            when (mode) {
+                MODE_LIVE -> renderLive()
+                MODE_HOME -> renderHomeState()
+            }
             handler.postDelayed(this, 100L)
         }
     }
@@ -64,7 +67,9 @@ class RaceActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        store = RaceDataStore(this); client = RaceServerClient(this); repo = CourseRepository(this)
+        store = RaceDataStore(this)
+        client = RaceServerClient(this)
+        repo = CourseRepository(this)
         val deepServer = intent?.data?.getQueryParameter("server").orEmpty().trim()
         if (deepServer.isNotBlank()) client.setEventServer(deepServer)
         val deepEvent = intent?.data?.getQueryParameter("event")?.trim()?.uppercase().orEmpty()
@@ -72,7 +77,8 @@ class RaceActivity : Activity() {
         currentEventCode = deepEvent.ifBlank { store.lastJoined()?.config?.eventCode.orEmpty() }
         val snap = store.snapshot()
         if (snap.state in setOf("WATCHING", "ARMED", "RUNNING")) showLive()
-        else if (deepEvent.isNotBlank()) showEvents(qrOnly = true) else showHome()
+        else if (deepEvent.isNotBlank()) showEvents(qrOnly = true)
+        else showHome()
         Thread { runCatching { client.flushPending() } }.start()
         handler.post(poller)
     }
@@ -80,7 +86,10 @@ class RaceActivity : Activity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (mode == MODE_HOME) {
             when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { swipeDownX = ev.x; swipeDownY = ev.y }
+                MotionEvent.ACTION_DOWN -> {
+                    swipeDownX = ev.x
+                    swipeDownY = ev.y
+                }
                 MotionEvent.ACTION_UP -> {
                     val dx = swipeDownX - ev.x
                     val dy = abs(swipeDownY - ev.y)
@@ -94,10 +103,15 @@ class RaceActivity : Activity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    override fun onDestroy() { handler.removeCallbacks(poller); super.onDestroy() }
+    override fun onDestroy() {
+        handler.removeCallbacks(poller)
+        super.onDestroy()
+    }
 
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if (mode == MODE_HOME) super.onBackPressed() else showHome() }
+    override fun onBackPressed() {
+        if (mode == MODE_HOME) super.onBackPressed() else showHome()
+    }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -121,15 +135,30 @@ class RaceActivity : Activity() {
         val profile = RaceProfileStore.profile(this)
         val joined = currentJoined()
         val active = runCatching { repo.activeMeta() }.getOrNull()
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
-        setContentView(root); addTopBar(root, "TimeGate RACE", false)
-        val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(Color.BLACK) }
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(22), dp(22), dp(22), dp(26)) }
-        scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+        }
+        setContentView(root)
+        addTopBar(root, "TimeGate RACE", false)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.BLACK)
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(22), dp(22), dp(22), dp(26))
+        }
+        scroll.addView(body)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         homeEventStatus = TextView(this).apply {
-            gravity = Gravity.CENTER; textSize = if (joined != null) 16f else 17f; setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(12), dp(10), dp(12), dp(10)); setTextColor(if (joined != null) GOOD else Color.LTGRAY)
+            gravity = Gravity.CENTER
+            textSize = if (joined != null) 16f else 17f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(if (joined != null) GOOD else Color.LTGRAY)
             text = if (joined != null) {
                 "✓ 참가완료 · ${joined.config.name} · ${joined.config.eventCode}\nNO.${profile.bib} · ${profile.name}(${profile.nickname})"
             } else {
@@ -140,9 +169,17 @@ class RaceActivity : Activity() {
         body.addView(View(this), LinearLayout.LayoutParams(1, dp(24)))
 
         startButton = Button(this).apply {
-            text = "START"; textSize = 51f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
-            gravity = Gravity.CENTER; isAllCaps = false
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(220, 0, 0)); setStroke(dp(10), Color.rgb(95, 95, 95)) }
+            text = "START"
+            textSize = 51f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            isAllCaps = false
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.rgb(220, 0, 0))
+                setStroke(dp(10), Color.rgb(95, 95, 95))
+            }
             setOnClickListener {
                 val s = store.snapshot()
                 if (s.state in setOf("WATCHING", "ARMED", "RUNNING")) showLive() else startRace()
@@ -151,85 +188,196 @@ class RaceActivity : Activity() {
         body.addView(startButton, LinearLayout.LayoutParams(dp(216), dp(216)))
         body.addView(TextView(this).apply {
             text = if (joined != null) "← 화면을 왼쪽으로 밀면 실시간 중계" else "START를 누르면 저장된 모든 GPX의 START를 백그라운드에서 자동 탐색합니다."
-            textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.rgb(115, 185, 255)); setPadding(0, dp(10), 0, dp(4)); setTypeface(typeface, Typeface.BOLD)
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(115, 185, 255))
+            setPadding(0, dp(10), 0, dp(4))
+            setTypeface(typeface, Typeface.BOLD)
         }, LinearLayout.LayoutParams(-1, -2))
         body.addView(View(this), LinearLayout.LayoutParams(1, dp(12)))
 
-        val menuRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        val menuRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
         menuRow.addView(menuButton(if (profile.isReady) "✓ 선수 등록" else "선수 등록") { showRegistration() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { marginEnd = dp(6) })
         menuRow.addView(menuButton(if (joined != null) "✓ 대회 참가" else "대회 참가") { showEvents() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { marginStart = dp(6) })
         body.addView(menuRow, LinearLayout.LayoutParams(-1, -2))
         body.addView(TextView(this).apply {
             text = "화면을 끄거나 휴대폰을 주머니에 넣어도 START/CP/FINISH 계측은 계속됩니다. 앱을 최근 앱 목록에서 밀어 종료하면 계측도 종료됩니다."
-            textSize = 11f; gravity = Gravity.CENTER; setTextColor(Color.GRAY); setPadding(0, dp(12), 0, 0)
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Color.GRAY)
+            setPadding(0, dp(12), 0, 0)
         })
     }
 
     private fun showRegistration() {
         mode = MODE_REGISTER
         val profile = RaceProfileStore.profile(this)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
-        setContentView(root); addTopBar(root, "선수 등록", true)
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(24), dp(22), dp(24)) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+        }
+        setContentView(root)
+        addTopBar(root, "선수 등록", true)
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(24), dp(22), dp(24))
+        }
         root.addView(body, LinearLayout.LayoutParams(-1, -1))
-        body.addView(TextView(this).apply { text = "이름 · 닉네임 · 배번"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) })
-        body.addView(TextView(this).apply { text = "일반 자동 랩은 회원가입 없이 바로 사용할 수 있습니다. 선수 정보는 대회 참가에 사용합니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(4), 0, dp(12)) })
+        body.addView(TextView(this).apply {
+            text = "이름 · 닉네임 · 배번"
+            textSize = 22f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        body.addView(TextView(this).apply {
+            text = "일반 자동 랩은 회원가입 없이 바로 사용할 수 있습니다. 선수 정보는 대회 참가에 사용합니다."
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(4), 0, dp(12))
+        })
         riderIdInput = darkInput("이름", profile.name).also { body.addView(it, inputLp()) }
         nicknameInput = darkInput("닉네임", profile.nickname).also { body.addView(it, inputLp()) }
         bibInput = darkInput("배번", profile.bib).apply { inputType = InputType.TYPE_CLASS_NUMBER }.also { body.addView(it, inputLp()) }
-        body.addView(Button(this).apply { text = "선수 정보 저장"; textSize = 17f; setTypeface(typeface, Typeface.BOLD); setOnClickListener { saveProfileOnly() } }, LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(12) })
-        registrationStatus = TextView(this).apply { textSize = 14f; setPadding(0, dp(12), 0, 0); setTextColor(if (profile.isReady) GOOD else Color.LTGRAY); text = if (profile.isReady) "✓ 저장됨 · 배번 ${profile.bib} · ${profile.nickname} (${profile.name})" else "아직 저장된 선수 정보가 없습니다." }
+        body.addView(Button(this).apply {
+            text = "선수 정보 저장"
+            textSize = 17f
+            setTypeface(typeface, Typeface.BOLD)
+            setOnClickListener { saveProfileOnly() }
+        }, LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(12) })
+        registrationStatus = TextView(this).apply {
+            textSize = 14f
+            setPadding(0, dp(12), 0, 0)
+            setTextColor(if (profile.isReady) GOOD else Color.LTGRAY)
+            text = if (profile.isReady) "✓ 저장됨 · 배번 ${profile.bib} · ${profile.nickname} (${profile.name})" else "아직 저장된 선수 정보가 없습니다."
+        }
         body.addView(registrationStatus)
     }
 
     private fun saveProfileOnly() {
-        val riderId = riderIdInput?.text?.toString().orEmpty().trim(); val nickname = nicknameInput?.text?.toString().orEmpty().trim(); val bib = bibInput?.text?.toString().orEmpty().trim()
-        if (riderId.isBlank() || nickname.isBlank() || bib.isBlank()) { registrationStatus?.setTextColor(WARN); registrationStatus?.text = "이름, 닉네임, 배번을 모두 입력해 주세요."; return }
-        val saved = RaceProfileStore.save(this, riderId, nickname, bib); hideKeyboard(); registrationStatus?.setTextColor(GOOD); registrationStatus?.text = "✓ 선수등록 저장 완료 · 배번 ${saved.bib} · ${saved.nickname} (${saved.name})"; Toast.makeText(this, "선수등록이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+        val riderId = riderIdInput?.text?.toString().orEmpty().trim()
+        val nickname = nicknameInput?.text?.toString().orEmpty().trim()
+        val bib = bibInput?.text?.toString().orEmpty().trim()
+        if (riderId.isBlank() || nickname.isBlank() || bib.isBlank()) {
+            registrationStatus?.setTextColor(WARN)
+            registrationStatus?.text = "이름, 닉네임, 배번을 모두 입력해 주세요."
+            return
+        }
+        val saved = RaceProfileStore.save(this, riderId, nickname, bib)
+        hideKeyboard()
+        registrationStatus?.setTextColor(GOOD)
+        registrationStatus?.text = "✓ 선수등록 저장 완료 · 배번 ${saved.bib} · ${saved.nickname} (${saved.name})"
+        Toast.makeText(this, "선수등록이 저장되었습니다.", Toast.LENGTH_SHORT).show()
     }
 
     private fun showEvents(qrOnly: Boolean = false) {
         mode = MODE_EVENTS
         if (!qrOnly) qrTargetEventCode = ""
         val profile = RaceProfileStore.profile(this)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
-        setContentView(root); addTopBar(root, "대회 참가", true)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+        }
+        setContentView(root)
+        addTopBar(root, "대회 참가", true)
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.BLACK) }
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(18), dp(18), dp(28)) }
-        scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        body.addView(TextView(this).apply { text = if (profile.isReady) "배번 ${profile.bib} · 이름 ${profile.name} · 닉네임 ${profile.nickname}" else "선수등록이 필요합니다."; textSize = 16f; setTextColor(if (profile.isReady) GOOD else WARN); setTypeface(typeface, Typeface.BOLD) })
-        body.addView(TextView(this).apply { text = if (qrTargetEventCode.isNotBlank()) "QR에서 선택한 대회 ${qrTargetEventCode}만 표시합니다. 다른 대회가 아니라 이 QR의 대회에 참가하게 됩니다." else "QR로 들어온 경우 현장 서버와 대회코드가 자동 설정됩니다. 대기중인 방은 운영자가 오픈할 때까지 참가할 수 없습니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(5), 0, dp(10)) })
-        body.addView(Button(this).apply { text = "새로고침"; setOnClickListener { loadEventsAsync() } }, LinearLayout.LayoutParams(-1, dp(48)))
-        joinStatus = TextView(this).apply { text = "개설된 대회를 불러오는 중…"; textSize = 13f; setTextColor(Color.LTGRAY); setPadding(0, dp(10), 0, dp(8)) }
-        body.addView(joinStatus); eventsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }; body.addView(eventsContainer, LinearLayout.LayoutParams(-1, -2)); loadEventsAsync()
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(28))
+        }
+        scroll.addView(body)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        body.addView(TextView(this).apply {
+            text = if (profile.isReady) "배번 ${profile.bib} · 이름 ${profile.name} · 닉네임 ${profile.nickname}" else "선수등록이 필요합니다."
+            textSize = 16f
+            setTextColor(if (profile.isReady) GOOD else WARN)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        body.addView(TextView(this).apply {
+            text = if (qrTargetEventCode.isNotBlank()) "QR에서 선택한 대회 ${qrTargetEventCode}만 표시합니다. 다른 대회가 아니라 이 QR의 대회에 참가하게 됩니다." else "QR로 들어온 경우 현장 서버와 대회코드가 자동 설정됩니다. 대기중인 방은 운영자가 오픈할 때까지 참가할 수 없습니다."
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(5), 0, dp(10))
+        })
+        body.addView(Button(this).apply {
+            text = "새로고침"
+            setOnClickListener { loadEventsAsync() }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        joinStatus = TextView(this).apply {
+            text = "개설된 대회를 불러오는 중…"
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(10), 0, dp(8))
+        }
+        body.addView(joinStatus)
+        eventsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(eventsContainer, LinearLayout.LayoutParams(-1, -2))
+        loadEventsAsync()
     }
 
     private fun loadEventsAsync() {
         if (mode != MODE_EVENTS) return
-        joinStatus?.setTextColor(Color.LTGRAY); joinStatus?.text = "개설된 대회를 불러오는 중…"; eventsContainer?.removeAllViews()
+        joinStatus?.setTextColor(Color.LTGRAY)
+        joinStatus?.text = "개설된 대회를 불러오는 중…"
+        eventsContainer?.removeAllViews()
         val qrCode = qrTargetEventCode
         Thread {
             val result = if (qrCode.isNotBlank()) runCatching { listOf(client.eventState(qrCode)) } else runCatching { client.listEvents() }
             runOnUiThread {
                 if (mode != MODE_EVENTS) return@runOnUiThread
                 result.onSuccess { events ->
-                    if (events.isEmpty()) { joinStatus?.text = "현재 표시할 대회가 없습니다."; return@onSuccess }
+                    if (events.isEmpty()) {
+                        joinStatus?.text = "현재 표시할 대회가 없습니다."
+                        return@onSuccess
+                    }
                     val selected = currentEventCode.takeIf { it.isNotBlank() }?.let { code -> events.firstOrNull { it.config.eventCode == code } }
                     joinStatus?.text = if (qrCode.isNotBlank()) "QR 대회 · ${events.first().config.name} · ${events.first().config.eventCode}" else selected?.notice?.takeIf { it.isNotBlank() } ?: "개설된 대회 ${events.size}개"
                     joinStatus?.setTextColor(if (selected?.phase == "WAITING") WARN else Color.LTGRAY)
                     events.forEach { addEventCard(it) }
-                }.onFailure { e -> joinStatus?.setTextColor(WARN); joinStatus?.text = "대회 목록을 불러오지 못했습니다.\n${e.message ?: "서버 연결을 확인하세요."}\n서버: ${client.baseUrl()}" }
+                }.onFailure { e ->
+                    joinStatus?.setTextColor(WARN)
+                    joinStatus?.text = "대회 목록을 불러오지 못했습니다.\n${e.message ?: "서버 연결을 확인하세요."}\n서버: ${client.baseUrl()}"
+                }
             }
         }.start()
     }
 
-    private fun phaseLabel(phase: String): String = when (phase.uppercase()) { "WAITING" -> "대기중"; "PRACTICE" -> "연습주행"; "OFFICIAL" -> "정식계측"; "ENDED" -> "종료"; else -> phase }
+    private fun phaseLabel(phase: String): String = when (phase.uppercase()) {
+        "WAITING" -> "대기중"
+        "PRACTICE" -> "연습주행"
+        "OFFICIAL" -> "정식계측"
+        "ENDED" -> "종료"
+        else -> phase
+    }
 
     private fun addEventCard(item: RaceServerClient.EventListItem) {
-        val code = item.config.eventCode; val joined = store.joined(code); val selected = currentEventCode == code && joined != null
-        val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12)); background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = dp(10).toFloat(); setColor(Color.rgb(24, 24, 24)); setStroke(dp(if (selected) 2 else 1), if (selected) GOOD else Color.rgb(70, 70, 70)) } }
-        card.addView(TextView(this).apply { text = "${item.config.name}  ·  ${item.config.eventCode}"; textSize = 18f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) })
-        card.addView(TextView(this).apply { text = "${item.config.courseName} · ${"%.2f".format(item.config.distanceM / 1000.0)} km · 참가 ${item.participants}명 · ${phaseLabel(item.phase)}"; textSize = 12f; setTextColor(if (item.phase == "WAITING") WARN else Color.LTGRAY); setPadding(0, dp(4), 0, dp(8)) })
+        val code = item.config.eventCode
+        val joined = store.joined(code)
+        val selected = currentEventCode == code && joined != null
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.rgb(24, 24, 24))
+                setStroke(dp(if (selected) 2 else 1), if (selected) GOOD else Color.rgb(70, 70, 70))
+            }
+        }
+        card.addView(TextView(this).apply {
+            text = "${item.config.name}  ·  ${item.config.eventCode}"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        card.addView(TextView(this).apply {
+            text = "${item.config.courseName} · ${"%.2f".format(item.config.distanceM / 1000.0)} km · 참가 ${item.participants}명 · ${phaseLabel(item.phase)}"
+            textSize = 12f
+            setTextColor(if (item.phase == "WAITING") WARN else Color.LTGRAY)
+            setPadding(0, dp(4), 0, dp(8))
+        })
         card.addView(Button(this).apply {
             text = when {
                 item.phase == "WAITING" -> "현재는 오픈되지 않았습니다"
@@ -239,33 +387,88 @@ class RaceActivity : Activity() {
                 item.phase == "PRACTICE" -> "연습주행 참가하기"
                 else -> "정식 대회 참가하기"
             }
-            textSize = 15f; isEnabled = item.joinable
+            textSize = 15f
+            isEnabled = item.joinable
             setOnClickListener {
-                if (joined != null) { currentEventCode = code; runCatching { repo.setActive(joined.localCourseId) }; joinStatus?.setTextColor(GOOD); joinStatus?.text = "✓ ${item.config.name} 참가완료 · ${phaseLabel(item.phase)}"; loadEventsAsync() }
-                else joinEvent(item)
+                if (joined != null) {
+                    currentEventCode = code
+                    runCatching { repo.setActive(joined.localCourseId) }
+                    joinStatus?.setTextColor(GOOD)
+                    joinStatus?.text = "✓ ${item.config.name} 참가완료 · ${phaseLabel(item.phase)}"
+                    loadEventsAsync()
+                } else joinEvent(item)
             }
         }, LinearLayout.LayoutParams(-1, dp(50)))
-        if (item.phase == "WAITING") card.addView(TextView(this).apply { text = item.notice.ifBlank { "현재는 대회 서버가 오픈되지 않았습니다. 운영자 오픈 후 이용해 주세요." }; textSize = 12f; setTextColor(WARN); setPadding(0, dp(6), 0, 0) })
+        if (item.phase == "WAITING") {
+            card.addView(TextView(this).apply {
+                text = item.notice.ifBlank { "현재는 대회 서버가 오픈되지 않았습니다. 운영자 오픈 후 이용해 주세요." }
+                textSize = 12f
+                setTextColor(WARN)
+                setPadding(0, dp(6), 0, 0)
+            })
+        }
         eventsContainer?.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+    }
+
+    /**
+     * Event timing must use the administrator's current GPX, not an arbitrary local course that only
+     * happens to share the same name/distance. When the same server course is already cached we
+     * replace its bytes in place so local lap-history courseId continuity is preserved.
+     */
+    private fun syncLatestEventCourse(eventCode: String, config: RaceEventConfig, preferredLocalId: String?): String {
+        val tmp = client.downloadCourse(eventCode)
+        try {
+            val preferred = preferredLocalId?.let { id -> repo.listCourses().firstOrNull { it.id == id && !it.builtIn } }
+            val target = preferred?.let { repo.sourceFile(it.id) }
+            if (preferred != null && target != null) {
+                tmp.copyTo(target, overwrite = true)
+                repo.setActive(preferred.id)
+                return preferred.id
+            }
+            return repo.importGpxFile(tmp, config.courseName, enqueueServer = false).id
+        } finally {
+            tmp.delete()
+        }
     }
 
     private fun joinEvent(item: RaceServerClient.EventListItem) {
         val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 이름, 닉네임, 배번을 선수 등록 메뉴에서 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
-        if (!item.joinable) { AlertDialog.Builder(this).setTitle("대회 오픈 대기").setMessage(item.notice.ifBlank { "현재는 대회 서버가 오픈되지 않았습니다. 운영자 오픈 후 이용해 주세요." }).setPositiveButton("확인", null).show(); return }
-        joinStatus?.setTextColor(Color.LTGRAY); joinStatus?.text = "${item.config.name} 참가 처리 중…\n서버 참가 등록 → GPX 확인"
+        if (!profile.isReady) {
+            AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 이름, 닉네임, 배번을 선수 등록 메뉴에서 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show()
+            return
+        }
+        if (!item.joinable) {
+            AlertDialog.Builder(this).setTitle("대회 오픈 대기").setMessage(item.notice.ifBlank { "현재는 대회 서버가 오픈되지 않았습니다. 운영자 오픈 후 이용해 주세요." }).setPositiveButton("확인", null).show()
+            return
+        }
+        joinStatus?.setTextColor(Color.LTGRAY)
+        joinStatus?.text = "${item.config.name} 참가 처리 중…\n서버 참가 등록 → 관리자 GPX 최신본 동기화"
         Thread {
             val result = runCatching {
-                val joined = client.join(item.config.eventCode, profile); val old = store.joined(item.config.eventCode); val localCourses = repo.listCourses()
-                val oldLocal = old?.localCourseId?.takeIf { id -> localCourses.any { it.id == id } && old.config.courseServerId == joined.config.courseServerId }
-                val matchingLocal = localCourses.firstOrNull { m -> m.name.trim().equals(joined.config.courseName.trim(), true) && abs(m.totalKm * 1000.0 - joined.config.distanceM) <= 40.0 }?.id
-                val localId = oldLocal ?: matchingLocal ?: run { val tmp = client.downloadCourse(item.config.eventCode); try { repo.importGpxFile(tmp, joined.config.courseName, enqueueServer = false).id } finally { tmp.delete() } }
-                repo.setActive(localId); store.saveJoined(joined.config, joined.participantToken, localId); Triple(joined.config, localId, joined.phase)
+                val joined = client.join(item.config.eventCode, profile)
+                val old = store.joined(item.config.eventCode)
+                val localCourses = repo.listCourses()
+                val preferredLocal = old?.localCourseId?.takeIf { id ->
+                    localCourses.any { it.id == id && !it.builtIn } && old.config.courseServerId == joined.config.courseServerId
+                }
+                val localId = syncLatestEventCourse(item.config.eventCode, joined.config, preferredLocal)
+                repo.setActive(localId)
+                store.saveJoined(joined.config, joined.participantToken, localId)
+                Triple(joined.config, localId, joined.phase)
             }
             runOnUiThread {
                 if (mode != MODE_EVENTS) return@runOnUiThread
-                result.onSuccess { (cfg, _, phase) -> currentEventCode = cfg.eventCode; joinStatus?.setTextColor(GOOD); joinStatus?.text = "✓ 참가완료 · ${cfg.name} · ${cfg.eventCode}\n배번 ${profile.bib} · ${profile.nickname} · ${phaseLabel(phase)}"; AlertDialog.Builder(this).setTitle("대회 참가 완료").setMessage("${cfg.name}\n대회 코드 ${cfg.eventCode}\n배번 ${profile.bib}\n\n${phaseLabel(phase)} 세션에 참가했습니다.").setPositiveButton("확인", null).show(); loadEventsAsync() }
-                    .onFailure { e -> joinStatus?.setTextColor(WARN); joinStatus?.text = e.message ?: "참가 실패"; AlertDialog.Builder(this).setTitle("대회 참가 안내").setMessage(e.message ?: "서버 연결을 확인하세요.").setPositiveButton("확인", null).show() }
+                result.onSuccess { (cfg, _, phase) ->
+                    currentEventCode = cfg.eventCode
+                    joinStatus?.setTextColor(GOOD)
+                    joinStatus?.text = "✓ 참가완료 · 관리자 경기맵 최신본 적용 · ${cfg.name} · ${cfg.eventCode}\n배번 ${profile.bib} · ${profile.nickname} · ${phaseLabel(phase)}"
+                    AlertDialog.Builder(this).setTitle("대회 참가 완료").setMessage("${cfg.name}\n대회 코드 ${cfg.eventCode}\n배번 ${profile.bib}\n\n관리자 경기맵 최신본을 적용했습니다.\n${phaseLabel(phase)} 세션에 참가했습니다.").setPositiveButton("확인", null).show()
+                    loadEventsAsync()
+                }.onFailure { e ->
+                    joinStatus?.setTextColor(WARN)
+                    joinStatus?.text = e.message ?: "참가 실패"
+                    AlertDialog.Builder(this).setTitle("대회 참가 안내").setMessage(e.message ?: "서버 연결을 확인하세요.").setPositiveButton("확인", null).show()
+                }
             }
         }.start()
     }
@@ -293,24 +496,35 @@ class RaceActivity : Activity() {
 
     private fun startRace() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION); return
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION)
+            return
         }
         val joined = currentJoined()
         if (joined == null) {
-            startLocalAutoLapWatch(); return
+            startLocalAutoLapWatch()
+            return
         }
         val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("대회 계측에는 이름, 닉네임, 배번이 필요합니다. 일반 자동 랩은 대회 참가 없이 사용할 수 있습니다.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
+        if (!profile.isReady) {
+            AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("대회 계측에는 이름, 닉네임, 배번이 필요합니다. 일반 자동 랩은 대회 참가 없이 사용할 수 있습니다.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show()
+            return
+        }
         currentEventCode = joined.config.eventCode
         val oldLocalCourseId = joined.localCourseId
         val baseConfig = joined.config
-        homeEventStatus?.setTextColor(Color.LTGRAY); homeEventStatus?.text = "${baseConfig.name} · 세션/코스 상태 확인 중…"
+        homeEventStatus?.setTextColor(Color.LTGRAY)
+        homeEventStatus?.text = "${baseConfig.name} · 서버 세션 확인 → 관리자 경기맵 최신본 동기화 중…"
+
         Thread {
             val stateResult = runCatching { client.eventState(baseConfig.eventCode) }
             if (stateResult.isSuccess) {
                 val state = stateResult.getOrThrow()
                 if (state.phase == "WAITING") {
-                    runOnUiThread { homeEventStatus?.setTextColor(WARN); homeEventStatus?.text = state.notice; AlertDialog.Builder(this).setTitle("대회 오픈 대기").setMessage(state.notice).setPositiveButton("확인", null).show() }
+                    runOnUiThread {
+                        homeEventStatus?.setTextColor(WARN)
+                        homeEventStatus?.text = state.notice
+                        AlertDialog.Builder(this).setTitle("대회 오픈 대기").setMessage(state.notice).setPositiveButton("확인", null).show()
+                    }
                     return@Thread
                 }
                 if (state.phase == "ENDED") {
@@ -325,63 +539,154 @@ class RaceActivity : Activity() {
             val serverConfig = stateResult.getOrNull()?.config ?: baseConfig
             var resolvedCourseId = oldLocalCourseId
             var courseRefreshed = false
-            val localExists = repo.listCourses().any { it.id == oldLocalCourseId }
-            val courseChanged = serverConfig.courseServerId != baseConfig.courseServerId ||
-                serverConfig.courseName.trim() != baseConfig.courseName.trim() ||
-                abs(serverConfig.distanceM - baseConfig.distanceM) > 20.0
-            if (stateResult.isSuccess && (courseChanged || !localExists)) {
-                val tmp = client.downloadCourse(serverConfig.eventCode)
-                try {
-                    resolvedCourseId = repo.importGpxFile(tmp, serverConfig.courseName, enqueueServer = false).id
+            val oldMeta = repo.listCourses().firstOrNull { it.id == oldLocalCourseId }
+            val localExists = oldMeta != null
+
+            if (stateResult.isSuccess) {
+                val preferredLocal = oldLocalCourseId.takeIf {
+                    localExists && oldMeta?.builtIn == false && serverConfig.courseServerId == baseConfig.courseServerId
+                }
+                val syncResult = runCatching { syncLatestEventCourse(serverConfig.eventCode, serverConfig, preferredLocal) }
+                if (syncResult.isSuccess) {
+                    resolvedCourseId = syncResult.getOrThrow()
                     courseRefreshed = true
-                } finally { tmp.delete() }
-                repo.setActive(resolvedCourseId)
-                store.saveJoined(serverConfig, joined.token, resolvedCourseId, joined.serverUrl.ifBlank { client.baseUrl() })
+                    repo.setActive(resolvedCourseId)
+                    store.saveJoined(serverConfig, joined.token, resolvedCourseId, joined.serverUrl.ifBlank { client.baseUrl() })
+                } else if (!localExists) {
+                    runOnUiThread {
+                        Toast.makeText(this, "관리자 경기맵을 내려받지 못해 계측을 시작하지 않았습니다. ${syncResult.exceptionOrNull()?.message.orEmpty()}", Toast.LENGTH_LONG).show()
+                        showHome()
+                    }
+                    return@Thread
+                }
             } else if (localExists) {
                 runCatching { repo.setActive(resolvedCourseId) }
             }
 
-            // Phone DELTA is based only on the immediately previous local lap for this course.
-            // First lap has no comparison reference, so DELTA remains blank until lap 2.
             val reference = previousRunForCourse(resolvedCourseId)?.reference ?: emptyList()
             val cfg = serverConfig.copy(reference = reference)
             runOnUiThread {
                 startService(Intent(this, RaceAutoLapDiscoveryService::class.java).apply { action = RaceAutoLapDiscoveryService.ACTION_STOP })
                 store.saveActiveConfig(cfg, resolvedCourseId, reference)
-                startForegroundService(Intent(this, RaceTimingService::class.java).apply { action = RaceTimingService.ACTION_ARM; putExtra(RaceTimingService.EXTRA_CONFIG, cfg.toJson().toString()); putExtra(RaceTimingService.EXTRA_COURSE_ID, resolvedCourseId) })
-                currentEventCode = cfg.eventCode; showLive()
-                if (courseRefreshed) Toast.makeText(this, "관리자가 변경한 최신 대회 코스를 적용했습니다.", Toast.LENGTH_LONG).show()
-                if (stateResult.isFailure) Toast.makeText(this, "서버 상태 확인이 안 되어도 휴대폰 로컬 계측은 계속합니다. 연결 복구 후 자동 분류됩니다.", Toast.LENGTH_LONG).show()
+                startForegroundService(Intent(this, RaceTimingService::class.java).apply {
+                    action = RaceTimingService.ACTION_ARM
+                    putExtra(RaceTimingService.EXTRA_CONFIG, cfg.toJson().toString())
+                    putExtra(RaceTimingService.EXTRA_COURSE_ID, resolvedCourseId)
+                })
+                currentEventCode = cfg.eventCode
+                showLive()
+                if (courseRefreshed) Toast.makeText(this, "관리자 경기맵 최신본 적용 · START 계측 대기", Toast.LENGTH_LONG).show()
+                if (stateResult.isFailure) Toast.makeText(this, "서버 상태 확인이 안 되어 캐시된 경기맵으로 로컬 계측을 계속합니다. 연결 복구 후 자동 분류됩니다.", Toast.LENGTH_LONG).show()
             }
         }.start()
     }
 
     private fun showLive() {
         mode = MODE_LIVE
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(0, 0, 230)) }; setContentView(root)
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(12), 0); setBackgroundColor(Color.rgb(47, 47, 47)) }
-        top.addView(Button(this).apply { text = "‹  Live"; textSize = 17f; isAllCaps = false; setTextColor(Color.WHITE); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showHome() } }, LinearLayout.LayoutParams(dp(112), dp(56)))
-        liveHeader = TextView(this).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; textSize = 14f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) }
-        top.addView(liveHeader, LinearLayout.LayoutParams(0, dp(56), 1f)); root.addView(top)
-        bestTime = addLiveTimeBlock(root, "BEST", "1"); previousTime = addLiveTimeBlock(root, "PREVIOUS", "2"); currentTime = addLiveTimeBlock(root, "CURRENT", "3")
-        deltaPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(8), dp(6), dp(8), dp(6)); setBackgroundColor(Color.rgb(55, 55, 55)) }
-        deltaPanel?.addView(TextView(this).apply { text = "DELTA · PREVIOUS"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
-        deltaTime = TextView(this).apply { text = "—"; textSize = 92f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); includeFontPadding = false }
-        deltaPanel?.addView(deltaTime, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(deltaPanel, LinearLayout.LayoutParams(-1, 0, 1.15f))
-        liveFooter = TextView(this).apply { gravity = Gravity.CENTER; textSize = 11f; setTextColor(Color.LTGRAY); setBackgroundColor(Color.rgb(28, 28, 28)); setPadding(dp(8), dp(5), dp(8), dp(5)) }
-        root.addView(liveFooter, LinearLayout.LayoutParams(-1, dp(34))); renderLive()
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(0, 0, 230))
+        }
+        setContentView(root)
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(12), 0)
+            setBackgroundColor(Color.rgb(47, 47, 47))
+        }
+        top.addView(Button(this).apply {
+            text = "‹  Live"
+            textSize = 17f
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showHome() }
+        }, LinearLayout.LayoutParams(dp(112), dp(56)))
+        liveHeader = TextView(this).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+        }
+        top.addView(liveHeader, LinearLayout.LayoutParams(0, dp(56), 1f))
+        root.addView(top)
+        bestTime = addLiveTimeBlock(root, "BEST", "1")
+        previousTime = addLiveTimeBlock(root, "PREVIOUS", "2")
+        currentTime = addLiveTimeBlock(root, "CURRENT", "3")
+        deltaPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+            setBackgroundColor(Color.rgb(55, 55, 55))
+        }
+        deltaPanel?.addView(TextView(this).apply {
+            text = "DELTA · PREVIOUS"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+        })
+        deltaTime = TextView(this).apply {
+            text = "—"
+            textSize = 92f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            includeFontPadding = false
+        }
+        deltaPanel?.addView(deltaTime, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(deltaPanel, LinearLayout.LayoutParams(-1, 0, 1.15f))
+        liveFooter = TextView(this).apply {
+            gravity = Gravity.CENTER
+            textSize = 11f
+            setTextColor(Color.LTGRAY)
+            setBackgroundColor(Color.rgb(28, 28, 28))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+        }
+        root.addView(liveFooter, LinearLayout.LayoutParams(-1, dp(34)))
+        renderLive()
     }
 
     private fun addLiveTimeBlock(root: LinearLayout, label: String, index: String): TextView {
-        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(6), dp(10), dp(3)); setBackgroundColor(Color.rgb(0, 0, 230)) }
-        block.addView(TextView(this).apply { text = label; textSize = 13f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) })
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(TextView(this).apply { text = index; textSize = 43f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER; includeFontPadding = false }, LinearLayout.LayoutParams(dp(58), -1))
-        val time = TextView(this).apply { text = "—"; textSize = 72f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER; includeFontPadding = false }
-        row.addView(time, LinearLayout.LayoutParams(0, -1, 1f)); block.addView(row, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(block, LinearLayout.LayoutParams(-1, 0, 1.55f)); return time
+        val block = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(6), dp(10), dp(3))
+            setBackgroundColor(Color.rgb(0, 0, 230))
+        }
+        block.addView(TextView(this).apply {
+            text = label
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(TextView(this).apply {
+            text = index
+            textSize = 43f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }, LinearLayout.LayoutParams(dp(58), -1))
+        val time = TextView(this).apply {
+            text = "—"
+            textSize = 72f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }
+        row.addView(time, LinearLayout.LayoutParams(0, -1, 1f))
+        block.addView(row, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(block, LinearLayout.LayoutParams(-1, 0, 1.55f))
+        return time
     }
 
-    private fun renderHomeState() { startButton?.text = "START" }
+    private fun renderHomeState() {
+        startButton?.text = "START"
+    }
 
     private fun renderLive() {
         if (mode != MODE_LIVE) return
@@ -410,20 +715,20 @@ class RaceActivity : Activity() {
         deltaPanel?.setBackgroundColor(Color.rgb(55, 55, 55))
         val d = s.deltaMs
         if (d == null || s.state !in setOf("RUNNING", "FINISHED")) {
-            deltaTime?.text = "—"; deltaTime?.setTextColor(Color.WHITE)
+            deltaTime?.text = "—"
+            deltaTime?.setTextColor(Color.WHITE)
         } else when {
             d < 0L -> {
-                // Product convention: faster than PREVIOUS is positive/blue.
                 deltaTime?.text = "+%.1f".format(abs(d) / 1000.0)
                 deltaTime?.setTextColor(Color.rgb(70, 150, 255))
             }
             d > 0L -> {
-                // Product convention: slower than PREVIOUS is negative/red.
                 deltaTime?.text = "−%.1f".format(abs(d) / 1000.0)
                 deltaTime?.setTextColor(Color.rgb(255, 55, 70))
             }
             else -> {
-                deltaTime?.text = "0.0"; deltaTime?.setTextColor(Color.WHITE)
+                deltaTime?.text = "0.0"
+                deltaTime?.setTextColor(Color.WHITE)
             }
         }
         liveFooter?.text = buildString {
@@ -436,20 +741,80 @@ class RaceActivity : Activity() {
     }
 
     private fun addTopBar(root: LinearLayout, title: String, back: Boolean) {
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), 0, dp(14), 0); setBackgroundColor(Color.rgb(46, 46, 46)) }
-        if (back) top.addView(Button(this).apply { text = "‹"; textSize = 28f; isAllCaps = false; setTextColor(Color.WHITE); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showHome() } }, LinearLayout.LayoutParams(dp(58), dp(68)))
-        top.addView(TextView(this).apply { text = title; textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(68), 1f)); root.addView(top)
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), 0, dp(14), 0)
+            setBackgroundColor(Color.rgb(46, 46, 46))
+        }
+        if (back) {
+            top.addView(Button(this).apply {
+                text = "‹"
+                textSize = 28f
+                isAllCaps = false
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.TRANSPARENT)
+                setOnClickListener { showHome() }
+            }, LinearLayout.LayoutParams(dp(58), dp(68)))
+        }
+        top.addView(TextView(this).apply {
+            text = title
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER_VERTICAL
+        }, LinearLayout.LayoutParams(0, dp(68), 1f))
+        root.addView(top)
     }
 
-    private fun menuButton(label: String, action: () -> Unit) = Button(this).apply { text = label; textSize = 16f; isAllCaps = false; setTypeface(typeface, Typeface.BOLD); setOnClickListener { action() } }
-    private fun darkInput(hintText: String, value: String): EditText = EditText(this).apply { hint = hintText; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 16f; setSingleLine(true); setText(value); setPadding(dp(12), 0, dp(12), 0); background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = dp(6).toFloat(); setColor(Color.rgb(38, 38, 38)); setStroke(dp(1), Color.rgb(90, 90, 90)) } }
+    private fun menuButton(label: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        textSize = 16f
+        isAllCaps = false
+        setTypeface(typeface, Typeface.BOLD)
+        setOnClickListener { action() }
+    }
+
+    private fun darkInput(hintText: String, value: String): EditText = EditText(this).apply {
+        hint = hintText
+        setHintTextColor(Color.GRAY)
+        setTextColor(Color.WHITE)
+        textSize = 16f
+        setSingleLine(true)
+        setText(value)
+        setPadding(dp(12), 0, dp(12), 0)
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(6).toFloat()
+            setColor(Color.rgb(38, 38, 38))
+            setStroke(dp(1), Color.rgb(90, 90, 90))
+        }
+    }
+
     private fun inputLp() = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
-    private fun formatBigTime(ms: Long): String { val safe = ms.coerceAtLeast(0L); val minute = safe / 60_000; val seconds = (safe % 60_000) / 1000; val tenth = (safe % 1000) / 100; return if (minute > 0) "%d:%02d.%d".format(minute, seconds, tenth) else "%d.%d".format(seconds, tenth) }
-    private fun hideKeyboard() { val token = currentFocus?.windowToken ?: return; (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(token, 0); currentFocus?.clearFocus() }
+
+    private fun formatBigTime(ms: Long): String {
+        val safe = ms.coerceAtLeast(0L)
+        val minute = safe / 60_000
+        val seconds = (safe % 60_000) / 1000
+        val tenth = (safe % 1000) / 100
+        return if (minute > 0) "%d:%02d.%d".format(minute, seconds, tenth) else "%d.%d".format(seconds, tenth)
+    }
+
+    private fun hideKeyboard() {
+        val token = currentFocus?.windowToken ?: return
+        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(token, 0)
+        currentFocus?.clearFocus()
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
 
     companion object {
-        private const val MODE_HOME = 0; private const val MODE_REGISTER = 1; private const val MODE_EVENTS = 2; private const val MODE_LIVE = 3; private const val REQ_LOCATION = 8801
-        private val GOOD = Color.rgb(75, 215, 115); private val WARN = Color.rgb(255, 140, 70)
+        private const val MODE_HOME = 0
+        private const val MODE_REGISTER = 1
+        private const val MODE_EVENTS = 2
+        private const val MODE_LIVE = 3
+        private const val REQ_LOCATION = 8801
+        private val GOOD = Color.rgb(75, 215, 115)
+        private val WARN = Color.rgb(255, 140, 70)
     }
 }
