@@ -7,8 +7,16 @@ import kotlin.math.*
 class RaceRouteMatcher(private val course: CourseData) {
     data class Match(val routeM: Double, val distanceM: Double, val segmentIndex: Int)
     private var lastRouteM: Double? = null
+    private var lastLat: Double? = null
+    private var lastLon: Double? = null
+    private var stagnantTravelM = 0.0
 
-    fun reset(routeM: Double? = null) { lastRouteM = routeM }
+    fun reset(routeM: Double? = null) {
+        lastRouteM = routeM
+        lastLat = null
+        lastLon = null
+        stagnantTravelM = 0.0
+    }
 
     fun match(location: Location): Match {
         val track = course.track
@@ -25,7 +33,32 @@ class RaceRouteMatcher(private val course: CourseData) {
             end = course.indexAtKm(((last / 1000.0) + 0.80).coerceAtMost(course.totalKm)).coerceIn(start, track.lastIndex - 1)
             best = projectRange(location.latitude, location.longitude, start, end)
         }
+
+        val previousLat = lastLat
+        val previousLon = lastLon
+        if (previousLat != null && previousLon != null) {
+            val travelled = Geo.distanceMeters(previousLat, previousLon, location.latitude, location.longitude)
+            val progressed = if (last == null) Double.POSITIVE_INFINITY else abs(best.routeM - last)
+            stagnantTravelM = if (progressed < 4.0) stagnantTravelM + travelled else 0.0
+        }
+
+        // Recovery for a field-observed failure where routeM remained near START while the rider
+        // physically continued along the course. The normal local continuity window stays primary.
+        // A global snap is allowed only when the local match is clearly poor, or the phone has
+        // travelled a substantial distance while route progress remained effectively frozen.
+        if (last != null && (best.distanceM > 80.0 || stagnantTravelM > 120.0)) {
+            val global = projectRange(location.latitude, location.longitude, 0, track.lastIndex - 1)
+            val improvement = best.distanceM - global.distanceM
+            val backwards = global.routeM < last - 80.0
+            if (!backwards && global.distanceM <= 35.0 && improvement >= 25.0) {
+                best = global
+                stagnantTravelM = 0.0
+            }
+        }
+
         if (best.distanceM < 150.0) lastRouteM = best.routeM
+        lastLat = location.latitude
+        lastLon = location.longitude
         return best
     }
 
