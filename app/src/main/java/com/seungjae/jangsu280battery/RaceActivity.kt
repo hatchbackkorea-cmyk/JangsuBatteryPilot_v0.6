@@ -277,11 +277,11 @@ class RaceActivity : Activity() {
         return joined
     }
 
-    private fun bestRunForCourse(courseId: String): RaceRunSummary? {
+    private fun previousRunForCourse(courseId: String): RaceRunSummary? {
         if (courseId.isBlank()) return null
-        val history = store.completed().filter { it.courseId == courseId && it.status != "INVALID" }
-        val valid = history.filter { it.status == "VALID" }
-        return (valid.ifEmpty { history }).minByOrNull { it.elapsedMs }
+        return store.completed()
+            .filter { it.courseId == courseId && it.status != "INVALID" && it.reference.size >= 2 }
+            .maxByOrNull { it.finishedAtMs }
     }
 
     private fun startLocalAutoLapWatch() {
@@ -341,9 +341,9 @@ class RaceActivity : Activity() {
                 runCatching { repo.setActive(resolvedCourseId) }
             }
 
-            val ownBest = bestRunForCourse(resolvedCourseId)?.reference?.takeIf { it.size >= 2 }
-            val serverReference = runCatching { client.fetchReference(baseConfig.eventCode) }.getOrDefault(serverConfig.reference)
-            val reference = ownBest ?: serverReference
+            // Phone DELTA is based only on the immediately previous local lap for this course.
+            // First lap has no comparison reference, so DELTA remains blank until lap 2.
+            val reference = previousRunForCourse(resolvedCourseId)?.reference ?: emptyList()
             val cfg = serverConfig.copy(reference = reference)
             runOnUiThread {
                 startService(Intent(this, RaceAutoLapDiscoveryService::class.java).apply { action = RaceAutoLapDiscoveryService.ACTION_STOP })
@@ -365,7 +365,7 @@ class RaceActivity : Activity() {
         top.addView(liveHeader, LinearLayout.LayoutParams(0, dp(56), 1f)); root.addView(top)
         bestTime = addLiveTimeBlock(root, "BEST", "1"); previousTime = addLiveTimeBlock(root, "PREVIOUS", "2"); currentTime = addLiveTimeBlock(root, "CURRENT", "3")
         deltaPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(8), dp(6), dp(8), dp(6)); setBackgroundColor(Color.rgb(55, 55, 55)) }
-        deltaPanel?.addView(TextView(this).apply { text = "DELTA · BEST"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
+        deltaPanel?.addView(TextView(this).apply { text = "DELTA · PREVIOUS"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
         deltaTime = TextView(this).apply { text = "—"; textSize = 92f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); includeFontPadding = false }
         deltaPanel?.addView(deltaTime, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(deltaPanel, LinearLayout.LayoutParams(-1, 0, 1.15f))
         liveFooter = TextView(this).apply { gravity = Gravity.CENTER; textSize = 11f; setTextColor(Color.LTGRAY); setBackgroundColor(Color.rgb(28, 28, 28)); setPadding(dp(8), dp(5), dp(8), dp(5)) }
@@ -391,7 +391,7 @@ class RaceActivity : Activity() {
         val historical = if (courseId.isBlank()) emptyList() else store.completed().filter { it.courseId == courseId && it.runId != currentRunId }
         val valid = historical.filter { it.status == "VALID" }
         val best = (valid.ifEmpty { historical }).minByOrNull { it.elapsedMs }
-        val previous = historical.maxByOrNull { it.finishedAtMs }
+        val previous = historical.filter { it.status != "INVALID" }.maxByOrNull { it.finishedAtMs }
         val elapsed = if (s.state == "RUNNING" && s.startedAtMs > 0L) (System.currentTimeMillis() - s.startedAtMs).coerceAtLeast(0L) else s.elapsedMs
         bestTime?.text = best?.elapsedMs?.let(::formatBigTime) ?: "—"
         previousTime?.text = previous?.elapsedMs?.let(::formatBigTime) ?: "—"
@@ -413,12 +413,12 @@ class RaceActivity : Activity() {
             deltaTime?.text = "—"; deltaTime?.setTextColor(Color.WHITE)
         } else when {
             d < 0L -> {
-                // Product convention: faster than BEST is positive/blue.
+                // Product convention: faster than PREVIOUS is positive/blue.
                 deltaTime?.text = "+%.1f".format(abs(d) / 1000.0)
                 deltaTime?.setTextColor(Color.rgb(70, 150, 255))
             }
             d > 0L -> {
-                // Product convention: slower than BEST is negative/red.
+                // Product convention: slower than PREVIOUS is negative/red.
                 deltaTime?.text = "−%.1f".format(abs(d) / 1000.0)
                 deltaTime?.setTextColor(Color.rgb(255, 55, 70))
             }
@@ -429,6 +429,7 @@ class RaceActivity : Activity() {
         liveFooter?.text = buildString {
             append("GPS ±").append(s.gpsAccuracyM.roundToInt()).append("m")
             if (s.totalM > 0) append("  ·  ").append(s.routeM.roundToInt()).append("/").append(s.totalM.roundToInt()).append("m")
+            if (previous != null) append("  ·  PREVIOUS ").append(formatBigTime(previous.elapsedMs))
             if (best != null) append("  ·  BEST ").append(formatBigTime(best.elapsedMs))
             if (s.serverStatus.isNotBlank()) append("  ·  ").append(s.serverStatus)
         }
