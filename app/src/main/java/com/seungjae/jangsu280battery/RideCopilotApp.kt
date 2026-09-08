@@ -7,14 +7,15 @@ import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Switch
 import android.widget.TextView
+import androidx.core.view.WindowCompat
 import com.kakao.vectormap.KakaoMapSdk
 
-/**
- * Application-level UI helpers plus Kakao Maps SDK initialization.
- */
+/** Application-level TimeGate UI helpers plus Kakao Maps SDK initialization. */
 class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     override fun onCreate() {
         super.onCreate()
@@ -66,19 +67,31 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     private fun applyTimeGateSystemBars(activity: Activity) {
         val window = activity.window
         window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = Color.WHITE
         window.navigationBarColor = Color.WHITE
+
         @Suppress("DEPRECATION")
         run {
-            var flags = window.decorView.systemUiVisibility
+            val blocked = View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            var flags = window.decorView.systemUiVisibility and blocked.inv()
             flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
             window.decorView.systemUiVisibility = flags
         }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.insetsController?.show(WindowInsets.Type.systemBars())
             window.insetsController?.setSystemBarsAppearance(
-                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             )
         }
     }
@@ -145,6 +158,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     private fun dp(activity: Activity, value: Float): Int = (value * activity.resources.displayMetrics.density).toInt()
+
     override fun onActivityStarted(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
