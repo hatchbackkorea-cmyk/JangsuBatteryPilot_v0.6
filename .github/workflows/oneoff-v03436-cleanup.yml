@@ -23,7 +23,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import xml.etree.ElementTree as ET
-          import re
 
           ROOT = Path('.')
           ANDROID_NS = 'http://schemas.android.com/apk/res/android'
@@ -43,7 +42,24 @@ jobs:
               end = min(candidates) if candidates else len(text)
               return text[:start] + text[end+1:]
 
-          # 1) Physically remove the obsolete mobile-deploy ViewFlipper page from the eMTB layout.
+          def remove_panel_containing_id(xml_path: Path, target_id: str) -> None:
+              tree = ET.parse(xml_path)
+              root = tree.getroot()
+              parent = {child: p for p in root.iter() for child in p}
+              target = next((n for n in root.iter() if n.get(aid) == target_id), None)
+              if target is None:
+                  raise SystemExit(f'{target_id} not found in {xml_path}')
+              panel = parent.get(target)
+              if panel is None:
+                  raise SystemExit(f'parent panel missing for {target_id}')
+              holder = parent.get(panel)
+              if holder is None:
+                  raise SystemExit(f'panel holder missing for {target_id}')
+              holder.remove(panel)
+              ET.indent(tree, space='    ')
+              tree.write(xml_path, encoding='utf-8', xml_declaration=True)
+
+          # 1) Physically remove obsolete mobile-deploy UI from both eMTB and legacy settings layouts.
           xml_path = ROOT / 'app/src/main/res/layout/activity_main.xml'
           tree = ET.parse(xml_path)
           root = tree.getroot()
@@ -58,6 +74,7 @@ jobs:
               raise SystemExit('mobile deploy page not found in activity_main.xml')
           ET.indent(tree, space='    ')
           tree.write(xml_path, encoding='utf-8', xml_declaration=True)
+          remove_panel_containing_id(ROOT / 'app/src/main/res/layout/activity_settings.xml', '@+id/btnMobileRelease')
 
           # 2) Remove dead mobile-deploy bindings/code and make the six remaining eMTB pages directly addressable.
           main_path = ROOT / 'app/src/main/java/com/seungjae/jangsu280battery/MainActivity.kt'
@@ -97,6 +114,15 @@ jobs:
           main = main.replace(companion_old, companion_new, 1)
           main_path.write_text(main, encoding='utf-8')
 
+          # Legacy SettingsActivity had one dead shortcut into the removed mobile deploy path.
+          legacy_path = ROOT / 'app/src/main/java/com/seungjae/jangsu280battery/SettingsActivity.kt'
+          legacy = legacy_path.read_text(encoding='utf-8')
+          legacy = legacy.replace(
+              '        findViewById<Button>(R.id.btnMobileRelease).setOnClickListener {\n            startActivity(Intent(this, AdminCenterActivity::class.java))\n        }\n',
+              ''
+          )
+          legacy_path.write_text(legacy, encoding='utf-8')
+
           # 3) Remove the runtime workaround that used to hide the deploy page.
           mtb_path = ROOT / 'app/src/main/java/com/seungjae/jangsu280battery/MtbHudCompactController.kt'
           mtb = mtb_path.read_text(encoding='utf-8')
@@ -133,7 +159,7 @@ jobs:
           changelog = ROOT / 'CHANGELOG.md'
           if changelog.exists():
               old_change = changelog.read_text(encoding='utf-8')
-              entry = '''# v0.34.36\n- AVINOX SYSTEM에서 eMTB 주행·코스·설정·학습·피드백·배터리 센터를 바로 열 수 있도록 완전 통합했습니다.\n- 더 이상 사용하는 모바일 소스 배포 ViewFlipper 페이지와 관련 MainActivity/MtbHud 런타임 코드를 완전히 제거했습니다.\n- eMTB 내부 페이지는 배포 페이지 제거 후 6개로 정리하고 직접 페이지 진입 인덱스를 안정화했습니다.\n\n'''
+              entry = '''# v0.34.36\n- AVINOX SYSTEM에서 eMTB 주행·코스·설정·학습·피드백·배터리 센터를 바로 열 수 있도록 완전 통합했습니다.\n- 모바일 소스 배포의 eMTB 페이지·구형 설정 바로가기·MainActivity/MtbHud 런타임 코드를 완전히 제거했습니다.\n- eMTB 내부 페이지는 배포 페이지 제거 후 6개로 정리하고 직접 페이지 진입 인덱스를 안정화했습니다.\n\n'''
               if not old_change.startswith('# v0.34.36'):
                   changelog.write_text(entry + old_change, encoding='utf-8')
 
@@ -146,19 +172,17 @@ jobs:
                   txt = p.read_text(encoding='utf-8')
               except Exception:
                   continue
-              for needle in ('btnPageMobileRelease', 'tvPageMobileReleaseStatus', 'ReleaseUploaderActivity', 'ReleaseDeployService', '새 ZIP 모바일 배포', 'ChatGPT ZIP → GitHub'):
+              for needle in ('btnPageMobileRelease', 'tvPageMobileReleaseStatus', 'btnMobileRelease', 'ReleaseUploaderActivity', 'ReleaseDeployService', '새 ZIP 모바일 배포', 'ChatGPT ZIP → GitHub'):
                   if needle in txt:
                       bad.append(f'{p}: {needle}')
           if bad:
               raise SystemExit('Obsolete mobile-deploy runtime remnants remain:\n' + '\n'.join(bad))
 
-          # Ensure all six AVINOX/eMTB entry points are present.
           av_check = av_path.read_text(encoding='utf-8')
           for needle in ('PAGE_RIDE', 'PAGE_COURSE', 'PAGE_SETTINGS', 'PAGE_LEARNING', 'PAGE_FEEDBACK', 'PAGE_BATTERY'):
               if needle not in av_check:
                   raise SystemExit(f'Missing AVINOX hub entry: {needle}')
 
-          # Delete this one-off workflow before committing so no migration machinery remains.
           Path('.github/workflows/oneoff-v03436-cleanup.yml').unlink(missing_ok=True)
           PY
 
