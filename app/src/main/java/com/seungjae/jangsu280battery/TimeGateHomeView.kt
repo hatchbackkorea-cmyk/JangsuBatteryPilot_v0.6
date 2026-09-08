@@ -16,12 +16,10 @@ import android.widget.Toast
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** Fixed-coordinate TimeGate home with transparent hotspots above one rendered design canvas. */
 class TimeGateHomeView(context: Context) : FrameLayout(context) {
     var onTimingClick: (() -> Unit)? = null
     var onWatchClick: (() -> Unit)? = null
     var onMapClick: (() -> Unit)? = null
-    var onEmtbClick: (() -> Unit)? = null
     var onGranfondoClick: (() -> Unit)? = null
     var onAvinoxClick: (() -> Unit)? = null
     var onLabClick: (() -> Unit)? = null
@@ -33,29 +31,24 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
     private val art = HomeArt(context)
 
     init {
-        // Do not hide Android system bars. The real clock/network/battery row at the top and
-        // Back/Home/Recents controls at the bottom remain visible above the white TimeGate canvas.
         setBackgroundColor(Color.WHITE)
         addView(art, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        addHotspot(58f, 650f, 600f, 752f) { onTimingClick?.invoke() }
-        addHotspot(58f, 762f, 600f, 864f) { onWatchClick?.invoke() }
-        addHotspot(58f, 874f, 600f, 976f) {
+        addHotspot(58f, 660f, 600f, 762f) { onTimingClick?.invoke() }
+        addHotspot(58f, 772f, 600f, 874f) { onWatchClick?.invoke() }
+        addHotspot(58f, 884f, 600f, 986f) {
             onMapClick?.invoke() ?: context.startActivity(Intent(context, RaceTrackBuilderActivity::class.java))
         }
-        addHotspot(58f, 986f, 600f, 1088f) {
-            onEmtbClick?.invoke() ?: context.startActivity(Intent(context, MainActivity::class.java))
-        }
-        addHotspot(58f, 1098f, 600f, 1200f) {
+        addHotspot(58f, 996f, 600f, 1098f) {
             onGranfondoClick?.invoke() ?: context.startActivity(Intent(context, RoadGranfondoActivity::class.java))
         }
-        addHotspot(58f, 1210f, 600f, 1312f, adminOnly = true) {
+        addHotspot(58f, 1108f, 600f, 1210f, adminOnly = true) {
             onAvinoxClick?.invoke() ?: context.startActivity(Intent(context, AvinoxSystemActivity::class.java))
         }
-        addHotspot(58f, 1322f, 600f, 1424f, adminOnly = true) {
+        addHotspot(58f, 1220f, 600f, 1322f, adminOnly = true) {
             onLabClick?.invoke() ?: context.startActivity(Intent(context, TimeGateLabActivity::class.java))
         }
-        addHotspot(58f, 1434f, 600f, 1536f, longClick = { onSettingsLongClick?.invoke() }) {
+        addHotspot(58f, 1332f, 600f, 1434f, longClick = { onSettingsLongClick?.invoke() }) {
             onSettingsClick?.invoke() ?: context.startActivity(Intent(context, TimeGateGeneralSettingsActivity::class.java))
         }
         addHotspot(55f, 120f, 610f, 305f, longClick = { onBrandLongClick?.invoke() }) { }
@@ -72,7 +65,10 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
     }
 
     private fun addHotspot(
-        x1: Float, y1: Float, x2: Float, y2: Float,
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
         adminOnly: Boolean = false,
         longClick: (() -> Unit)? = null,
         click: () -> Unit
@@ -84,7 +80,9 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
             setOnClickListener {
                 if (adminOnly && !adminUnlocked) {
                     Toast.makeText(context, "관리자 핸드폰에서만 열 수 있는 메뉴입니다.", Toast.LENGTH_SHORT).show()
-                } else click()
+                } else {
+                    click()
+                }
             }
             if (longClick != null) setOnLongClickListener { longClick(); true }
         }
@@ -119,30 +117,37 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
             val s = min(width / REF_W, height / REF_H)
             val ox = (width - REF_W * s) / 2f
             val oy = (height - REF_H * s) / 2f
-            c.save(); c.translate(ox, oy); c.scale(s, s)
+            c.save()
+            c.translate(ox, oy)
+            c.scale(s, s)
 
             drawBrand(c)
             drawHero(c)
             drawRoute(c)
 
-            menu(c, 650f, red, Color.WHITE, "기록측정", "지금 시작하세요", Icon.PLAY)
-            menu(c, 762f, blue, Color.WHITE, "관전하기", "실시간 기록을 확인하세요", Icon.MONITOR)
-            menu(c, 874f, black, Color.WHITE, "맵만들기", "GPX파일 불러오기 및 제작하기", Icon.MAP)
-            menu(c, 986f, blue, Color.WHITE, "eMTB", "배터리 코파일럿", Icon.BOLT)
-            menu(c, 1098f, red, Color.WHITE, "그란폰도", "ROAD · 페이스 코치", Icon.BIKE)
-            menu(c, 1210f, black, Color.WHITE, "AVINOX SYSTEM", "배터리 · 학습 · 라이더 분석", Icon.BATTERY, !adminUnlocked)
-            menu(c, 1322f, charcoal, Color.WHITE, "실험실", "테스트모드 · 모바일 소스배포", Icon.LAB, !adminUnlocked)
-            menu(c, 1434f, gray, black, "설정", "음성 · 화면 · 업데이트 · 버전", Icon.SETTINGS)
+            menu(c, 660f, red, Color.WHITE, "기록측정", "지금 시작하세요", Icon.PLAY)
+            menu(c, 772f, blue, Color.WHITE, "관전하기", "실시간 기록을 확인하세요", Icon.MONITOR)
+            menu(c, 884f, black, Color.WHITE, "맵만들기", "GPX파일 불러오기 및 제작하기", Icon.MAP)
+            menu(c, 996f, red, Color.WHITE, "그란폰도", "ROAD · 페이스 코치", Icon.BIKE)
+            menu(c, 1108f, black, Color.WHITE, "AVINOX SYSTEM", "eMTB · 배터리 · 학습 · 분석", Icon.BATTERY, !adminUnlocked)
+            menu(c, 1220f, charcoal, Color.WHITE, "실험실", "테스트모드", Icon.LAB, !adminUnlocked)
+            menu(c, 1332f, gray, black, "설정", "음성 · 화면 · 업데이트 · 버전", Icon.SETTINGS)
 
             c.restore()
         }
 
         private fun drawBrand(c: Canvas) {
-            p.style = Paint.Style.STROKE; p.strokeWidth = 9f; p.color = blue
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 9f
+            p.color = blue
             c.drawCircle(112f, 194f, 48f, p)
-            p.style = Paint.Style.FILL; c.drawRoundRect(RectF(100f, 128f, 124f, 142f), 4f, 4f, p)
-            p.color = red; c.drawCircle(151f, 155f, 8f, p)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 7f; c.drawLine(112f, 194f, 139f, 169f, p)
+            p.style = Paint.Style.FILL
+            c.drawRoundRect(RectF(100f, 128f, 124f, 142f), 4f, 4f, p)
+            p.color = red
+            c.drawCircle(151f, 155f, 8f, p)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 7f
+            c.drawLine(112f, 194f, 139f, 169f, p)
             text(c, "Time", 182f, 215f, 72f, blue, true)
             text(c, "Gate", 355f, 215f, 72f, red, true)
             text(c, "생동감 있는", 185f, 262f, 27f, blue, true)
@@ -150,12 +155,16 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
         }
 
         private fun drawHero(c: Canvas) {
-            text(c, "LIVE", 58f, 455f, 126f, red, true)
-            text(c, "랩타이머", 56f, 625f, 112f, black, true)
+            text(c, "LIVE", 58f, 448f, 63f, red, true)
+            text(c, "랩타이머", 56f, 555f, 112f, black, true)
         }
 
         private fun drawRoute(c: Canvas) {
-            p.style = Paint.Style.STROKE; p.strokeWidth = 16f; p.strokeCap = Paint.Cap.ROUND; p.strokeJoin = Paint.Join.ROUND; p.color = blue
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 16f
+            p.strokeCap = Paint.Cap.ROUND
+            p.strokeJoin = Paint.Join.ROUND
+            p.color = blue
             val path = Path().apply {
                 moveTo(720f, 276f)
                 cubicTo(661f, 327f, 766f, 387f, 747f, 482f)
@@ -163,68 +172,124 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
                 cubicTo(786f, 696f, 692f, 744f, 711f, 813f)
             }
             c.drawPath(path, p)
-            p.style = Paint.Style.FILL; p.color = red; c.drawCircle(720f, 224f, 32f, p)
-            p.color = Color.WHITE; c.drawCircle(720f, 224f, 12f, p)
+            p.style = Paint.Style.FILL
+            p.color = red
+            c.drawCircle(720f, 224f, 32f, p)
+            p.color = Color.WHITE
+            c.drawCircle(720f, 224f, 12f, p)
             text(c, "START", 765f, 242f, 35f, black, true)
-            p.color = blue; c.drawCircle(746f, 540f, 31f, p)
-            p.color = Color.WHITE; c.drawCircle(746f, 540f, 22f, p)
-            p.color = red; c.drawCircle(746f, 540f, 14f, p)
+            p.color = blue
+            c.drawCircle(746f, 540f, 31f, p)
+            p.color = Color.WHITE
+            c.drawCircle(746f, 540f, 22f, p)
+            p.color = red
+            c.drawCircle(746f, 540f, 14f, p)
             text(c, "CP1", 786f, 553f, 34f, black, true)
 
-            p.color = black; c.drawRoundRect(RectF(672f, 812f, 680f, 895f), 3f, 3f, p)
-            val left = 679f; val top = 820f; val cw = 18f; val ch = 18f
+            p.color = black
+            c.drawRoundRect(RectF(672f, 812f, 680f, 895f), 3f, 3f, p)
+            val left = 679f
+            val top = 820f
+            val cw = 18f
+            val ch = 18f
             for (r in 0..2) for (col in 0..3) {
                 p.color = if ((r + col) % 2 == 0) black else Color.WHITE
-                c.drawRect(left + col*cw, top + r*ch, left + (col+1)*cw, top + (r+1)*ch, p)
+                c.drawRect(left + col * cw, top + r * ch, left + (col + 1) * cw, top + (r + 1) * ch, p)
             }
-            p.style = Paint.Style.STROKE; p.color = black; p.strokeWidth = 3f
+            p.style = Paint.Style.STROKE
+            p.color = black
+            p.strokeWidth = 3f
             c.drawRect(left, top, left + 72f, top + 54f, p)
             text(c, "FINISH", 765f, 895f, 34f, black, true)
         }
 
         private fun menu(c: Canvas, top: Float, fill: Int, fg: Int, title: String, sub: String, icon: Icon, locked: Boolean = false) {
             val bottom = top + 102f
-            p.style = Paint.Style.FILL; p.color = fill
+            p.style = Paint.Style.FILL
+            p.color = fill
             c.drawRoundRect(RectF(58f, top, 600f, bottom), 24f, 24f, p)
-            drawIcon(c, 132f, (top + bottom)/2f, fg, icon)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 2f
-            p.color = if (fg == black) Color.rgb(195,205,218) else Color.argb(120,255,255,255)
+            drawIcon(c, 132f, (top + bottom) / 2f, fg, icon)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 2f
+            p.color = if (fg == black) Color.rgb(195, 205, 218) else Color.argb(120, 255, 255, 255)
             c.drawLine(210f, top + 22f, 210f, bottom - 22f, p)
             val titleSize = if (title.length > 11) 28f else 35f
             text(c, title, 232f, top + 47f, titleSize, fg, true)
             text(c, sub, 232f, top + 79f, 20f, if (fg == black) darkGray else fg, false)
-            if (locked) drawLock(c, 555f, (top + bottom)/2f, fg)
-            else text(c, "›", 548f, top + 73f, 52f, fg, false)
+            if (locked) drawLock(c, 555f, (top + bottom) / 2f, fg) else text(c, "›", 548f, top + 73f, 52f, fg, false)
         }
 
         private fun drawIcon(c: Canvas, x: Float, y: Float, color: Int, icon: Icon) {
-            p.color = color; p.strokeWidth = 6f; p.strokeCap = Paint.Cap.ROUND; p.strokeJoin = Paint.Join.ROUND
+            p.color = color
+            p.strokeWidth = 6f
+            p.strokeCap = Paint.Cap.ROUND
+            p.strokeJoin = Paint.Join.ROUND
             when (icon) {
-                Icon.PLAY -> { p.style = Paint.Style.STROKE; c.drawCircle(x,y,31f,p); p.style = Paint.Style.FILL; val q=Path().apply{moveTo(x-8f,y-17f);lineTo(x+20f,y);lineTo(x-8f,y+17f);close()};c.drawPath(q,p) }
-                Icon.MONITOR -> { p.style = Paint.Style.STROKE; c.drawRoundRect(RectF(x-35f,y-24f,x+35f,y+16f),5f,5f,p);c.drawLine(x,y+16f,x,y+32f,p);c.drawLine(x-20f,y+32f,x+20f,y+32f,p) }
-                Icon.MAP -> { p.style = Paint.Style.STROKE; c.drawRect(x-32f,y-25f,x+32f,y+25f,p);c.drawLine(x-10f,y-25f,x-10f,y+25f,p);c.drawLine(x+10f,y-25f,x+10f,y+25f,p) }
-                Icon.BOLT -> { p.style = Paint.Style.FILL; val q=Path().apply{moveTo(x+6f,y-32f);lineTo(x-22f,y+3f);lineTo(x-2f,y+3f);lineTo(x-9f,y+32f);lineTo(x+24f,y-7f);lineTo(x+4f,y-7f);close()};c.drawPath(q,p) }
-                Icon.BIKE -> { p.style = Paint.Style.STROKE; c.drawCircle(x-23f,y+15f,17f,p);c.drawCircle(x+24f,y+15f,17f,p);c.drawLine(x-23f,y+15f,x-2f,y-10f,p);c.drawLine(x-2f,y-10f,x+12f,y+15f,p);c.drawLine(x+12f,y+15f,x-23f,y+15f,p) }
-                Icon.BATTERY -> { p.style = Paint.Style.STROKE; c.drawRoundRect(RectF(x-32f,y-20f,x+26f,y+20f),5f,5f,p);c.drawRect(x+26f,y-7f,x+34f,y+7f,p) }
-                Icon.LAB -> { p.style = Paint.Style.STROKE; c.drawLine(x-9f,y-31f,x+9f,y-31f,p);c.drawLine(x-6f,y-31f,x-6f,y-7f,p);c.drawLine(x+6f,y-31f,x+6f,y-7f,p);val q=Path().apply{moveTo(x-6f,y-7f);lineTo(x-25f,y+25f);quadTo(x,y+35f,x+25f,y+25f);lineTo(x+6f,y-7f)};c.drawPath(q,p) }
-                Icon.SETTINGS -> { p.style = Paint.Style.STROKE; c.drawCircle(x,y,17f,p); c.drawCircle(x,y,31f,p) }
+                Icon.PLAY -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawCircle(x, y, 31f, p)
+                    p.style = Paint.Style.FILL
+                    c.drawPath(Path().apply { moveTo(x - 8f, y - 17f); lineTo(x + 20f, y); lineTo(x - 8f, y + 17f); close() }, p)
+                }
+                Icon.MONITOR -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawRoundRect(RectF(x - 35f, y - 24f, x + 35f, y + 16f), 5f, 5f, p)
+                    c.drawLine(x, y + 16f, x, y + 32f, p)
+                    c.drawLine(x - 20f, y + 32f, x + 20f, y + 32f, p)
+                }
+                Icon.MAP -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawRect(x - 32f, y - 25f, x + 32f, y + 25f, p)
+                    c.drawLine(x - 10f, y - 25f, x - 10f, y + 25f, p)
+                    c.drawLine(x + 10f, y - 25f, x + 10f, y + 25f, p)
+                }
+                Icon.BIKE -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawCircle(x - 23f, y + 15f, 17f, p)
+                    c.drawCircle(x + 24f, y + 15f, 17f, p)
+                    c.drawLine(x - 23f, y + 15f, x - 2f, y - 10f, p)
+                    c.drawLine(x - 2f, y - 10f, x + 12f, y + 15f, p)
+                    c.drawLine(x + 12f, y + 15f, x - 23f, y + 15f, p)
+                }
+                Icon.BATTERY -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawRoundRect(RectF(x - 32f, y - 20f, x + 26f, y + 20f), 5f, 5f, p)
+                    c.drawRect(x + 26f, y - 7f, x + 34f, y + 7f, p)
+                }
+                Icon.LAB -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawLine(x - 9f, y - 31f, x + 9f, y - 31f, p)
+                    c.drawLine(x - 6f, y - 31f, x - 6f, y - 7f, p)
+                    c.drawLine(x + 6f, y - 31f, x + 6f, y - 7f, p)
+                    c.drawPath(Path().apply { moveTo(x - 6f, y - 7f); lineTo(x - 25f, y + 25f); quadTo(x, y + 35f, x + 25f, y + 25f); lineTo(x + 6f, y - 7f) }, p)
+                }
+                Icon.SETTINGS -> {
+                    p.style = Paint.Style.STROKE
+                    c.drawCircle(x, y, 17f, p)
+                    c.drawCircle(x, y, 31f, p)
+                }
             }
         }
 
         private fun drawLock(c: Canvas, x: Float, y: Float, color: Int) {
-            p.color = color; p.style = Paint.Style.STROKE; p.strokeWidth = 5f
-            c.drawRoundRect(RectF(x-16f,y-2f,x+16f,y+23f),5f,5f,p)
-            c.drawArc(RectF(x-12f,y-23f,x+12f,y+4f),190f,160f,false,p)
+            p.color = color
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 5f
+            c.drawRoundRect(RectF(x - 16f, y - 2f, x + 16f, y + 23f), 5f, 5f, p)
+            c.drawArc(RectF(x - 12f, y - 23f, x + 12f, y + 4f), 190f, 160f, false, p)
         }
 
         private fun text(c: Canvas, v: String, x: Float, y: Float, size: Float, color: Int, bold: Boolean) {
-            p.style = Paint.Style.FILL; p.color = color; p.textSize = size; p.textAlign = Paint.Align.LEFT
+            p.style = Paint.Style.FILL
+            p.color = color
+            p.textSize = size
+            p.textAlign = Paint.Align.LEFT
             p.typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
             c.drawText(v, x, y, p)
         }
     }
 
-    private enum class Icon { PLAY, MONITOR, MAP, BOLT, BIKE, BATTERY, LAB, SETTINGS }
+    private enum class Icon { PLAY, MONITOR, MAP, BIKE, BATTERY, LAB, SETTINGS }
 
     companion object {
         private const val REF_W = 941f
