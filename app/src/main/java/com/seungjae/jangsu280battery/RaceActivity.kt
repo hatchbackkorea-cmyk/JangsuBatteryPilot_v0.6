@@ -26,7 +26,7 @@ import android.widget.Toast
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** RACE UI: field QR join, waiting/practice/official phases, local-first timing. */
+/** RACE + local auto-lap UI. Official events and stored-GPX practice share the same timing engine. */
 class RaceActivity : Activity() {
     private lateinit var store: RaceDataStore
     private lateinit var client: RaceServerClient
@@ -70,7 +70,9 @@ class RaceActivity : Activity() {
         val deepEvent = intent?.data?.getQueryParameter("event")?.trim()?.uppercase().orEmpty()
         qrTargetEventCode = deepEvent
         currentEventCode = deepEvent.ifBlank { store.lastJoined()?.config?.eventCode.orEmpty() }
-        if (deepEvent.isNotBlank()) showEvents(qrOnly = true) else showHome()
+        val snap = store.snapshot()
+        if (snap.state in setOf("WATCHING", "ARMED", "RUNNING")) showLive()
+        else if (deepEvent.isNotBlank()) showEvents(qrOnly = true) else showHome()
         Thread { runCatching { client.flushPending() } }.start()
         handler.post(poller)
     }
@@ -105,7 +107,7 @@ class RaceActivity : Activity() {
     private fun openBroadcast() {
         val joined = currentJoined()
         if (joined == null) {
-            Toast.makeText(this, "먼저 대회 참가를 완료해 주세요.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "대회 중계는 대회 참가 후 열 수 있습니다.", Toast.LENGTH_SHORT).show()
             return
         }
         startActivity(Intent(this, RaceBroadcastActivity::class.java).apply {
@@ -118,20 +120,21 @@ class RaceActivity : Activity() {
         mode = MODE_HOME
         val profile = RaceProfileStore.profile(this)
         val joined = currentJoined()
+        val active = runCatching { repo.activeMeta() }.getOrNull()
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
-        setContentView(root); addTopBar(root, "Ride Copilot RACE", false)
+        setContentView(root); addTopBar(root, "TimeGate RACE", false)
         val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(Color.BLACK) }
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(22), dp(22), dp(22), dp(26)) }
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         homeEventStatus = TextView(this).apply {
-            gravity = Gravity.CENTER; textSize = if (joined != null) 16f else 18f; setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER; textSize = if (joined != null) 16f else 17f; setTypeface(typeface, Typeface.BOLD)
             setPadding(dp(12), dp(10), dp(12), dp(10)); setTextColor(if (joined != null) GOOD else Color.LTGRAY)
             text = if (joined != null) {
                 "✓ 참가완료 · ${joined.config.name} · ${joined.config.eventCode}\nNO.${profile.bib} · ${profile.name}(${profile.nickname})"
-            } else if (profile.isReady) {
-                "선수등록 완료 · NO.${profile.bib}\n대회 참가 메뉴에서 참가할 대회를 선택하세요."
-            } else "먼저 선수 등록을 완료하세요."
+            } else {
+                "자동 랩 준비 · 저장 코스 ${repo.listCourses().size}개\n${active?.name ?: "저장 GPX를 확인합니다."}"
+            }
         }
         body.addView(homeEventStatus, LinearLayout.LayoutParams(-1, -2))
         body.addView(View(this), LinearLayout.LayoutParams(1, dp(24)))
@@ -140,11 +143,14 @@ class RaceActivity : Activity() {
             text = "START"; textSize = 51f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER; isAllCaps = false
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(220, 0, 0)); setStroke(dp(10), Color.rgb(95, 95, 95)) }
-            setOnClickListener { val s = store.snapshot(); if (s.state == "ARMED" || s.state == "RUNNING") showLive() else startRace() }
+            setOnClickListener {
+                val s = store.snapshot()
+                if (s.state in setOf("WATCHING", "ARMED", "RUNNING")) showLive() else startRace()
+            }
         }
         body.addView(startButton, LinearLayout.LayoutParams(dp(216), dp(216)))
         body.addView(TextView(this).apply {
-            text = if (joined != null) "← 화면을 왼쪽으로 밀면 실시간 중계" else ""
+            text = if (joined != null) "← 화면을 왼쪽으로 밀면 실시간 중계" else "START를 누르면 저장된 모든 GPX의 START를 백그라운드에서 자동 탐색합니다."
             textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.rgb(115, 185, 255)); setPadding(0, dp(10), 0, dp(4)); setTypeface(typeface, Typeface.BOLD)
         }, LinearLayout.LayoutParams(-1, -2))
         body.addView(View(this), LinearLayout.LayoutParams(1, dp(12)))
@@ -154,7 +160,7 @@ class RaceActivity : Activity() {
         menuRow.addView(menuButton(if (joined != null) "✓ 대회 참가" else "대회 참가") { showEvents() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { marginStart = dp(6) })
         body.addView(menuRow, LinearLayout.LayoutParams(-1, -2))
         body.addView(TextView(this).apply {
-            text = "화면을 끄거나 다른 앱을 열어도 계측은 계속됩니다. 앱을 최근 앱 목록에서 밀어 종료하면 계측도 종료됩니다."
+            text = "화면을 끄거나 휴대폰을 주머니에 넣어도 START/CP/FINISH 계측은 계속됩니다. 앱을 최근 앱 목록에서 밀어 종료하면 계측도 종료됩니다."
             textSize = 11f; gravity = Gravity.CENTER; setTextColor(Color.GRAY); setPadding(0, dp(12), 0, 0)
         })
     }
@@ -167,7 +173,7 @@ class RaceActivity : Activity() {
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(24), dp(22), dp(24)) }
         root.addView(body, LinearLayout.LayoutParams(-1, -1))
         body.addView(TextView(this).apply { text = "이름 · 닉네임 · 배번"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) })
-        body.addView(TextView(this).apply { text = "여기서는 선수 정보만 저장합니다. 저장 후 ‘대회 참가’에서 참가할 대회를 선택합니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(4), 0, dp(12)) })
+        body.addView(TextView(this).apply { text = "일반 자동 랩은 회원가입 없이 바로 사용할 수 있습니다. 선수 정보는 대회 참가에 사용합니다."; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(4), 0, dp(12)) })
         riderIdInput = darkInput("이름", profile.name).also { body.addView(it, inputLp()) }
         nicknameInput = darkInput("닉네임", profile.nickname).also { body.addView(it, inputLp()) }
         bibInput = darkInput("배번", profile.bib).apply { inputType = InputType.TYPE_CLASS_NUMBER }.also { body.addView(it, inputLp()) }
@@ -265,14 +271,36 @@ class RaceActivity : Activity() {
     }
 
     private fun currentJoined(): RaceDataStore.Joined? {
-        val code = currentEventCode.ifBlank { store.lastJoined()?.config?.eventCode.orEmpty() }; val joined = code.takeIf { it.isNotBlank() }?.let(store::joined) ?: store.lastJoined(); if (joined != null) currentEventCode = joined.config.eventCode; return joined
+        val code = currentEventCode.ifBlank { store.lastJoined()?.config?.eventCode.orEmpty() }
+        val joined = code.takeIf { it.isNotBlank() }?.let(store::joined) ?: store.lastJoined()
+        if (joined != null) currentEventCode = joined.config.eventCode
+        return joined
+    }
+
+    private fun bestRunForCourse(courseId: String): RaceRunSummary? {
+        if (courseId.isBlank()) return null
+        val history = store.completed().filter { it.courseId == courseId && it.status != "INVALID" }
+        val valid = history.filter { it.status == "VALID" }
+        return (valid.ifEmpty { history }).minByOrNull { it.elapsedMs }
+    }
+
+    private fun startLocalAutoLapWatch() {
+        currentEventCode = "PRACTICE"
+        startForegroundService(Intent(this, RaceAutoLapDiscoveryService::class.java).apply { action = RaceAutoLapDiscoveryService.ACTION_START })
+        showLive()
+        Toast.makeText(this, "저장된 GPX의 START를 자동 탐색합니다. 화면을 꺼도 계속됩니다.", Toast.LENGTH_LONG).show()
     }
 
     private fun startRace() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION); return
+        }
+        val joined = currentJoined()
+        if (joined == null) {
+            startLocalAutoLapWatch(); return
+        }
         val profile = RaceProfileStore.profile(this)
-        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("먼저 선수 등록 메뉴에서 이름, 닉네임, 배번을 저장해 주세요.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
-        val joined = currentJoined() ?: run { AlertDialog.Builder(this).setTitle("대회 참가 필요").setMessage("START 전에 대회 참가 메뉴에서 참가할 대회를 선택해 주세요.").setPositiveButton("대회 참가") { _, _ -> showEvents() }.setNegativeButton("취소", null).show(); return }
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION); return }
+        if (!profile.isReady) { AlertDialog.Builder(this).setTitle("선수등록 필요").setMessage("대회 계측에는 이름, 닉네임, 배번이 필요합니다. 일반 자동 랩은 대회 참가 없이 사용할 수 있습니다.").setPositiveButton("선수 등록") { _, _ -> showRegistration() }.setNegativeButton("취소", null).show(); return }
         currentEventCode = joined.config.eventCode
         val oldLocalCourseId = joined.localCourseId
         val baseConfig = joined.config
@@ -281,8 +309,15 @@ class RaceActivity : Activity() {
             val stateResult = runCatching { client.eventState(baseConfig.eventCode) }
             if (stateResult.isSuccess) {
                 val state = stateResult.getOrThrow()
-                if (state.phase == "WAITING" || state.phase == "ENDED") {
-                    runOnUiThread { homeEventStatus?.setTextColor(WARN); homeEventStatus?.text = state.notice; AlertDialog.Builder(this).setTitle(if (state.phase == "WAITING") "대회 오픈 대기" else "대회 종료").setMessage(state.notice).setPositiveButton("확인", null).show() }
+                if (state.phase == "WAITING") {
+                    runOnUiThread { homeEventStatus?.setTextColor(WARN); homeEventStatus?.text = state.notice; AlertDialog.Builder(this).setTitle("대회 오픈 대기").setMessage(state.notice).setPositiveButton("확인", null).show() }
+                    return@Thread
+                }
+                if (state.phase == "ENDED") {
+                    runOnUiThread {
+                        Toast.makeText(this, "대회는 종료되었습니다. 같은 코스를 포함한 저장 GPX 자동 랩으로 전환합니다.", Toast.LENGTH_LONG).show()
+                        startLocalAutoLapWatch()
+                    }
                     return@Thread
                 }
             }
@@ -306,9 +341,12 @@ class RaceActivity : Activity() {
                 runCatching { repo.setActive(resolvedCourseId) }
             }
 
-            val reference = runCatching { client.fetchReference(baseConfig.eventCode) }.getOrDefault(serverConfig.reference)
+            val ownBest = bestRunForCourse(resolvedCourseId)?.reference?.takeIf { it.size >= 2 }
+            val serverReference = runCatching { client.fetchReference(baseConfig.eventCode) }.getOrDefault(serverConfig.reference)
+            val reference = ownBest ?: serverReference
             val cfg = serverConfig.copy(reference = reference)
             runOnUiThread {
+                startService(Intent(this, RaceAutoLapDiscoveryService::class.java).apply { action = RaceAutoLapDiscoveryService.ACTION_STOP })
                 store.saveActiveConfig(cfg, resolvedCourseId, reference)
                 startForegroundService(Intent(this, RaceTimingService::class.java).apply { action = RaceTimingService.ACTION_ARM; putExtra(RaceTimingService.EXTRA_CONFIG, cfg.toJson().toString()); putExtra(RaceTimingService.EXTRA_COURSE_ID, resolvedCourseId) })
                 currentEventCode = cfg.eventCode; showLive()
@@ -325,9 +363,9 @@ class RaceActivity : Activity() {
         top.addView(Button(this).apply { text = "‹  Live"; textSize = 17f; isAllCaps = false; setTextColor(Color.WHITE); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { showHome() } }, LinearLayout.LayoutParams(dp(112), dp(56)))
         liveHeader = TextView(this).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; textSize = 14f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) }
         top.addView(liveHeader, LinearLayout.LayoutParams(0, dp(56), 1f)); root.addView(top)
-        bestTime = addLiveTimeBlock(root, "Best", "1"); previousTime = addLiveTimeBlock(root, "Previous", "2"); currentTime = addLiveTimeBlock(root, "Current", "3")
+        bestTime = addLiveTimeBlock(root, "BEST", "1"); previousTime = addLiveTimeBlock(root, "PREVIOUS", "2"); currentTime = addLiveTimeBlock(root, "CURRENT", "3")
         deltaPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(8), dp(6), dp(8), dp(6)); setBackgroundColor(Color.rgb(55, 55, 55)) }
-        deltaPanel?.addView(TextView(this).apply { text = "DELTA"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
+        deltaPanel?.addView(TextView(this).apply { text = "DELTA · BEST"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
         deltaTime = TextView(this).apply { text = "—"; textSize = 92f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); includeFontPadding = false }
         deltaPanel?.addView(deltaTime, LinearLayout.LayoutParams(-1, 0, 1f)); root.addView(deltaPanel, LinearLayout.LayoutParams(-1, 0, 1.15f))
         liveFooter = TextView(this).apply { gravity = Gravity.CENTER; textSize = 11f; setTextColor(Color.LTGRAY); setBackgroundColor(Color.rgb(28, 28, 28)); setPadding(dp(8), dp(5), dp(8), dp(5)) }
@@ -347,14 +385,53 @@ class RaceActivity : Activity() {
 
     private fun renderLive() {
         if (mode != MODE_LIVE) return
-        val s = store.snapshot(); val eventCode = s.eventCode.ifBlank { currentEventCode }.ifBlank { "PRACTICE" }; val currentRunId = s.runId
-        val historical = store.completed().filter { it.eventCode == eventCode && it.runId != currentRunId }; val valid = historical.filter { it.status == "VALID" }; val best = (valid.ifEmpty { historical }).minByOrNull { it.elapsedMs }; val previous = historical.maxByOrNull { it.finishedAtMs }
+        val s = store.snapshot()
+        val currentRunId = s.runId
+        val courseId = s.courseId.ifBlank { store.activeConfig()?.second.orEmpty() }
+        val historical = if (courseId.isBlank()) emptyList() else store.completed().filter { it.courseId == courseId && it.runId != currentRunId }
+        val valid = historical.filter { it.status == "VALID" }
+        val best = (valid.ifEmpty { historical }).minByOrNull { it.elapsedMs }
+        val previous = historical.maxByOrNull { it.finishedAtMs }
         val elapsed = if (s.state == "RUNNING" && s.startedAtMs > 0L) (System.currentTimeMillis() - s.startedAtMs).coerceAtLeast(0L) else s.elapsedMs
-        bestTime?.text = best?.elapsedMs?.let(::formatBigTime) ?: "—"; previousTime?.text = previous?.elapsedMs?.let(::formatBigTime) ?: "—"; currentTime?.text = formatBigTime(elapsed)
-        val stateLabel = when (s.state) { "ARMED" -> "ARMED · START GATE"; "RUNNING" -> "RUNNING"; "FINISHED" -> "FINISH · ${s.validation}"; else -> "READY" }; liveHeader?.text = "$stateLabel  ·  $eventCode"
+        bestTime?.text = best?.elapsedMs?.let(::formatBigTime) ?: "—"
+        previousTime?.text = previous?.elapsedMs?.let(::formatBigTime) ?: "—"
+        currentTime?.text = if (s.state == "WATCHING" || s.state == "ARMED") "0.0" else formatBigTime(elapsed)
+
+        val stateLabel = when (s.state) {
+            "WATCHING" -> "AUTO · 코스 START 탐색"
+            "ARMED" -> "ARMED · START GATE"
+            "RUNNING" -> "RUNNING · ${s.currentSector.ifBlank { "NEXT CP" }}"
+            "FINISHED" -> "FINISH · ${s.validation}"
+            else -> "READY"
+        }
+        val identity = s.courseName.ifBlank { s.eventName.ifBlank { s.eventCode.ifBlank { "TimeGate" } } }
+        liveHeader?.text = "$stateLabel  ·  $identity"
+
+        deltaPanel?.setBackgroundColor(Color.rgb(55, 55, 55))
         val d = s.deltaMs
-        if (d == null || s.state != "RUNNING") { deltaPanel?.setBackgroundColor(Color.rgb(55, 55, 55)); deltaTime?.text = "—" } else { val faster = d <= 0L; deltaPanel?.setBackgroundColor(if (faster) Color.rgb(0, 145, 20) else Color.rgb(210, 0, 0)); deltaTime?.text = "%s%.1f".format(if (faster) "−" else "+", abs(d) / 1000.0) }
-        liveFooter?.text = buildString { append("GPS ±").append(s.gpsAccuracyM.roundToInt()).append("m"); if (s.totalM > 0) append("  ·  ").append(s.routeM.roundToInt()).append("/").append(s.totalM.roundToInt()).append("m"); if (s.serverStatus.isNotBlank()) append("  ·  ").append(s.serverStatus) }
+        if (d == null || s.state !in setOf("RUNNING", "FINISHED")) {
+            deltaTime?.text = "—"; deltaTime?.setTextColor(Color.WHITE)
+        } else when {
+            d < 0L -> {
+                // Product convention: faster than BEST is positive/blue.
+                deltaTime?.text = "+%.1f".format(abs(d) / 1000.0)
+                deltaTime?.setTextColor(Color.rgb(70, 150, 255))
+            }
+            d > 0L -> {
+                // Product convention: slower than BEST is negative/red.
+                deltaTime?.text = "−%.1f".format(abs(d) / 1000.0)
+                deltaTime?.setTextColor(Color.rgb(255, 55, 70))
+            }
+            else -> {
+                deltaTime?.text = "0.0"; deltaTime?.setTextColor(Color.WHITE)
+            }
+        }
+        liveFooter?.text = buildString {
+            append("GPS ±").append(s.gpsAccuracyM.roundToInt()).append("m")
+            if (s.totalM > 0) append("  ·  ").append(s.routeM.roundToInt()).append("/").append(s.totalM.roundToInt()).append("m")
+            if (best != null) append("  ·  BEST ").append(formatBigTime(best.elapsedMs))
+            if (s.serverStatus.isNotBlank()) append("  ·  ").append(s.serverStatus)
+        }
     }
 
     private fun addTopBar(root: LinearLayout, title: String, back: Boolean) {
