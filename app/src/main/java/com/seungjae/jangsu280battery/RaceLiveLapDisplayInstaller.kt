@@ -50,17 +50,17 @@ object RaceLiveLapDisplayInstaller {
         val courseId = snapshot.courseId.ifBlank { store.activeConfig()?.second.orEmpty() }
         if (courseId.isBlank()) return
 
-        installHistoryButton(activity, root, bestBlock.labelView, courseId)
+        installHistoryButton(activity, root, courseId)
 
         val today = todaysRuns(store.completed(), courseId)
         val usable = today.filter { it.status != "INVALID" }
         val currentFinishedIndex = today.indexOfFirst { it.runId == snapshot.runId }
 
-        // BEST is the fastest usable finished lap today, including CURRENT after FINISH.
+        // BEST = fastest usable finished lap today on this exact course.
         val best = usable.minByOrNull { it.elapsedMs }
         val bestLapNo = best?.let { target -> today.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
 
-        // PREVIOUS is literally the immediately preceding finished lap in today's course session.
+        // PREVIOUS = literally the immediately preceding finished lap in today's course session.
         val previous = when {
             currentFinishedIndex > 0 -> today[currentFinishedIndex - 1]
             currentFinishedIndex == 0 -> null
@@ -68,6 +68,7 @@ object RaceLiveLapDisplayInstaller {
         }
         val previousLapNo = previous?.let { target -> today.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
 
+        // CURRENT = today's next lap number, or the just-finished lap while FINISH is still displayed.
         val currentLapNo = when {
             currentFinishedIndex >= 0 -> currentFinishedIndex + 1
             else -> today.size + 1
@@ -78,19 +79,13 @@ object RaceLiveLapDisplayInstaller {
         setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
     }
 
-    private fun installHistoryButton(activity: RaceActivity, root: ViewGroup, liveLabel: TextView, courseId: String) {
+    private fun installHistoryButton(activity: RaceActivity, root: ViewGroup, courseId: String) {
         root.findViewWithTag<Button>(TAG_HISTORY)?.apply {
             setOnClickListener { openHistory(activity, courseId) }
             return
         }
-        var p: View? = liveLabel
-        var topRow: LinearLayout? = null
-        repeat(4) {
-            val parent = p?.parent as? LinearLayout ?: return@repeat
-            if (parent.orientation == LinearLayout.HORIZONTAL && parent.childCount >= 2) topRow = parent
-            p = parent
-        }
-        val row = topRow ?: return
+        val back = findButton(root) { it.text?.toString()?.contains("Live", ignoreCase = true) == true } ?: return
+        val row = back.parent as? LinearLayout ?: return
         val button = Button(activity).apply {
             tag = TAG_HISTORY
             text = "랩 기록"
@@ -101,8 +96,7 @@ object RaceLiveLapDisplayInstaller {
             setBackgroundColor(Color.rgb(70, 70, 70))
             setOnClickListener { openHistory(activity, courseId) }
         }
-        val index = (row.childCount - 1).coerceAtLeast(1)
-        row.addView(button, index, LinearLayout.LayoutParams(dp(activity, 78), dp(activity, 42)).apply { marginEnd = dp(activity, 6) })
+        row.addView(button, 1.coerceAtMost(row.childCount), LinearLayout.LayoutParams(dp(activity, 78), dp(activity, 42)).apply { marginEnd = dp(activity, 6) })
     }
 
     private fun openHistory(activity: RaceActivity, courseId: String) {
@@ -140,7 +134,7 @@ object RaceLiveLapDisplayInstaller {
         else -> null
     }
 
-    private data class Block(val labelView: TextView, val lap: TextView, val time: TextView)
+    private data class Block(val lap: TextView, val time: TextView)
 
     private fun findBlock(root: View, label: String): Block? {
         val labelView = findText(root, label) ?: return null
@@ -149,7 +143,7 @@ object RaceLiveLapDisplayInstaller {
         val row = block.getChildAt(1) as? LinearLayout ?: return null
         val lap = row.getChildAt(0) as? TextView ?: return null
         val time = row.getChildAt(1) as? TextView ?: return null
-        return Block(labelView, lap, time)
+        return Block(lap, time)
     }
 
     private fun setBlock(block: Block, lapNumber: Int?, elapsedMs: Long?) {
@@ -169,6 +163,14 @@ object RaceLiveLapDisplayInstaller {
         if (root is TextView && root.text?.toString() == text) return root
         if (root is ViewGroup) {
             for (i in 0 until root.childCount) findText(root.getChildAt(i), text)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findButton(root: View, predicate: (Button) -> Boolean): Button? {
+        if (root is Button && predicate(root)) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) findButton(root.getChildAt(i), predicate)?.let { return it }
         }
         return null
     }
