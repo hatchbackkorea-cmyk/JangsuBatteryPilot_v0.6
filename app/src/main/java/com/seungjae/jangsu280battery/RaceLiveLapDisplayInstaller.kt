@@ -10,12 +10,11 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import java.util.Calendar
 import java.util.WeakHashMap
 
 /**
  * Keeps the live RACE screen limited to three timing blocks while making their lap number meaningful.
- * BEST/PREVIOUS/CURRENT are scoped to today's completed laps on the active local course.
+ * BEST/PREVIOUS/CURRENT are scoped to the persistent lap session for this event+course.
  */
 object RaceLiveLapDisplayInstaller {
     private const val TAG_HISTORY = "timegate_lap_history_v03443"
@@ -41,37 +40,47 @@ object RaceLiveLapDisplayInstaller {
 
     private fun update(activity: RaceActivity) {
         val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+        val store = RaceDataStore(activity)
+        val snapshot = store.snapshot()
+        val active = store.activeConfig()
+        val courseId = snapshot.courseId.ifBlank { active?.second.orEmpty() }
+        if (courseId.isBlank()) return
+        val eventCode = snapshot.eventCode.ifBlank { active?.first?.eventCode.orEmpty() }.ifBlank { "PRACTICE" }.uppercase()
+
+        val sessionStore = RaceLapSessionStore(activity)
+        if (snapshot.state == "RUNNING" && snapshot.startedAtMs > 0L) {
+            sessionStore.beginOrResume(eventCode, courseId, snapshot.startedAtMs)
+        } else if (snapshot.state == "FINISHED" && snapshot.startedAtMs > 0L) {
+            sessionStore.beginOrResume(eventCode, courseId, snapshot.startedAtMs)
+        }
+        val session = sessionStore.matching(eventCode, courseId) ?: return
+
         val bestBlock = findBlock(root, "BEST") ?: return
         val previousBlock = findBlock(root, "PREVIOUS") ?: return
         val currentBlock = findBlock(root, "CURRENT") ?: return
 
-        val store = RaceDataStore(activity)
-        val snapshot = store.snapshot()
-        val courseId = snapshot.courseId.ifBlank { store.activeConfig()?.second.orEmpty() }
-        if (courseId.isBlank()) return
+        installHistoryButton(activity, root, courseId, eventCode)
 
-        installHistoryButton(activity, root, courseId)
+        val sessionRuns = sessionRuns(store.completed(), eventCode, courseId, session.startedAtMs)
+        val usable = sessionRuns.filter { it.status != "INVALID" }
+        val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
-        val today = todaysRuns(store.completed(), courseId)
-        val usable = today.filter { it.status != "INVALID" }
-        val currentFinishedIndex = today.indexOfFirst { it.runId == snapshot.runId }
-
-        // BEST = fastest usable finished lap today on this exact course.
+        // BEST = fastest usable finished lap in this persistent event session.
         val best = usable.minByOrNull { it.elapsedMs }
-        val bestLapNo = best?.let { target -> today.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
+        val bestLapNo = best?.let { target -> sessionRuns.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
 
-        // PREVIOUS = literally the immediately preceding finished lap in today's course session.
+        // PREVIOUS = literally the immediately preceding finished lap in this session.
         val previous = when {
-            currentFinishedIndex > 0 -> today[currentFinishedIndex - 1]
+            currentFinishedIndex > 0 -> sessionRuns[currentFinishedIndex - 1]
             currentFinishedIndex == 0 -> null
-            else -> today.lastOrNull()
+            else -> sessionRuns.lastOrNull()
         }
-        val previousLapNo = previous?.let { target -> today.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
+        val previousLapNo = previous?.let { target -> sessionRuns.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
 
-        // CURRENT = today's next lap number, or the just-finished lap while FINISH is still displayed.
+        // CURRENT = next session lap number, or the just-finished lap while FINISH is still displayed.
         val currentLapNo = when {
             currentFinishedIndex >= 0 -> currentFinishedIndex + 1
-            else -> today.size + 1
+            else -> sessionRuns.size + 1
         }.coerceAtLeast(1)
 
         setBlock(bestBlock, bestLapNo, best?.elapsedMs)
@@ -79,9 +88,9 @@ object RaceLiveLapDisplayInstaller {
         setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
     }
 
-    private fun installHistoryButton(activity: RaceActivity, root: ViewGroup, courseId: String) {
+    private fun installHistoryButton(activity: RaceActivity, root: ViewGroup, courseId: String, eventCode: String) {
         root.findViewWithTag<Button>(TAG_HISTORY)?.apply {
-            setOnClickListener { openHistory(activity, courseId) }
+            setOnClickListener { openHistory(activity, courseId, eventCode) }
             return
         }
         val back = findButton(root) { it.text?.toString()?.contains("Live", ignoreCase = true) == true } ?: return
@@ -94,38 +103,25 @@ object RaceLiveLapDisplayInstaller {
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(70, 70, 70))
-            setOnClickListener { openHistory(activity, courseId) }
+            setOnClickListener { openHistory(activity, courseId, eventCode) }
         }
         row.addView(button, 1.coerceAtMost(row.childCount), LinearLayout.LayoutParams(dp(activity, 78), dp(activity, 42)).apply { marginEnd = dp(activity, 6) })
     }
 
-    private fun openHistory(activity: RaceActivity, courseId: String) {
+    private fun openHistory(activity: RaceActivity, courseId: String, eventCode: String) {
         activity.startActivity(Intent(activity, RaceLapHistoryActivity::class.java).apply {
             putExtra(RaceLapHistoryActivity.EXTRA_COURSE_ID, courseId)
+            putExtra(RaceLapHistoryActivity.EXTRA_EVENT_CODE, eventCode)
         })
     }
 
-    private fun todaysRuns(all: List<RaceRunSummary>, courseId: String): List<RaceRunSummary> {
-        val (start, end) = todayBounds()
-        return all.asSequence()
+    private fun sessionRuns(all: List<RaceRunSummary>, eventCode: String, courseId: String, sessionStartMs: Long): List<RaceRunSummary> =
+        all.asSequence()
+            .filter { it.eventCode.equals(eventCode, ignoreCase = true) }
             .filter { it.courseId == courseId }
-            .filter { it.finishedAtMs in start until end }
+            .filter { it.finishedAtMs >= sessionStartMs }
             .sortedBy { it.finishedAtMs }
             .toList()
-    }
-
-    private fun todayBounds(now: Long = System.currentTimeMillis()): Pair<Long, Long> {
-        val cal = Calendar.getInstance().apply {
-            timeInMillis = now
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        cal.add(Calendar.DAY_OF_YEAR, 1)
-        return start to cal.timeInMillis
-    }
 
     private fun currentElapsed(s: RaceDataStore.Snapshot): Long? = when {
         s.state == "RUNNING" && s.startedAtMs > 0L -> (System.currentTimeMillis() - s.startedAtMs).coerceAtLeast(0L)
