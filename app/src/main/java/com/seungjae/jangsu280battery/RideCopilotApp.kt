@@ -31,6 +31,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         applyTimeGateSystemBars(activity)
+        TimeGateHeaderNormalizer.install(activity)
         when (activity) {
             is BikeModeChooserActivity -> activity.window.decorView.post {
                 RaceLauncherUiInstaller.install(activity)
@@ -109,6 +110,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityDestroyed(activity: Activity) {
+        TimeGateHeaderNormalizer.uninstall(activity)
         TimeGateProgrammaticSkin.uninstall(activity)
         if (activity is RaceActivity) {
             RaceProfileServerSync.pause(activity)
