@@ -1,0 +1,1 @@
+Server companion expectation for v0.34.44: Rider Control Center v0.8.1 supplies event leader time/name, live leader gap, estimated rank, CP segment rank, cumulative START-to-CP rank, monitor lap history, and wide-screen achievement animations.
