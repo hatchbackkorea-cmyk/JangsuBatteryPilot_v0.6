@@ -42,7 +42,7 @@ class TimeGateGeneralSettingsActivity : Activity() {
         val scroll = ScrollView(this).apply { setBackgroundColor(bg); isFillViewport = true }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(30))
+            setPadding(dp(16), dp(8), dp(16), dp(30))
         }
         scroll.addView(body)
         setContentView(scroll)
@@ -145,10 +145,11 @@ class TimeGateGeneralSettingsActivity : Activity() {
             .setTitle("TimeGate")
             .setMessage(
                 "v${UpdateManager.currentVersion(this)}\n\n" +
-                    "• 흰색 기반 TimeGate 서브페이지 디자인 통일\n" +
-                    "• 상단 상태바 시간·통신·배터리 표시 복원\n" +
-                    "• 하단 Back/Home/최근 앱 버튼 대비 개선\n" +
-                    "• 파랑·빨강 포인트와 검정 텍스트를 공통 디자인 규칙으로 적용"
+                    "• eMTB 기능을 AVINOX SYSTEM 내부로 통합\n" +
+                    "• 모바일 소스 배포 기능 제거\n" +
+                    "• 모든 페이지에서 상단/하단 Android 시스템 영역 보존\n" +
+                    "• 페이지 제목 위치를 공통 헤더 규격으로 통일\n" +
+                    "• 충전 기준/도달 알림을 콤팩트 드롭다운으로 변경"
             )
             .setPositiveButton("확인", null)
             .show()
@@ -168,14 +169,14 @@ class TimeGateGeneralSettingsActivity : Activity() {
             setTextColor(blue)
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { finish() }
-        }, LinearLayout.LayoutParams(dp(58), dp(54)))
+        }, LinearLayout.LayoutParams(dp(58), dp(58)))
         addView(TextView(this@TimeGateGeneralSettingsActivity).apply {
             text = name
-            textSize = 27f
+            textSize = 24f
             setTextColor(primary)
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER_VERTICAL
-        }, LinearLayout.LayoutParams(0, dp(54), 1f))
+        }, LinearLayout.LayoutParams(0, dp(58), 1f))
         addView(TextView(this@TimeGateGeneralSettingsActivity).apply {
             text = "TimeGate"
             textSize = 13f

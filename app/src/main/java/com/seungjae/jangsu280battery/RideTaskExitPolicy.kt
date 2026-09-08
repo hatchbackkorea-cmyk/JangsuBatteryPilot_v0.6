@@ -3,14 +3,7 @@ package com.seungjae.jangsu280battery
 import android.content.Context
 import java.io.File
 
-/**
- * Explicit task-exit policy for v0.33.5.
- *
- * The user chose "close means completely stop" rather than automatic ride resume.
- * This helper is intentionally small and idempotent so the root activity can call it while
- * Android is removing the task. It removes only active/in-progress state; completed archives,
- * learning data, server settings and update settings are preserved.
- */
+/** Explicit task-exit policy. */
 object RideTaskExitPolicy {
     private const val RIDE_PREFS = "ride_log_manager"
     private const val CHARGE_PREFS = "charging_session_state"
@@ -36,9 +29,7 @@ object RideTaskExitPolicy {
 
     fun stopEverything(context: Context) {
         val app = context.applicationContext
-
         runCatching { app.stopService(android.content.Intent(app, RideService::class.java)) }
-        runCatching { app.stopService(android.content.Intent(app, ReleaseDeployService::class.java)) }
 
         val prefs = app.getSharedPreferences(RIDE_PREFS, Context.MODE_PRIVATE)
         val activeId = prefs.getString("active_id", null)
