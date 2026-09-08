@@ -422,10 +422,6 @@ object MtbHudCompactController {
             val lastIndex = count - 1
             var current = flipper.displayedChild.coerceIn(0, lastIndex)
 
-            if (mobileReleasePageRemoved && lastPagerChild == lastIndex && current == 0) {
-                flipper.displayedChild = lastIndex
-                current = lastIndex
-            }
             lastPagerChild = current
 
             val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배터리")
