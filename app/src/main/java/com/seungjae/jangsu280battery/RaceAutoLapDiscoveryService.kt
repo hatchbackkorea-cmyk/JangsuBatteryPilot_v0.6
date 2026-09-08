@@ -23,8 +23,10 @@ import kotlin.math.roundToInt
  * close enough to a stored course START, the precise RaceTimingService is armed; the timing service
  * still requires an actual directional gate-line crossing before its clock starts.
  *
- * The same GPS samples query the server (at most once/minute) for released courses whose START is
- * within 10 km and raises a user-confirmable download notification.
+ * The watcher intentionally stays alive while a local lap is being timed. After FINISH it keeps the
+ * final result visible briefly, then resumes scanning so lap 2/3/... can start automatically without
+ * touching the phone again. The same GPS samples query the server (at most once/minute) for released
+ * courses whose START is within 10 km and raises a user-confirmable download notification.
  */
 class RaceAutoLapDiscoveryService : Service(), LocationListener {
     companion object {
@@ -36,6 +38,7 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
         private const val NEARBY_NOTIFICATION_ID = 8845
         private const val ARM_RADIUS_M = 600.0
         private const val SERVER_RADIUS_KM = 10.0
+        private const val FINISH_HOLD_MS = 3_000L
     }
 
     private data class Candidate(val meta: CourseMeta, val config: RaceEventConfig, val start: RaceGate)
@@ -49,6 +52,8 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
     private var candidates: List<Candidate> = emptyList()
     private var lastCandidateRefreshMs = 0L
     private var lastServerQueryMs = 0L
+    private var finishHoldUntilMs = 0L
+    private var lastFinishedRunId = ""
     @Volatile private var serverQueryRunning = false
 
     override fun onCreate() {
@@ -75,22 +80,46 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
             stopSelf(); return
         }
         refreshCandidates(force = true)
-        store.clearActiveConfig()
-        store.writeSnapshot(
-            RaceDataStore.Snapshot(
-                state = "WATCHING", eventCode = "PRACTICE", eventName = "자동 랩", courseName = "저장 코스 자동 탐색",
-                serverStatus = if (candidates.isEmpty()) "저장된 GPX 확인 중 · 근처 공개 코스도 탐색합니다." else "저장 코스 ${candidates.size}개 · START 자동 탐색 중"
+        val existing = store.snapshot()
+        val timingActive = existing.state == "ARMED" || existing.state == "RUNNING"
+        if (!timingActive) {
+            store.clearActiveConfig()
+            store.writeSnapshot(
+                RaceDataStore.Snapshot(
+                    state = "WATCHING", eventCode = "PRACTICE", eventName = "자동 랩", courseName = "저장 코스 자동 탐색",
+                    serverStatus = if (candidates.isEmpty()) "저장된 GPX 확인 중 · 근처 공개 코스도 탐색합니다." else "저장 코스 ${candidates.size}개 · START 자동 탐색 중"
+                )
             )
-        )
+        }
         acquireWakeLock()
-        startForeground(NOTIFICATION_ID, watchNotification("저장 코스 START 자동 탐색 중"))
+        val notificationText = if (timingActive) "자동 랩 감시 유지 · 현재 계측 중" else "저장 코스 START 자동 탐색 중"
+        startForeground(NOTIFICATION_ID, watchNotification(notificationText))
         runCatching { locationManager.removeUpdates(this) }
         runCatching { locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 800L, 1f, this) }
         runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull()?.let(::onLocationChanged)
     }
 
     override fun onLocationChanged(location: Location) {
-        refreshCandidates()
+        val runtime = store.snapshot()
+        if (runtime.state == "ARMED" || runtime.state == "RUNNING") {
+            val label = if (runtime.state == "RUNNING") "${runtime.courseName.ifBlank { "코스" }} · 랩 계측 중" else "${runtime.courseName.ifBlank { "코스" }} · START 게이트 대기"
+            updateWatchNotification(label)
+            return
+        }
+
+        if (runtime.state == "FINISHED") {
+            val now = System.currentTimeMillis()
+            if (runtime.runId != lastFinishedRunId) {
+                lastFinishedRunId = runtime.runId
+                finishHoldUntilMs = now + FINISH_HOLD_MS
+            }
+            if (now < finishHoldUntilMs) {
+                updateWatchNotification("FINISH 기록 저장 완료 · 다음 랩 자동대기 준비")
+                return
+            }
+        }
+
+        refreshCandidates(force = runtime.state == "FINISHED")
         val nearest = candidates.minByOrNull { Geo.distanceMeters(location.latitude, location.longitude, it.start.lat, it.start.lon) }
         val nearestM = nearest?.let { Geo.distanceMeters(location.latitude, location.longitude, it.start.lat, it.start.lon) } ?: Double.POSITIVE_INFINITY
         if (nearest != null && nearestM <= ARM_RADIUS_M) {
@@ -104,7 +133,18 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
         }
         updateWatchNotification(text)
         val old = store.snapshot()
-        if (old.state == "WATCHING") store.writeSnapshot(old.copy(gpsAccuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0, serverStatus = text))
+        if (old.state != "WATCHING") {
+            store.clearActiveConfig()
+            store.writeSnapshot(
+                RaceDataStore.Snapshot(
+                    state = "WATCHING", eventCode = "PRACTICE", eventName = "자동 랩", courseName = "저장 코스 자동 탐색",
+                    gpsAccuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0,
+                    serverStatus = text
+                )
+            )
+        } else {
+            store.writeSnapshot(old.copy(gpsAccuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0, serverStatus = text))
+        }
         queryNearbyServerIfDue(location)
     }
 
@@ -136,12 +176,9 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
             putExtra(RaceTimingService.EXTRA_CONFIG, candidate.config.toJson().toString())
             putExtra(RaceTimingService.EXTRA_COURSE_ID, candidate.meta.id)
         })
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(
-            NOTIFICATION_ID,
-            watchNotification("${candidate.meta.name} · START ${formatDistance(distanceM)} · 게이트 통과 대기")
-        )
-        runCatching { locationManager.removeUpdates(this) }
-        releaseWakeLock(); stopForeground(true); stopSelf()
+        updateWatchNotification("${candidate.meta.name} · START ${formatDistance(distanceM)} · 게이트 통과 대기")
+        // Do not stop this watcher. It idles while RaceTimingService is ARMED/RUNNING and
+        // automatically resumes course discovery after FINISH for the next lap.
     }
 
     private fun queryNearbyServerIfDue(location: Location) {
