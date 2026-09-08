@@ -33,17 +33,12 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Phone RACE course builder inspired by RaceChrono's Create New Track workflow.
- * Raw GPS is recorded first. START/FINISH/Sector traps can be dropped while riding or edited
- * afterwards. The large-map editor can freely move each trap off the GPX route and directly edit
- * direction and gate width. Saving creates a normal local GPX so the rest of Ride Copilot can use
- * it immediately. Administrator phones may explicitly publish it.
+ * TimeGate course builder.
  *
- * Course type:
- * - OPEN: START and FINISH are independent.
- * - CLOSED: the FINISH line is automatically kept at the same physical point as START, while its
- *   route progress remains at the end of the recorded lap. This makes a true loop course possible
- *   without confusing the 1D course matcher.
+ * User flow is deliberately simple: START begins GPS recording and fixes START, CP adds CP1/CP2…,
+ * and FINISH fixes FINISH and stops recording. Every gate initially points in the riding direction
+ * and remains freely editable afterwards. Automatic CP detection only recommends likely segment
+ * boundaries; it never creates a CP without the user's tap.
  */
 class RaceTrackBuilderActivity : Activity() {
     companion object {
@@ -80,6 +75,9 @@ class RaceTrackBuilderActivity : Activity() {
     private var savedMeta: CourseMeta? = null
     private var receiverRegistered = false
     private var courseType = TYPE_OPEN
+    private var pendingStartRouteM: Double? = null
+    private var suggestedCpRouteM: Double? = null
+    private var lastSuggestedCpRouteM = -10_000.0
 
     private val updateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -100,7 +98,14 @@ class RaceTrackBuilderActivity : Activity() {
                 )
                 if (points.lastOrNull()?.timeMs != p.timeMs) points += p
                 selectedRouteM = p.routeM
+
+                if (pendingStartRouteM != null && points.size >= 2 && gates.none { it.type == "START" }) {
+                    val startM = pendingStartRouteM!!.coerceIn(0.0, points.last().routeM)
+                    pendingStartRouteM = null
+                    addTrap("START", startM, refresh = false)
+                }
                 if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = false)
+                evaluateCpSuggestion()
             }
             refreshUi(follow = draft?.state == RaceTrackDraftStore.STATE_RECORDING)
         }
@@ -108,24 +113,12 @@ class RaceTrackBuilderActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        drafts = RaceTrackDraftStore(this)
-        repo = CourseRepository(this)
-        sync = RiderServerSync(this)
-        buildUi()
-        restoreDraft()
-        ensureLocationPermission()
+        drafts = RaceTrackDraftStore(this); repo = CourseRepository(this); sync = RiderServerSync(this)
+        buildUi(); restoreDraft(); ensureLocationPermission()
     }
 
-    override fun onResume() {
-        super.onResume()
-        registerUpdates()
-        restoreDraft()
-    }
-
-    override fun onPause() {
-        unregisterUpdates()
-        super.onPause()
-    }
+    override fun onResume() { super.onResume(); registerUpdates(); restoreDraft() }
+    override fun onPause() { unregisterUpdates(); super.onPause() }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -137,10 +130,9 @@ class RaceTrackBuilderActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
         setContentView(root)
-
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(14), 0); setBackgroundColor(Color.rgb(43, 43, 43)) }
         top.addView(Button(this).apply { text = "‹"; textSize = 28f; setTextColor(Color.WHITE); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { finish() } }, LinearLayout.LayoutParams(dp(56), dp(58)))
-        top.addView(TextView(this).apply { text = "RACE 코스 만들기"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(58), 1f))
+        top.addView(TextView(this).apply { text = "TimeGate 코스 만들기"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(58), 1f))
         root.addView(top)
 
         map = RaceTrackBuilderMapView(this)
@@ -148,39 +140,30 @@ class RaceTrackBuilderActivity : Activity() {
 
         val bottomScroll = ScrollView(this).apply { setBackgroundColor(Color.rgb(11, 16, 23)) }
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(10), dp(14), dp(16)) }
-        bottomScroll.addView(body)
-        root.addView(bottomScroll, LinearLayout.LayoutParams(-1, dp(372)))
+        bottomScroll.addView(body); root.addView(bottomScroll, LinearLayout.LayoutParams(-1, dp(372)))
 
         status = TextView(this).apply { textSize = 13f; setTextColor(Color.LTGRAY); setPadding(0, 0, 0, dp(8)) }
         body.addView(status)
 
-        btnCourseType = Button(this).apply {
-            isAllCaps = false
-            textSize = 14f
-            setTypeface(typeface, Typeface.BOLD)
-            setOnClickListener { chooseCourseType() }
-        }
+        btnCourseType = Button(this).apply { isAllCaps = false; textSize = 14f; setTypeface(typeface, Typeface.BOLD); setOnClickListener { chooseCourseType() } }
         body.addView(btnCourseType, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(6) })
 
         btnMapEdit = Button(this).apply {
-            isAllCaps = false
-            text = "↗ 큰 지도에서 위치 · 방향 · 폭 자유 편집"
-            textSize = 14f
-            setTypeface(typeface, Typeface.BOLD)
+            isAllCaps = false; text = "↗ 큰 지도에서 위치 · 방향 · 폭 자유 편집"; textSize = 14f; setTypeface(typeface, Typeface.BOLD)
             setOnClickListener { openFullscreenTrapEditor() }
         }
         body.addView(btnMapEdit, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(7) })
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        btnRecord = Button(this).apply { text = "● 새 기록"; setOnClickListener { startNewDraft() } }
+        btnRecord = Button(this).apply { text = "START"; setTypeface(typeface, Typeface.BOLD); setOnClickListener { startNewDraft() } }
         btnPause = Button(this).apply { text = "Ⅱ 일시정지"; setOnClickListener { togglePause() } }
-        btnFinish = Button(this).apply { text = "기록 종료"; setOnClickListener { stopRecording() } }
-        row.addView(btnRecord, LinearLayout.LayoutParams(0, dp(48), 1f))
-        row.addView(btnPause, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(6) })
-        row.addView(btnFinish, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(6) })
+        btnFinish = Button(this).apply { text = "FINISH"; setTypeface(typeface, Typeface.BOLD); setOnClickListener { finishCourse() } }
+        row.addView(btnRecord, LinearLayout.LayoutParams(0, dp(50), 1f))
+        row.addView(btnPause, LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginStart = dp(6) })
+        row.addView(btnFinish, LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginStart = dp(6) })
         body.addView(row)
 
-        seekLabel = TextView(this).apply { text = "트랩 위치 선택"; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(8), 0, 0) }
+        seekLabel = TextView(this).apply { text = "게이트 위치"; textSize = 12f; setTextColor(Color.LTGRAY); setPadding(0, dp(8), 0, 0) }
         body.addView(seekLabel)
         seek = SeekBar(this).apply {
             max = 1000
@@ -189,8 +172,8 @@ class RaceTrackBuilderActivity : Activity() {
                     if (!fromUser || points.isEmpty()) return
                     val total = points.last().routeM.coerceAtLeast(1.0)
                     selectedRouteM = total * progress / 1000.0
-                    refreshMap(false)
-                    updateSeekLabel()
+                    suggestedCpRouteM = null
+                    refreshMap(false); updateSeekLabel(); updateActionLabels()
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
@@ -199,7 +182,7 @@ class RaceTrackBuilderActivity : Activity() {
         body.addView(seek)
 
         val trapActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        btnAddTrap = Button(this).apply { text = "+ 트랩 추가"; setOnClickListener { chooseTrapType() } }
+        btnAddTrap = Button(this).apply { text = "+ CP1"; setOnClickListener { addCp() } }
         btnSave = Button(this).apply { text = "코스 저장"; setOnClickListener { saveCourse() } }
         btnPublish = Button(this).apply { text = "서버 등록"; setOnClickListener { publishCourse() } }
         trapActions.addView(btnAddTrap, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -208,7 +191,7 @@ class RaceTrackBuilderActivity : Activity() {
         body.addView(trapActions)
 
         body.addView(TextView(this).apply {
-            text = "산악 MTB 기준 트랩 폭 기본 5m · 조절 범위 1~20m. 큰 지도에서는 코스선에 붙이지 않고 화살표를 원하는 위치·방향·폭으로 직접 편집합니다. 폐쇄형은 START 위치를 FINISH와 자동 공유합니다."
+            text = "START → CP1 → CP2… → FINISH 순서로 누르면 됩니다. 급감속·큰 방향전환 지점은 CP 후보로만 추천합니다. 게이트 방향은 진행방향, 폭 기본 5m(1~20m 편집)입니다."
             textSize = 10.5f; setTextColor(Color.GRAY); setPadding(0, dp(8), 0, dp(5))
         })
         trapContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -216,77 +199,34 @@ class RaceTrackBuilderActivity : Activity() {
     }
 
     private fun ensureLocationPermission() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION)
-        }
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION)
     }
 
     private fun chooseCourseType() {
-        val choices = arrayOf(
-            "개방형 · START / FINISH 분리",
-            "폐쇄형 · START = FINISH"
-        )
+        val choices = arrayOf("개방형 · START / FINISH 분리", "폐쇄형 · START = FINISH")
         val checked = if (courseType == TYPE_CLOSED) 1 else 0
-        AlertDialog.Builder(this)
-            .setTitle("코스 형태")
-            .setSingleChoiceItems(choices, checked) { dialog, which ->
-                val previous = courseType
-                courseType = if (which == 1) TYPE_CLOSED else TYPE_OPEN
-                draft?.let { saveCourseType(it.id) }
-                if (courseType == TYPE_CLOSED) {
-                    syncClosedLoopFinish(persist = true)
-                } else if (previous == TYPE_CLOSED) {
-                    gates.removeAll { it.type == "FINISH" }
-                    draft?.let { drafts.writeTraps(it.id, gates) }
-                }
-                dialog.dismiss()
-                refreshUi(false)
-            }
-            .setNegativeButton("취소", null)
-            .show()
+        AlertDialog.Builder(this).setTitle("코스 형태").setSingleChoiceItems(choices, checked) { dialog, which ->
+            val previous = courseType
+            courseType = if (which == 1) TYPE_CLOSED else TYPE_OPEN
+            draft?.let { saveCourseType(it.id) }
+            if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = true)
+            else if (previous == TYPE_CLOSED) { gates.removeAll { it.type == "FINISH" }; draft?.let { drafts.writeTraps(it.id, gates) } }
+            dialog.dismiss(); refreshUi(false)
+        }.setNegativeButton("취소", null).show()
     }
 
     private fun openFullscreenTrapEditor() {
-        if (points.size < 2) {
-            Toast.makeText(this, "GPS 코스가 아직 없습니다.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (gates.isEmpty()) {
-            Toast.makeText(this, "START/CP/FINISH를 하나 이상 먼저 추가해 주세요.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
+        if (points.size < 2) { Toast.makeText(this, "GPS 코스가 아직 없습니다.", Toast.LENGTH_SHORT).show(); return }
+        if (gates.isEmpty()) { Toast.makeText(this, "START/CP/FINISH를 하나 이상 먼저 추가해 주세요.", Toast.LENGTH_SHORT).show(); return }
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(7, 16, 26))
-        }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(6), dp(8), dp(6))
-            setBackgroundColor(Color.rgb(13, 21, 32))
-        }
-        bar.addView(TextView(this).apply {
-            text = "RACE 큰 지도 편집"
-            textSize = 19f
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(0, dp(50), 1f))
-        bar.addView(Button(this).apply {
-            text = "완료"
-            isAllCaps = false
-            setTypeface(typeface, Typeface.BOLD)
-            setOnClickListener { dialog.dismiss() }
-        }, LinearLayout.LayoutParams(dp(88), dp(44)))
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(7, 16, 26)) }
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(8), dp(6)); setBackgroundColor(Color.rgb(13, 21, 32)) }
+        bar.addView(TextView(this).apply { text = "TimeGate 큰 지도 편집"; textSize = 19f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD) }, LinearLayout.LayoutParams(0, dp(50), 1f))
+        bar.addView(Button(this).apply { text = "완료"; isAllCaps = false; setTypeface(typeface, Typeface.BOLD); setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(dp(88), dp(44)))
         root.addView(bar)
-
         root.addView(TextView(this).apply {
-            text = "화살표 몸통 드래그 = 위치 · 화살표 끝 흰 점 = 방향 · 옆 흰 점 = 폭 1~20m · 코스선 자동보정 없음"
-            textSize = 12f
-            setTextColor(Color.rgb(200, 216, 235))
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(Color.rgb(10, 28, 43))
+            text = "화살표 몸통 드래그 = 위치 · 끝 흰 점 = 진행방향 · 옆 흰 점 = 게이트 폭 1~20m"
+            textSize = 12f; setTextColor(Color.rgb(200, 216, 235)); setPadding(dp(12), dp(8), dp(12), dp(8)); setBackgroundColor(Color.rgb(10, 28, 43))
         }, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         lateinit var editorMap: RaceTrackBuilderMapView
@@ -295,54 +235,30 @@ class RaceTrackBuilderActivity : Activity() {
             if (index !in gates.indices) return@TrapEditListener
             val original = gates[index]
             if (courseType == TYPE_CLOSED && original.type == "FINISH") {
-                Toast.makeText(this, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show()
-                editorMap.render(points, gates, selectedRouteM, false)
-                return@TrapEditListener
+                Toast.makeText(this, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show(); editorMap.render(points, gates, selectedRouteM, false); return@TrapEditListener
             }
-            gates[index] = original.copy(
-                lat = lat,
-                lon = lon,
-                bearingDeg = ((bearingDeg % 360.0) + 360.0) % 360.0,
-                widthM = widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)
-            )
+            gates[index] = original.copy(lat = lat, lon = lon, bearingDeg = ((bearingDeg % 360.0) + 360.0) % 360.0, widthM = widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M))
             selectedRouteM = original.routeM
-            if (courseType == TYPE_CLOSED && original.type == "START") {
-                syncClosedLoopFinish(persist = true)
-            } else {
-                draft?.let { drafts.writeTraps(it.id, gates) }
-            }
+            if (courseType == TYPE_CLOSED && original.type == "START") syncClosedLoopFinish(persist = true) else draft?.let { drafts.writeTraps(it.id, gates) }
             editorMap.render(points, gates, selectedRouteM, false)
         })
         root.addView(editorMap, LinearLayout.LayoutParams(-1, 0, 1f))
         dialog.setContentView(root)
         dialog.setOnShowListener { editorMap.render(points, gates, selectedRouteM, false) }
-        dialog.setOnDismissListener {
-            editorMap.setTrapEditListener(null, false)
-            refreshUi(false)
-        }
+        dialog.setOnDismissListener { editorMap.setTrapEditListener(null, false); refreshUi(false) }
         dialog.show()
     }
 
     private fun startNewDraft() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            ensureLocationPermission(); return
-        }
-        val input = EditText(this).apply { hint = "예: 백봉 MTB 코스"; setText("새 RACE 코스") }
-        val typeLabel = if (courseType == TYPE_CLOSED) "폐쇄형 · START=FINISH" else "개방형 · START/FINISH 분리"
-        AlertDialog.Builder(this)
-            .setTitle("새 코스 기록")
-            .setMessage("코스 형태: $typeLabel\nGPS 원본을 먼저 기록합니다. 코스 형태는 기록 중에도 변경할 수 있습니다.")
-            .setView(input)
-            .setPositiveButton("기록 시작") { _, _ ->
-                draft?.let { old -> if (old.state == RaceTrackDraftStore.STATE_RECORDING) sendAction(RaceTrackRecorderService.ACTION_STOP) }
-                val d = drafts.start(input.text.toString())
-                draft = d; points.clear(); gates.clear(); savedMeta = null; selectedRouteM = null
-                saveCourseType(d.id)
-                startForegroundService(Intent(this, RaceTrackRecorderService::class.java).apply { action = RaceTrackRecorderService.ACTION_START; putExtra(RaceTrackRecorderService.EXTRA_DRAFT_ID, d.id) })
-                refreshUi(true)
-            }
-            .setNegativeButton("취소", null)
-            .show()
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) { ensureLocationPermission(); return }
+        draft?.let { old -> if (old.state == RaceTrackDraftStore.STATE_RECORDING) sendAction(RaceTrackRecorderService.ACTION_STOP) }
+        val d = drafts.start("새 TimeGate 코스")
+        draft = d; points.clear(); gates.clear(); savedMeta = null; selectedRouteM = null
+        pendingStartRouteM = 0.0; suggestedCpRouteM = null; lastSuggestedCpRouteM = -10_000.0
+        saveCourseType(d.id)
+        startForegroundService(Intent(this, RaceTrackRecorderService::class.java).apply { action = RaceTrackRecorderService.ACTION_START; putExtra(RaceTrackRecorderService.EXTRA_DRAFT_ID, d.id) })
+        Toast.makeText(this, "START 기록 시작 · 첫 GPS 진행방향으로 START 게이트를 만듭니다.", Toast.LENGTH_LONG).show()
+        refreshUi(true)
     }
 
     private fun togglePause() {
@@ -350,49 +266,87 @@ class RaceTrackBuilderActivity : Activity() {
         when (d.state) {
             RaceTrackDraftStore.STATE_RECORDING -> sendAction(RaceTrackRecorderService.ACTION_PAUSE)
             RaceTrackDraftStore.STATE_PAUSED -> sendAction(RaceTrackRecorderService.ACTION_RESUME)
-            else -> Toast.makeText(this, "새 기록을 시작해 주세요.", Toast.LENGTH_SHORT).show()
+            else -> Toast.makeText(this, "START를 먼저 눌러 주세요.", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun stopRecording() {
-        val d = draft ?: return
+    private fun finishCourse() {
+        val d = draft ?: run { Toast.makeText(this, "START를 먼저 눌러 주세요.", Toast.LENGTH_SHORT).show(); return }
+        if (points.size < 2) { Toast.makeText(this, "GPS 포인트가 아직 부족합니다.", Toast.LENGTH_SHORT).show(); return }
+        if (gates.none { it.type == "START" }) addTrap("START", 0.0, refresh = false)
+        selectedRouteM = points.last().routeM
+        if (courseType == TYPE_OPEN) addTrap("FINISH", selectedRouteM!!, refresh = false)
         sendAction(RaceTrackRecorderService.ACTION_STOP)
         draft = drafts.setState(d.id, RaceTrackDraftStore.STATE_STOPPED)
-        selectedRouteM = points.lastOrNull()?.routeM
-        if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = true)
+        if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = true) else drafts.writeTraps(d.id, gates)
+        suggestedCpRouteM = null
+        Toast.makeText(this, "FINISH 지정 완료 · 코스 저장 전 게이트를 수정할 수 있습니다.", Toast.LENGTH_LONG).show()
         refreshUi(false)
     }
 
-    private fun sendAction(a: String) {
-        startService(Intent(this, RaceTrackRecorderService::class.java).apply { action = a })
-    }
+    private fun sendAction(a: String) { startService(Intent(this, RaceTrackRecorderService::class.java).apply { action = a }) }
 
-    private fun chooseTrapType() {
+    private fun addCp() {
         if (points.size < 2) { Toast.makeText(this, "GPS 포인트가 아직 부족합니다.", Toast.LENGTH_SHORT).show(); return }
-        val types = if (courseType == TYPE_CLOSED) arrayOf("START", "SECTOR") else arrayOf("START", "SECTOR", "FINISH")
-        AlertDialog.Builder(this).setTitle("트랩 추가").setItems(types) { _, which -> addTrap(types[which]) }.show()
+        val m = suggestedCpRouteM ?: points.last().routeM
+        selectedRouteM = m
+        addTrap("SECTOR", m, refresh = false)
+        suggestedCpRouteM = null
+        refreshUi(false)
     }
 
-    private fun addTrap(type: String) {
+    private fun addTrap(type: String, routeM: Double? = null, refresh: Boolean = true) {
         if (courseType == TYPE_CLOSED && type == "FINISH") return
-        val m = selectedRouteM ?: points.lastOrNull()?.routeM ?: return
+        val m = routeM ?: selectedRouteM ?: points.lastOrNull()?.routeM ?: return
         val name = when (type) {
             "START" -> "START"
             "FINISH" -> "FINISH"
-            else -> "S${gates.count { it.type == "SECTOR" } + 1}"
+            else -> "CP${gates.count { it.type == "SECTOR" } + 1}"
         }
         if (type == "START") gates.removeAll { it.type == "START" }
         if (type == "FINISH") gates.removeAll { it.type == "FINISH" }
         gates += gateAt(m, name, type, DEFAULT_GATE_WIDTH_M)
         gates.sortBy { it.routeM }
-        if (courseType == TYPE_CLOSED && type == "START") syncClosedLoopFinish(persist = true)
-        else draft?.let { drafts.writeTraps(it.id, gates) }
-        refreshUi(false)
+        if (courseType == TYPE_CLOSED && type == "START") syncClosedLoopFinish(persist = true) else draft?.let { drafts.writeTraps(it.id, gates) }
+        if (refresh) refreshUi(false)
     }
 
+    private fun evaluateCpSuggestion() {
+        val d = draft ?: return
+        if (d.state != RaceTrackDraftStore.STATE_RECORDING || points.size < 8) return
+        val end = points.last()
+        if (end.routeM - lastSuggestedCpRouteM < 90.0) return
+        val midI = indexNearRoute((end.routeM - 8.0).coerceAtLeast(0.0))
+        val startI = indexNearRoute((end.routeM - 28.0).coerceAtLeast(0.0))
+        if (startI >= midI || midI >= points.lastIndex) return
+        val a = points[startI]; val b = points[midI]; val c = end
+        val before = speedMps(a, b); val after = speedMps(b, c)
+        if (before < 2.5) return
+        val drop = (1.0 - after / before.coerceAtLeast(0.1)).coerceIn(-2.0, 1.0)
+        val turn = angleDiff(bearingBetween(a, b), bearingBetween(b, c))
+        val strong = (drop >= 0.45 && turn >= 20.0) || drop >= 0.58 || turn >= 55.0
+        if (!strong) return
+        val candidateM = b.routeM
+        if (gates.any { abs(it.routeM - candidateM) < 70.0 }) return
+        suggestedCpRouteM = candidateM; selectedRouteM = candidateM; lastSuggestedCpRouteM = candidateM
+        updateSeekFromSelection(); updateActionLabels(); refreshMap(false)
+    }
+
+    private fun speedMps(a: RaceTrackDraftStore.Point, b: RaceTrackDraftStore.Point): Double {
+        val dt = (b.timeMs - a.timeMs).coerceAtLeast(1L) / 1000.0
+        return (b.routeM - a.routeM).coerceAtLeast(0.0) / dt
+    }
+
+    private fun bearingBetween(a: RaceTrackDraftStore.Point, b: RaceTrackDraftStore.Point): Double {
+        val p1 = Math.toRadians(a.lat); val p2 = Math.toRadians(b.lat); val dl = Math.toRadians(b.lon - a.lon)
+        val y = sin(dl) * cos(p2); val x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)
+        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
+    }
+
+    private fun angleDiff(a: Double, b: Double): Double { val d = abs(((b - a + 540.0) % 360.0) - 180.0); return d.coerceIn(0.0, 180.0) }
+
     private fun gateAt(routeM: Double, name: String, type: String, width: Double): RaceGate {
-        val i = nearestPointIndex(routeM)
-        val p = points[i]
+        val i = nearestPointIndex(routeM); val p = points[i]
         return RaceGate(name, type, p.routeM, p.lat, p.lon, bearingAt(i), width.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M))
     }
 
@@ -403,21 +357,12 @@ class RaceTrackBuilderActivity : Activity() {
         if (totalM <= start.routeM + 1.0) return
         val oldFinish = gates.firstOrNull { it.type == "FINISH" }
         val width = (oldFinish?.widthM ?: start.widthM).coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)
-        val finish = RaceGate(
-            name = "FINISH",
-            type = "FINISH",
-            routeM = totalM,
-            lat = start.lat,
-            lon = start.lon,
-            bearingDeg = bearingAt(points.lastIndex),
-            widthM = width
-        )
-        gates.removeAll { it.type == "FINISH" }
-        gates += finish
-        gates.sortBy { it.routeM }
+        val finish = RaceGate("FINISH", "FINISH", totalM, start.lat, start.lon, bearingAt(points.lastIndex), width)
+        gates.removeAll { it.type == "FINISH" }; gates += finish; gates.sortBy { it.routeM }
         if (persist) draft?.let { drafts.writeTraps(it.id, gates) }
     }
 
+    private fun indexNearRoute(routeM: Double): Int = nearestPointIndex(routeM)
     private fun nearestPointIndex(routeM: Double): Int {
         if (points.isEmpty()) return 0
         var best = 0; var bestD = Double.MAX_VALUE
@@ -428,45 +373,29 @@ class RaceTrackBuilderActivity : Activity() {
     private fun bearingAt(i: Int): Double {
         val p = points[i]
         if (p.bearingDeg.isFinite()) return ((p.bearingDeg % 360.0) + 360.0) % 360.0
-        val a = points[(i - 1).coerceAtLeast(0)]
-        val b = points[(i + 1).coerceAtMost(points.lastIndex)]
-        val p1 = Math.toRadians(a.lat); val p2 = Math.toRadians(b.lat); val dl = Math.toRadians(b.lon - a.lon)
-        val y = sin(dl) * cos(p2)
-        val x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)
-        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
+        val a = points[(i - 1).coerceAtLeast(0)]; val b = points[(i + 1).coerceAtMost(points.lastIndex)]
+        return bearingBetween(a, b)
     }
 
     private fun renderTraps() {
         trapContainer.removeAllViews()
-        if (gates.isEmpty()) {
-            trapContainer.addView(TextView(this).apply { text = "등록된 트랩 없음"; textSize = 11f; setTextColor(Color.GRAY) })
-            return
-        }
+        if (gates.isEmpty()) { trapContainer.addView(TextView(this).apply { text = "START를 누르면 첫 게이트가 자동 생성됩니다."; textSize = 11f; setTextColor(Color.GRAY) }); return }
         gates.sortedBy { it.routeM }.forEach { gate ->
             val lockedFinish = courseType == TYPE_CLOSED && gate.type == "FINISH"
             val b = Button(this).apply {
-                text = "${gate.type} · ${gate.name} · ${"%.3f".format(Locale.US, gate.routeM / 1000.0)}km · 폭 ${"%.1f".format(Locale.US, gate.widthM)}m · 방향 ${Math.round(gate.bearingDeg)}°${if (lockedFinish) " · START와 동일" else ""}"
+                text = "${gate.name} · ${"%.3f".format(Locale.US, gate.routeM / 1000.0)}km · 폭 ${"%.1f".format(Locale.US, gate.widthM)}m · 방향 ${Math.round(gate.bearingDeg)}°${if (lockedFinish) " · START와 동일" else ""}"
                 textSize = 12f; isAllCaps = false; gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                setOnClickListener {
-                    if (lockedFinish) Toast.makeText(this@RaceTrackBuilderActivity, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show()
-                    else editTrap(gate)
-                }
+                setOnClickListener { if (lockedFinish) Toast.makeText(this@RaceTrackBuilderActivity, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show() else editTrap(gate) }
             }
             trapContainer.addView(b, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(3) })
         }
     }
 
     private fun editTrap(original: RaceGate) {
-        if (courseType == TYPE_CLOSED && original.type == "FINISH") {
-            Toast.makeText(this, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show(); return
-        }
+        if (courseType == TYPE_CLOSED && original.type == "FINISH") { Toast.makeText(this, "폐쇄형 FINISH는 START 위치에 자동 고정됩니다.", Toast.LENGTH_SHORT).show(); return }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), 0, dp(18), 0) }
-        val name = EditText(this).apply { hint = "트랩 이름"; setText(original.name); setSingleLine(true) }
-        val width = EditText(this).apply {
-            hint = "폭(m) · 1~20"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText("%.1f".format(Locale.US, original.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)))
-        }
+        val name = EditText(this).apply { hint = "게이트 이름"; setText(original.name); setSingleLine(true) }
+        val width = EditText(this).apply { hint = "폭(m) · 1~20"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL; setText("%.1f".format(Locale.US, original.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M))) }
         val label = TextView(this).apply { textSize = 13f; setTextColor(Color.DKGRAY) }
         val slider = SeekBar(this).apply { max = 1000 }
         val total = points.lastOrNull()?.routeM?.coerceAtLeast(1.0) ?: 1.0
@@ -479,49 +408,40 @@ class RaceTrackBuilderActivity : Activity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
         root.addView(name); root.addView(width); root.addView(label); root.addView(slider)
-        AlertDialog.Builder(this).setTitle("${original.type} 트랩 편집").setView(root)
+        AlertDialog.Builder(this).setTitle("${original.name} 편집").setView(root)
             .setPositiveButton("저장") { _, _ ->
                 val m = total * slider.progress / 1000.0
-                val w = width.text.toString().toDoubleOrNull()?.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M) ?: original.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)
+                val w = width.text.toString().toDoubleOrNull()?.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M) ?: original.widthM
                 val replacement = gateAt(m, name.text.toString().trim().ifBlank { original.name }, original.type, w)
                 val idx = gates.indexOf(original); if (idx >= 0) gates[idx] = replacement
                 gates.sortBy { it.routeM }
-                if (courseType == TYPE_CLOSED && replacement.type == "START") syncClosedLoopFinish(persist = true)
-                else draft?.let { drafts.writeTraps(it.id, gates) }
-                selectedRouteM = replacement.routeM
-                refreshUi(false)
+                if (courseType == TYPE_CLOSED && replacement.type == "START") syncClosedLoopFinish(persist = true) else draft?.let { drafts.writeTraps(it.id, gates) }
+                selectedRouteM = replacement.routeM; refreshUi(false)
             }
             .setNeutralButton("삭제") { _, _ ->
                 gates.remove(original)
                 if (courseType == TYPE_CLOSED && original.type == "START") gates.removeAll { it.type == "FINISH" }
-                draft?.let { drafts.writeTraps(it.id, gates) }
-                refreshUi(false)
-            }
-            .setNegativeButton("취소", null).show()
+                draft?.let { drafts.writeTraps(it.id, gates) }; refreshUi(false)
+            }.setNegativeButton("취소", null).show()
     }
 
     private fun saveCourse() {
-        if (points.size < 2 || (points.lastOrNull()?.routeM ?: 0.0) < 50.0) {
-            Toast.makeText(this, "코스 길이가 너무 짧습니다.", Toast.LENGTH_SHORT).show(); return
-        }
+        if (points.size < 2 || (points.lastOrNull()?.routeM ?: 0.0) < 50.0) { Toast.makeText(this, "코스 길이가 너무 짧습니다.", Toast.LENGTH_SHORT).show(); return }
         if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = true)
-        if (gates.none { it.type == "START" } || gates.none { it.type == "FINISH" }) {
-            val msg = if (courseType == TYPE_CLOSED) "폐쇄형 코스는 START 트랩을 먼저 지정해 주세요. FINISH는 자동 생성됩니다." else "START와 FINISH 트랩을 먼저 지정해 주세요."
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); return
-        }
-        val suggested = draft?.name ?: "RACE 코스"
-        val input = EditText(this).apply { setText(suggested); selectAll() }
+        if (gates.none { it.type == "START" } || gates.none { it.type == "FINISH" }) { Toast.makeText(this, "START와 FINISH를 먼저 지정해 주세요.", Toast.LENGTH_LONG).show(); return }
+        val suggested = draft?.name ?: "TimeGate 코스"
+        val input = EditText(this).apply { setText(if (suggested == "새 TimeGate 코스") "TimeGate 코스" else suggested); selectAll() }
         val typeLabel = if (courseType == TYPE_CLOSED) "폐쇄형 · START=FINISH" else "개방형 · START/FINISH 분리"
-        AlertDialog.Builder(this).setTitle("코스 저장").setMessage("$typeLabel\n휴대폰의 기존 GPX 코스 저장 위치에 저장합니다.").setView(input)
+        AlertDialog.Builder(this).setTitle("코스 저장").setMessage("$typeLabel\nTimeGate의 GPX 코스 폴더에 저장합니다.").setView(input)
             .setPositiveButton("저장") { _, _ ->
                 runCatching {
                     val tmp = File(cacheDir, "race_track_${System.currentTimeMillis()}.gpx")
-                    writeGpx(tmp, input.text.toString().trim().ifBlank { suggested })
-                    val meta = repo.importGpxFile(tmp, input.text.toString().trim().ifBlank { suggested }, enqueueServer = false)
+                    val name = input.text.toString().trim().ifBlank { "TimeGate 코스" }
+                    writeGpx(tmp, name)
+                    val meta = repo.importGpxFile(tmp, name, enqueueServer = false)
                     tmp.delete(); savedMeta = meta; draft?.let { drafts.clearActive(it.id) }
-                    status.setTextColor(GOOD); status.text = "✓ 휴대폰 코스 저장 완료 · ${meta.name} · ${"%.2f".format(Locale.US, meta.totalKm)}km · $typeLabel"
-                    Toast.makeText(this, "코스가 저장되고 현재 코스로 선택되었습니다.", Toast.LENGTH_LONG).show()
-                    refreshUi(false)
+                    status.setTextColor(GOOD); status.text = "✓ 저장 완료 · ${meta.name} · ${"%.2f".format(Locale.US, meta.totalKm)}km"
+                    Toast.makeText(this, "코스를 저장하고 현재 코스로 선택했습니다.", Toast.LENGTH_LONG).show(); refreshUi(false)
                 }.onFailure { e -> Toast.makeText(this, "저장 실패 · ${e.message}", Toast.LENGTH_LONG).show() }
             }.setNegativeButton("취소", null).show()
     }
@@ -530,15 +450,9 @@ class RaceTrackBuilderActivity : Activity() {
         if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = true)
         val meta = savedMeta ?: run { Toast.makeText(this, "먼저 코스를 휴대폰에 저장해 주세요.", Toast.LENGTH_SHORT).show(); return }
         val file = repo.sourceFile(meta.id) ?: run { Toast.makeText(this, "GPX 파일을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show(); return }
-        btnPublish.isEnabled = false
-        status.setTextColor(Color.LTGRAY); status.text = "관리자 서버에 RACE 코스와 트랩 등록 중…"
+        btnPublish.isEnabled = false; status.setTextColor(Color.LTGRAY); status.text = "관리자 서버에 코스와 게이트 등록 중…"
         RaceCoursePublisher(sync).publishAsync(meta, file, gates.map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) }) { result ->
-            runOnUiThread {
-                btnPublish.isEnabled = true
-                status.setTextColor(if (result.ok) GOOD else WARN)
-                status.text = result.message + (result.serverCourseId?.let { " · 서버 코스 #$it" } ?: "")
-                Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-            }
+            runOnUiThread { btnPublish.isEnabled = true; status.setTextColor(if (result.ok) GOOD else WARN); status.text = result.message + (result.serverCourseId?.let { " · 서버 코스 #$it" } ?: ""); Toast.makeText(this, result.message, Toast.LENGTH_LONG).show() }
         }
     }
 
@@ -546,16 +460,14 @@ class RaceTrackBuilderActivity : Activity() {
         val sortedGates = gates.sortedBy { it.routeM }.map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) }
         target.bufferedWriter(Charsets.UTF_8).use { w ->
             w.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-            w.append("<gpx version=\"1.1\" creator=\"Ride Copilot RACE\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
+            w.append("<gpx version=\"1.1\" creator=\"TimeGate\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
             w.append("<metadata><name>${xml(name)}</name><desc>course_type=$courseType</desc></metadata>\n")
             sortedGates.forEach { g ->
                 val type = when (g.type) { "START" -> "RACE_START"; "FINISH" -> "RACE_FINISH"; else -> "RACE_SECTOR" }
                 w.append("<wpt lat=\"${fmt(g.lat)}\" lon=\"${fmt(g.lon)}\"><name>${xml(g.name)}</name><desc>bearing=${fmt(g.bearingDeg)};width=${fmt(g.widthM)};route_m=${fmt(g.routeM)};course_type=$courseType</desc><type>$type</type></wpt>\n")
             }
             w.append("<trk><name>${xml(name)}</name><trkseg>\n")
-            points.forEach { p ->
-                w.append("<trkpt lat=\"${fmt(p.lat)}\" lon=\"${fmt(p.lon)}\"><ele>${fmt(p.ele)}</ele><time>${Instant.ofEpochMilli(p.timeMs).toString()}</time></trkpt>\n")
-            }
+            points.forEach { p -> w.append("<trkpt lat=\"${fmt(p.lat)}\" lon=\"${fmt(p.lon)}\"><ele>${fmt(p.ele)}</ele><time>${Instant.ofEpochMilli(p.timeMs)}</time></trkpt>\n") }
             w.append("</trkseg></trk></gpx>\n")
         }
     }
@@ -563,67 +475,58 @@ class RaceTrackBuilderActivity : Activity() {
     private fun restoreDraft() {
         val d = drafts.active()
         if (d != null && draft?.id != d.id) {
-            draft = d
-            courseType = loadCourseType(d.id)
-            points.clear(); points.addAll(drafts.points(d.id))
-            gates.clear(); gates.addAll(drafts.traps(d.id).map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) })
+            draft = d; courseType = loadCourseType(d.id)
+            points.clear(); points.addAll(drafts.points(d.id)); gates.clear(); gates.addAll(drafts.traps(d.id).map { it.copy(widthM = it.widthM.coerceIn(MIN_GATE_WIDTH_M, MAX_GATE_WIDTH_M)) })
             if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = false)
-            drafts.writeTraps(d.id, gates)
-            selectedRouteM = points.lastOrNull()?.routeM
+            drafts.writeTraps(d.id, gates); selectedRouteM = points.lastOrNull()?.routeM
         } else if (d != null) {
-            draft = d
-            courseType = loadCourseType(d.id)
-            if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = false)
+            draft = d; courseType = loadCourseType(d.id); if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = false)
         }
         refreshUi(d?.state == RaceTrackDraftStore.STATE_RECORDING)
     }
 
     private fun refreshUi(follow: Boolean) {
         if (courseType == TYPE_CLOSED) syncClosedLoopFinish(persist = false)
-        val d = draft
-        val state = d?.state ?: "READY"
-        val dist = points.lastOrNull()?.routeM ?: d?.distanceM ?: 0.0
+        val d = draft; val state = d?.state ?: "READY"; val dist = points.lastOrNull()?.routeM ?: d?.distanceM ?: 0.0
         val typeText = if (courseType == TYPE_CLOSED) "폐쇄형 · START = FINISH" else "개방형 · START / FINISH 분리"
         btnCourseType.text = "코스 형태 · $typeText  ▼"
         status.setTextColor(Color.LTGRAY)
         if (savedMeta == null || d != null) status.text = buildString {
             append(typeText).append('\n')
             append(when (state) {
-                RaceTrackDraftStore.STATE_RECORDING -> "● GPS 기록 중 · ${"%.2f".format(Locale.US, dist / 1000.0)}km · ${points.size} points"
-                RaceTrackDraftStore.STATE_PAUSED -> "Ⅱ 일시정지 · 트랩을 추가/편집할 수 있습니다."
-                RaceTrackDraftStore.STATE_STOPPED -> "기록 종료 · 트랩을 확인한 뒤 코스를 저장하세요."
-                else -> "새 코스를 기록하거나 기존 RACE 코스 생성을 시작하세요."
+                RaceTrackDraftStore.STATE_RECORDING -> "● 기록 중 · ${"%.2f".format(Locale.US, dist / 1000.0)}km · CP ${gates.count { it.type == "SECTOR" }}개"
+                RaceTrackDraftStore.STATE_PAUSED -> "Ⅱ 일시정지 · 게이트를 수정할 수 있습니다."
+                RaceTrackDraftStore.STATE_STOPPED -> "FINISH 완료 · 확인 후 코스를 저장하세요."
+                else -> "START를 누르면 현재 위치부터 코스 제작을 시작합니다."
             })
+            suggestedCpRouteM?.let { append("\n★ CP 추천 · ${"%.3f".format(Locale.US, it / 1000.0)}km · 감속/방향전환 감지") }
         }
         btnPause.text = if (state == RaceTrackDraftStore.STATE_PAUSED) "▶ 재개" else "Ⅱ 일시정지"
         btnPause.isEnabled = state == RaceTrackDraftStore.STATE_RECORDING || state == RaceTrackDraftStore.STATE_PAUSED
-        btnFinish.isEnabled = d != null && state != RaceTrackDraftStore.STATE_STOPPED
-        btnAddTrap.text = if (courseType == TYPE_CLOSED) "+ START / SECTOR" else "+ 트랩 추가"
-        btnAddTrap.isEnabled = points.size >= 2
-        btnMapEdit.isEnabled = points.size >= 2 && gates.isNotEmpty()
-        btnSave.isEnabled = points.size >= 2
+        btnRecord.isEnabled = state != RaceTrackDraftStore.STATE_RECORDING && state != RaceTrackDraftStore.STATE_PAUSED
+        btnRecord.text = if (state == RaceTrackDraftStore.STATE_RECORDING || state == RaceTrackDraftStore.STATE_PAUSED) "START ✓" else "START"
+        btnFinish.isEnabled = d != null && points.size >= 2 && state != RaceTrackDraftStore.STATE_STOPPED
+        btnAddTrap.isEnabled = points.size >= 2 && state != RaceTrackDraftStore.STATE_STOPPED
+        btnMapEdit.isEnabled = points.size >= 2 && gates.isNotEmpty(); btnSave.isEnabled = points.size >= 2
         btnPublish.visibility = if (sync.isAdminDeviceCached()) View.VISIBLE else View.GONE
         btnPublish.isEnabled = sync.isAdminDeviceCached() && savedMeta != null
+        updateActionLabels(); updateSeekFromSelection(); updateSeekLabel(); renderTraps(); refreshMap(follow)
+    }
+
+    private fun updateActionLabels() {
+        val next = gates.count { it.type == "SECTOR" } + 1
+        btnAddTrap.text = "+ CP$next" + if (suggestedCpRouteM != null) " · 추천" else ""
+    }
+
+    private fun updateSeekFromSelection() {
         val total = points.lastOrNull()?.routeM ?: 0.0
         seek.isEnabled = points.size >= 2
         if (total > 0 && selectedRouteM != null) seek.progress = ((selectedRouteM!! / total) * 1000.0).toInt().coerceIn(0, 1000)
-        updateSeekLabel(); renderTraps(); refreshMap(follow)
     }
 
-    private fun saveCourseType(id: String) {
-        getSharedPreferences(PREF_COURSE_TYPE, Context.MODE_PRIVATE).edit().putString("type_$id", courseType).apply()
-    }
-
-    private fun loadCourseType(id: String): String {
-        return getSharedPreferences(PREF_COURSE_TYPE, Context.MODE_PRIVATE).getString("type_$id", TYPE_OPEN)
-            ?.takeIf { it == TYPE_OPEN || it == TYPE_CLOSED } ?: TYPE_OPEN
-    }
-
-    private fun updateSeekLabel() {
-        val m = selectedRouteM ?: points.lastOrNull()?.routeM ?: 0.0
-        seekLabel.text = "트랩 위치 · ${"%.3f".format(Locale.US, m / 1000.0)} km"
-    }
-
+    private fun saveCourseType(id: String) { getSharedPreferences(PREF_COURSE_TYPE, Context.MODE_PRIVATE).edit().putString("type_$id", courseType).apply() }
+    private fun loadCourseType(id: String): String = getSharedPreferences(PREF_COURSE_TYPE, Context.MODE_PRIVATE).getString("type_$id", TYPE_OPEN)?.takeIf { it == TYPE_OPEN || it == TYPE_CLOSED } ?: TYPE_OPEN
+    private fun updateSeekLabel() { val m = selectedRouteM ?: points.lastOrNull()?.routeM ?: 0.0; seekLabel.text = "게이트 위치 · ${"%.3f".format(Locale.US, m / 1000.0)} km" }
     private fun refreshMap(follow: Boolean) { map.render(points, gates, selectedRouteM, follow) }
 
     private fun registerUpdates() {
@@ -632,16 +535,11 @@ class RaceTrackBuilderActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(updateReceiver, f, Context.RECEIVER_NOT_EXPORTED) else @Suppress("DEPRECATION") registerReceiver(updateReceiver, f)
         receiverRegistered = true
     }
-
-    private fun unregisterUpdates() {
-        if (!receiverRegistered) return
-        runCatching { unregisterReceiver(updateReceiver) }; receiverRegistered = false
-    }
+    private fun unregisterUpdates() { if (!receiverRegistered) return; runCatching { unregisterReceiver(updateReceiver) }; receiverRegistered = false }
 
     private fun xml(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
     private fun fmt(v: Double) = String.format(Locale.US, "%.7f", v)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
     private val GOOD = Color.rgb(80, 220, 120)
     private val WARN = Color.rgb(255, 130, 80)
 }
