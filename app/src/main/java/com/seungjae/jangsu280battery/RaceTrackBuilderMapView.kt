@@ -9,8 +9,19 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
-/** MapLibre/CyclOSM preview + free-geometry editor for recorded RACE tracks and traps. */
+data class RaceCpSuggestion(
+    val routeM: Double,
+    val lat: Double,
+    val lon: Double,
+    val bearingDeg: Double,
+    val speedDropRatio: Double,
+    val turnDeg: Double,
+    val score: Double
+)
+
+/** MapLibre/CyclOSM preview + free-geometry editor for recorded TimeGate tracks and gates. */
 @SuppressLint("SetJavaScriptEnabled")
 class RaceTrackBuilderMapView @JvmOverloads constructor(
     context: Context,
@@ -21,9 +32,14 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
         fun onTrapChanged(index: Int, lat: Double, lon: Double, bearingDeg: Double, widthM: Double)
     }
 
+    fun interface SuggestionTapListener {
+        fun onSuggestionSelected(index: Int)
+    }
+
     private var ready = false
     private var pendingScript: String? = null
     private var trapEditListener: TrapEditListener? = null
+    private var suggestionTapListener: SuggestionTapListener? = null
     private var editable = false
 
     private inner class RaceEditorBridge {
@@ -38,6 +54,11 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
                     widthM.coerceIn(1.0, 20.0)
                 )
             }
+        }
+
+        @JavascriptInterface
+        fun onSuggestionSelected(index: Int) {
+            post { suggestionTapListener?.onSuggestionSelected(index) }
         }
     }
 
@@ -67,12 +88,24 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
         applyEditMode()
     }
 
+    fun setSuggestionTapListener(listener: SuggestionTapListener?) {
+        suggestionTapListener = listener
+    }
+
     private fun applyEditMode() {
         val script = "window.setRaceTrackEditMode && window.setRaceTrackEditMode(${if (editable) "true" else "false"});"
         if (ready) evaluateJavascript(script, null) else pendingScript = script
     }
 
-    fun render(points: List<RaceTrackDraftStore.Point>, gates: List<RaceGate>, selectedRouteM: Double?, followLatest: Boolean) {
+    fun render(
+        points: List<RaceTrackDraftStore.Point>,
+        gates: List<RaceGate>,
+        selectedRouteM: Double?,
+        followLatest: Boolean,
+        suggestions: List<RaceCpSuggestion> = emptyList(),
+        selectedSuggestionIndex: Int = -1,
+        recommendedGateKeys: Set<Int> = emptySet()
+    ) {
         val coords = JSONArray().apply { points.forEach { p -> put(JSONArray().put(p.lon).put(p.lat)) } }
         val features = JSONArray().apply {
             gates.forEachIndexed { index, g ->
@@ -82,6 +115,20 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
                     put("properties", JSONObject().apply {
                         put("index", index); put("name", g.name); put("gateType", g.type); put("routeM", g.routeM)
                         put("bearingDeg", g.bearingDeg); put("widthM", g.widthM)
+                        put("recommendedSource", g.type == "SECTOR" && recommendedGateKeys.contains(g.routeM.roundToInt()))
+                    })
+                })
+            }
+        }
+        val suggestionFeatures = JSONArray().apply {
+            suggestions.forEachIndexed { index, s ->
+                put(JSONObject().apply {
+                    put("type", "Feature")
+                    put("geometry", JSONObject().apply { put("type", "Point"); put("coordinates", JSONArray().put(s.lon).put(s.lat)) })
+                    put("properties", JSONObject().apply {
+                        put("index", index); put("routeM", s.routeM); put("bearingDeg", s.bearingDeg)
+                        put("dropPct", s.speedDropRatio * 100.0); put("turnDeg", s.turnDeg); put("score", s.score)
+                        put("selected", index == selectedSuggestionIndex)
                     })
                 })
             }
@@ -90,7 +137,7 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
         val selectedJs = if (selected == null) "null" else "[${selected.lon},${selected.lat}]"
         val heading = points.lastOrNull()?.bearingDeg?.takeIf { it.isFinite() }
         val headingJs = heading?.toString() ?: "null"
-        val script = "window.renderRaceTrack(${coords},${features},$selectedJs,${if (followLatest) "true" else "false"},$headingJs);window.setRaceTrackEditMode(${if (editable) "true" else "false"});"
+        val script = "window.renderRaceTrack(${coords},${features},${suggestionFeatures},$selectedJs,${if (followLatest) "true" else "false"},$headingJs);window.setRaceTrackEditMode(${if (editable) "true" else "false"});"
         if (ready) evaluateJavascript(script, null) else pendingScript = script
     }
 
@@ -112,32 +159,37 @@ class RaceTrackBuilderMapView @JvmOverloads constructor(
               .directionHandle,.widthHandle{display:none;position:absolute;border-radius:50%;background:#fff;border:4px solid var(--gate);width:18px;height:18px;box-sizing:border-box;pointer-events:auto}
               .directionHandle{left:-9px;top:-72px;cursor:grab}.widthLine{display:none;position:absolute;top:-2px;height:4px;background:#fff;border-radius:2px;opacity:.9;pointer-events:none}.widthHandle{top:-9px;cursor:ew-resize}
               .gateWrap.selected .directionHandle,.gateWrap.selected .widthHandle,.gateWrap.selected .widthLine{display:block}.gateWrap.selected .gateCenter{box-shadow:0 0 0 5px #ffffff66}
+              .suggestion{position:relative;width:104px;height:54px;cursor:pointer;user-select:none;filter:drop-shadow(0 2px 4px #000a)}
+              .suggestionDot{position:absolute;left:40px;top:13px;width:26px;height:26px;border-radius:50%;border:4px dashed #c06cff;background:#35144dcc;color:white;font:900 17px/18px system-ui;text-align:center;padding-top:1px;box-sizing:border-box}
+              .suggestionLabel{position:absolute;left:69px;top:14px;color:#f1d9ff;background:#23102edd;border:2px solid #c06cff;border-radius:6px;padding:3px 5px;font:900 10px system-ui;white-space:nowrap}
+              .suggestion.selected .suggestionDot{border-style:solid;background:#c06cff;color:#16051d;box-shadow:0 0 0 5px #fff8}.suggestion.selected .suggestionLabel{background:#c06cff;color:#16051d}
               .editHint{position:absolute;left:10px;bottom:14px;z-index:5;background:#07101add;color:#eaf2ff;border:1px solid #45617d;border-radius:9px;padding:7px 9px;font:800 11px system-ui;display:none;pointer-events:none}.editHint.on{display:block}
-            </style></head><body><div id="map"></div><div id="editHint" class="editHint">화살표 드래그=위치 · 끝점=방향 · 옆점=폭</div>
+            </style></head><body><div id="map"></div><div id="editHint" class="editHint">실선 CP=적용됨 · 보라 ★=추천 후보 · 화살표 드래그=위치/방향/폭</div>
             <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
             <script>
               const map=new maplibregl.Map({container:'map',center:[127.27,36.99],zoom:15,bearingSnap:0,style:{version:8,sources:{osm:{type:'raster',tiles:['https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap · CyclOSM'}},layers:[{id:'osm',type:'raster',source:'osm'}]}});
               map.addControl(new maplibregl.NavigationControl({showCompass:true}),'top-right');
-              let loaded=false,gateMarkers=[],cursor=null,lastLen=0,lastCoords=[],lastFeatures=[],editMode=false,selectedIndex=-1,gesture=null;
+              let loaded=false,gateMarkers=[],suggestionMarkers=[],cursor=null,lastLen=0,lastCoords=[],lastFeatures=[],lastSuggestions=[],editMode=false,selectedIndex=-1,gesture=null;
               map.on('load',()=>{loaded=true;map.addSource('track',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});map.addLayer({id:'track',type:'line',source:'track',paint:{'line-color':'#29b6f6','line-width':6}});});
               const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));const norm=v=>((Number(v||0)%360)+360)%360;
-              function colorFor(t){return t==='START'?'#55d56b':t==='FINISH'?'#ff5964':'#ffd24f'}
+              function colorFor(t,recommended){if(t==='START')return'#55d56b';if(t==='FINISH')return'#ff5964';return recommended?'#36b8ff':'#ffd24f'}
               function hav(a,b){const R=6371000,r=x=>x*Math.PI/180,dlat=r(b.lat-a.lat),dlon=r(b.lng-a.lng),la1=r(a.lat),la2=r(b.lat);const s=Math.sin(dlat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dlon/2)**2;return 2*R*Math.atan2(Math.sqrt(s),Math.sqrt(Math.max(0,1-s)))}
               function routeBearing(a,b){const r=x=>x*Math.PI/180,d=x=>x*180/Math.PI,p1=r(a[1]),p2=r(b[1]),dl=r(b[0]-a[0]),y=Math.sin(dl)*Math.cos(p2),x=Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl);return norm(d(Math.atan2(y,x)))}
               function emit(state){try{AndroidRaceEditor.onTrapChanged(Number(state.index),Number(state.lat),Number(state.lon),norm(state.bearing),clamp(Number(state.width),1,20))}catch(e){}}
-              function clearGates(){gateMarkers.forEach(x=>x.marker.remove());gateMarkers=[];if(cursor){cursor.remove();cursor=null;}}
+              function clearMarkers(){gateMarkers.forEach(x=>x.marker.remove());gateMarkers=[];suggestionMarkers.forEach(x=>x.remove());suggestionMarkers=[];if(cursor){cursor.remove();cursor=null;}}
               function visual(rec){const s=rec.state,el=rec.el,vec=el.querySelector('.gateVector'),line=el.querySelector('.widthLine'),wh=el.querySelector('.widthHandle');vec.style.transform='rotate('+norm(s.bearing)+'deg)';const span=12+clamp(Number(s.width),1,20)*1.6;line.style.left=(-span)+'px';line.style.width=(span*2)+'px';wh.style.left=(span-9)+'px';}
               function selectGate(index){selectedIndex=index;gateMarkers.forEach(rec=>{rec.el.classList.toggle('selected',rec.state.index===selectedIndex);visual(rec)});}
               function beginHandle(e,rec,role){if(!editMode)return;e.preventDefault();e.stopPropagation();selectGate(rec.state.index);gesture={rec,role,pid:e.pointerId};map.dragPan.disable();try{e.target.setPointerCapture(e.pointerId)}catch(_){}}
               function moveHandle(e){if(!gesture||gesture.pid!==e.pointerId)return;e.preventDefault();const rec=gesture.rec,rect=map.getContainer().getBoundingClientRect(),px=e.clientX-rect.left,py=e.clientY-rect.top,center=map.project(rec.marker.getLngLat());if(gesture.role==='direction'){const dx=px-center.x,dy=py-center.y;rec.state.bearing=norm(Math.atan2(dx,-dy)*180/Math.PI)}else{const ll=map.unproject([px,py]);rec.state.width=clamp(hav(rec.marker.getLngLat(),ll)*2,1,20)}visual(rec);}
               function endHandle(e){if(!gesture||gesture.pid!==e.pointerId)return;const rec=gesture.rec;gesture=null;map.dragPan.enable();emit(rec.state)}
               document.addEventListener('pointermove',moveHandle,{passive:false});document.addEventListener('pointerup',endHandle,{passive:false});document.addEventListener('pointercancel',endHandle,{passive:false});
-              function makeGate(f){const p=f.properties||{},idx=Number(p.index||0),typ=String(p.gateType||'SECTOR'),c=colorFor(typ),el=document.createElement('div');el.className='gateWrap';el.style.setProperty('--gate',c);const prefix=typ==='START'?'▶ ':typ==='FINISH'?'■ ':'◆ ';el.innerHTML='<div class="gateVector"><div class="gateShaft"></div><div class="gateTip"></div><div class="widthLine"></div><div class="widthHandle"></div><div class="directionHandle"></div></div><div class="gateCenter"></div><div class="gateHit"></div><div class="gateLabel">'+prefix+String(p.name||'')+'</div>';const state={index:idx,lat:Number(f.geometry.coordinates[1]),lon:Number(f.geometry.coordinates[0]),bearing:norm(p.bearingDeg),width:clamp(Number(p.widthM||5),1,20)};const marker=new maplibregl.Marker({element:el,anchor:'center',draggable:editMode}).setLngLat([state.lon,state.lat]).addTo(map),rec={marker,el,state};marker.on('dragstart',()=>selectGate(idx));marker.on('dragend',()=>{const ll=marker.getLngLat();state.lat=ll.lat;state.lon=ll.lng;emit(state)});el.addEventListener('pointerdown',e=>{if(!e.target.classList.contains('directionHandle')&&!e.target.classList.contains('widthHandle'))selectGate(idx)});el.querySelector('.directionHandle').addEventListener('pointerdown',e=>beginHandle(e,rec,'direction'));el.querySelector('.widthHandle').addEventListener('pointerdown',e=>beginHandle(e,rec,'width'));visual(rec);return rec;}
-              function redrawGates(){clearGates();(lastFeatures||[]).forEach(f=>gateMarkers.push(makeGate(f)));if(selectedIndex<0&&gateMarkers.length)selectedIndex=gateMarkers[0].state.index;selectGate(selectedIndex);}
-              window.setRaceTrackEditMode=function(on){editMode=!!on;document.getElementById('editHint').classList.toggle('on',editMode);if(loaded&&lastFeatures.length)redrawGates();};
-              window.renderRaceTrack=function(coords,features,selected,follow,heading){
-                if(!loaded){setTimeout(()=>window.renderRaceTrack(coords,features,selected,follow,heading),200);return;}
-                lastCoords=coords||[];lastFeatures=features||[];map.getSource('track').setData({type:'Feature',geometry:{type:'LineString',coordinates:lastCoords}});redrawGates();
+              function makeGate(f){const p=f.properties||{},idx=Number(p.index||0),typ=String(p.gateType||'SECTOR'),recommended=!!p.recommendedSource,c=colorFor(typ,recommended),el=document.createElement('div');el.className='gateWrap';el.style.setProperty('--gate',c);const prefix=typ==='START'?'▶ ':typ==='FINISH'?'■ ':recommended?'◆R ':'◆ ';el.innerHTML='<div class="gateVector"><div class="gateShaft"></div><div class="gateTip"></div><div class="widthLine"></div><div class="widthHandle"></div><div class="directionHandle"></div></div><div class="gateCenter"></div><div class="gateHit"></div><div class="gateLabel">'+prefix+String(p.name||'')+'</div>';const state={index:idx,lat:Number(f.geometry.coordinates[1]),lon:Number(f.geometry.coordinates[0]),bearing:norm(p.bearingDeg),width:clamp(Number(p.widthM||5),1,20)};const marker=new maplibregl.Marker({element:el,anchor:'center',draggable:editMode}).setLngLat([state.lon,state.lat]).addTo(map),rec={marker,el,state};marker.on('dragstart',()=>selectGate(idx));marker.on('dragend',()=>{const ll=marker.getLngLat();state.lat=ll.lat;state.lon=ll.lng;emit(state)});el.addEventListener('pointerdown',e=>{if(!e.target.classList.contains('directionHandle')&&!e.target.classList.contains('widthHandle'))selectGate(idx)});el.querySelector('.directionHandle').addEventListener('pointerdown',e=>beginHandle(e,rec,'direction'));el.querySelector('.widthHandle').addEventListener('pointerdown',e=>beginHandle(e,rec,'width'));visual(rec);return rec;}
+              function makeSuggestion(f){const p=f.properties||{},idx=Number(p.index||0),el=document.createElement('div');el.className='suggestion'+(p.selected?' selected':'');el.innerHTML='<div class="suggestionDot">★</div><div class="suggestionLabel">추천 '+(idx+1)+'</div>';el.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();try{AndroidRaceEditor.onSuggestionSelected(idx)}catch(_){}});return new maplibregl.Marker({element:el,anchor:'center'}).setLngLat(f.geometry.coordinates).addTo(map);}
+              function redraw(){clearMarkers();(lastFeatures||[]).forEach(f=>gateMarkers.push(makeGate(f)));(lastSuggestions||[]).forEach(f=>suggestionMarkers.push(makeSuggestion(f)));if(selectedIndex<0&&gateMarkers.length)selectedIndex=gateMarkers[0].state.index;selectGate(selectedIndex);}
+              window.setRaceTrackEditMode=function(on){editMode=!!on;document.getElementById('editHint').classList.toggle('on',editMode);if(loaded)redraw();};
+              window.renderRaceTrack=function(coords,features,suggestions,selected,follow,heading){
+                if(!loaded){setTimeout(()=>window.renderRaceTrack(coords,features,suggestions,selected,follow,heading),200);return;}
+                lastCoords=coords||[];lastFeatures=features||[];lastSuggestions=suggestions||[];map.getSource('track').setData({type:'Feature',geometry:{type:'LineString',coordinates:lastCoords}});redraw();
                 if(!editMode&&selected){const el=document.createElement('div');el.style.cssText='width:14px;height:14px;border-radius:50%;background:#ffeb3b;border:3px solid #000';cursor=new maplibregl.Marker({element:el}).setLngLat(selected).addTo(map);}
                 if(lastCoords.length){
                   if(follow){let h=Number(heading);if(!Number.isFinite(h)&&lastCoords.length>1)h=routeBearing(lastCoords[lastCoords.length-2],lastCoords[lastCoords.length-1]);map.easeTo({center:lastCoords[lastCoords.length-1],zoom:17,bearing:Number.isFinite(h)?h:map.getBearing(),duration:350});}
