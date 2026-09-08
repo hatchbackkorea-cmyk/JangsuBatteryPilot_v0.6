@@ -1,0 +1,36 @@
+name: One-off v0.34.36 pager cleanup fix
+on:
+  push:
+    branches: [timegate-v03436-cleanup]
+    paths: ['.github/workflows/oneoff-v03436-fix.yml']
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timegate-v03436-cleanup
+          fetch-depth: 0
+      - name: Remove stale deploy pager state
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/seungjae/jangsu280battery/MtbHudCompactController.kt')
+          s = p.read_text(encoding='utf-8')
+          old = '''            if (mobileReleasePageRemoved && lastPagerChild == lastIndex && current == 0) {\n                flipper.displayedChild = lastIndex\n                current = lastIndex\n            }\n'''
+          if old not in s:
+              raise SystemExit('stale pager block not found')
+          s = s.replace(old, '', 1)
+          if 'mobileReleasePageRemoved' in s:
+              raise SystemExit('mobileReleasePageRemoved still remains')
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/oneoff-v03436-fix.yml').unlink(missing_ok=True)
+          PY
+          git config user.name "hatchbackkorea-cmyk"
+          git config user.email "hatchbackkorea@gmail.com"
+          git add -A
+          git commit -m "Remove stale deploy pager state"
+          git push origin HEAD:timegate-v03436-cleanup
