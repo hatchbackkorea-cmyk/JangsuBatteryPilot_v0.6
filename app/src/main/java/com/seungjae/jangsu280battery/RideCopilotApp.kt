@@ -2,6 +2,7 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.Application
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +15,7 @@ import android.widget.Switch
 import android.widget.TextView
 import androidx.core.view.WindowCompat
 import com.kakao.vectormap.KakaoMapSdk
+import java.io.File
 
 /** Application-level TimeGate UI helpers plus Kakao Maps SDK initialization. */
 class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
@@ -36,13 +38,16 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             is BikeModeChooserActivity -> activity.window.decorView.post {
                 RaceLauncherUiInstaller.install(activity)
             }
-            is RaceActivity -> activity.window.decorView.post {
-                TimeGateProgrammaticSkin.install(activity)
-                RaceTrackBuilderUiInstaller.install(activity)
-                RaceNameLabelUiInstaller.install(activity)
-                RaceProfileServerSync.resume(activity)
-                RaceSavedCourseBackfill.sync(activity)
-                RaceLiveLapDisplayInstaller.install(activity)
+            is RaceActivity -> {
+                if (recoverOrResetRaceTiming(activity)) return
+                activity.window.decorView.post {
+                    TimeGateProgrammaticSkin.install(activity)
+                    RaceTrackBuilderUiInstaller.install(activity)
+                    RaceNameLabelUiInstaller.install(activity)
+                    RaceProfileServerSync.resume(activity)
+                    RaceSavedCourseBackfill.sync(activity)
+                    RaceLiveLapDisplayInstaller.install(activity)
+                }
             }
             is RaceTrackBuilderActivity -> activity.window.decorView.post {
                 TimeGateProgrammaticSkin.install(activity)
@@ -61,6 +66,64 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             }
             is SettingsActivity -> activity.window.decorView.post { installVoiceBoostControl(activity) }
         }
+    }
+
+    /**
+     * APK replacement kills the foreground timing service but SharedPreferences survive the install.
+     * Previously RaceActivity then reopened the persisted ARMED screen (for example 12/14156m)
+     * without any service receiving GPS, and START only reopened that dead screen instead of syncing
+     * the current event GPX. A genuinely live timing service writes raw GPS several times per second,
+     * so a stale ARMED heartbeat is safe to discard and re-arm from the event server.
+     *
+     * RUNNING is different: if its heartbeat is stale we try to recover the service rather than
+     * discard an in-progress race.
+     *
+     * @return true when the Activity is being recreated after clearing stale ARMED state.
+     */
+    private fun recoverOrResetRaceTiming(activity: RaceActivity): Boolean {
+        val store = RaceDataStore(activity)
+        val snap = store.snapshot()
+        if (snap.state !in setOf("ARMED", "RUNNING")) return false
+
+        val raw = snap.runId.takeIf { it.isNotBlank() }
+            ?.let { File(activity.filesDir, "race/raw/$it.jsonl") }
+        val heartbeatAt = raw?.takeIf { it.exists() }?.lastModified() ?: 0L
+        val ageMs = if (heartbeatAt > 0L) {
+            (System.currentTimeMillis() - heartbeatAt).coerceAtLeast(0L)
+        } else Long.MAX_VALUE
+        val stale = ageMs > TIMING_HEARTBEAT_STALE_MS
+        if (!stale) return false
+
+        if (snap.state == "RUNNING") {
+            runCatching {
+                activity.startForegroundService(Intent(activity, RaceTimingService::class.java))
+            }
+            return false
+        }
+
+        runCatching { activity.stopService(Intent(activity, RaceTimingService::class.java)) }
+        store.clearActiveConfig()
+        store.writeSnapshot(
+            snap.copy(
+                state = "STOPPED",
+                courseId = "",
+                courseName = "",
+                runId = "",
+                runNumber = 0,
+                startedAtMs = 0L,
+                lastGateAtMs = 0L,
+                elapsedMs = 0L,
+                routeM = 0.0,
+                deltaMs = null,
+                nextGateIndex = 0,
+                currentSector = "",
+                gpsAccuracyM = 0.0,
+                sectors = emptyList(),
+                serverStatus = "이전 START 대기 초기화 · START를 다시 눌러 최신 경기맵을 동기화합니다."
+            )
+        )
+        activity.window.decorView.post { activity.recreate() }
+        return true
     }
 
     private fun applyTimeGateSystemBars(activity: Activity) {
@@ -167,5 +230,6 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     companion object {
         private const val TAG_SWITCH = "voice_volume_boost_switch_v0334"
         private const val TAG_HINT = "voice_volume_boost_hint_v0334"
+        private const val TIMING_HEARTBEAT_STALE_MS = 4_000L
     }
 }
