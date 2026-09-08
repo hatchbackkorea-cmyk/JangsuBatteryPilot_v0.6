@@ -7,7 +7,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 
 /**
- * Keeps the saved-course launcher in the same action row as "서버 등록".
+ * Keeps the course loader in the same action row as "서버 등록".
  * This avoids both the GPS overlay at the top and the Android system navigation bar at the bottom.
  */
 object RaceSavedCourseInlineFix {
@@ -18,10 +18,11 @@ object RaceSavedCourseInlineFix {
         val serverButton = findButton(content) { it.text?.toString() == "서버 등록" } ?: return
         val row = serverButton.parent as? LinearLayout ?: return
 
-        // Remove the older launcher wherever it was injected (top/bottom) so only one remains.
+        // Remove older launchers wherever they were injected so only one remains.
         findButton(content) { b ->
             b !== serverButton && (b.tag?.toString()?.contains("race_saved_courses_launcher") == true ||
                 b.text?.toString()?.contains("저장된 RACE 코스") == true ||
+                b.text?.toString() == "저장 코스" ||
                 b.tag?.toString() == TAG)
         }?.let { old -> (old.parent as? ViewGroup)?.removeView(old) }
 
@@ -29,7 +30,7 @@ object RaceSavedCourseInlineFix {
 
         val button = Button(activity).apply {
             tag = TAG
-            text = "저장 코스"
+            text = "코스 불러오기"
             isAllCaps = false
             textSize = 12f
             setOnClickListener {
