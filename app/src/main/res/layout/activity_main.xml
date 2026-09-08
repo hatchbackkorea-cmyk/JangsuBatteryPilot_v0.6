@@ -60,7 +60,6 @@
                         <TextView android:id="@+id/tvHardReachMargin" android:layout_width="wrap_content" android:layout_height="match_parent" android:gravity="end|center_vertical" android:maxLines="1" android:text="하드 7%" android:textColor="@color/danger" android:textSize="9sp" android:textStyle="bold" android:visibility="gone" />
                     </LinearLayout>
                     <TextView android:id="@+id/tvBatteryRange" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-                    <!-- v0.29.1: 실시간 계산은 유지하되 4개 보조 안내값은 주행 HUD에서 제거. -->
                     <TextView android:id="@+id/tvSpeed" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
                     <TextView android:id="@+id/tvFinishEta" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
                     <TextView android:id="@+id/tvElevationAhead" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
@@ -128,7 +127,6 @@
                     <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:fillViewport="true" android:scrollbars="horizontal">
                         <TableLayout android:id="@+id/tableModeStrategy" android:layout_width="wrap_content" android:layout_height="wrap_content" android:shrinkColumns="*" android:stretchColumns="0" />
                     </HorizontalScrollView>
-                    <!-- v0.28.5: legacy ETA views remain hidden so old state restoration/bindings stay compatible. -->
                     <TextView android:id="@+id/tvPointEtaRideTime" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
                     <TextView android:id="@+id/tvPointEtaStopTime" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
                     <TextView android:id="@+id/tvPointEtaList" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
@@ -213,21 +211,6 @@
                 <Button android:id="@+id/btnPostRideCompare" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="7dp" android:text="실제 · 자체모델 · Avinox 비교" android:textStyle="bold" />
                 <Button android:id="@+id/btnPostRideLearn" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="7dp" android:text="최근 임의주행을 개인 학습에 반영" android:textStyle="bold" />
                 <Button android:id="@+id/btnRideReport" android:layout_width="match_parent" android:layout_height="54dp" android:layout_marginTop="7dp" android:text="현재 / 최근 주행 리포트" android:textStyle="bold" />
-            </LinearLayout>
-        </ScrollView>
-        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="top" android:orientation="vertical" android:paddingLeft="18dp" android:paddingRight="18dp" android:paddingTop="18dp" android:paddingBottom="24dp">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="모바일 배포" android:textColor="@color/text_primary" android:textSize="26sp" android:textStyle="bold" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="14dp">
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📦 ChatGPT ZIP → GitHub → 사인 APK" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
-                    <TextView android:id="@+id/tvPageMobileReleaseStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="현재 앱/저장소 확인 중…" android:textColor="@color/text_secondary" android:textSize="13sp" />
-                    <Button android:id="@+id/btnPageMobileRelease" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="📦 새 ZIP 모바일 배포" android:textStyle="bold" android:textSize="16sp" />
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="14dp">
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="휴대폰 사용 순서" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="1. ChatGPT에서 새 버전 ZIP 다운로드 2. 위 버튼에서 ZIP 선택 또는 공유로 열기 3. 최초 1회 GitHub 토큰 저장 4. GitHub main에 배포 5. signed Release 완성 후 APK 다운로드 · 설치" android:textColor="@color/text_primary" android:textSize="14sp" android:lineSpacingExtra="4dp" />
-                </LinearLayout>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="※ ZIP의 .github/workflows 업데이트는 기본 OFF입니다. 기존 자동 사인 workflow를 보존하는 쪽이 안전합니다. GitHub 토큰은 Android Keystore로 암호화 저장합니다." android:textColor="@color/text_secondary" android:textSize="12sp" />
             </LinearLayout>
         </ScrollView>
         <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">

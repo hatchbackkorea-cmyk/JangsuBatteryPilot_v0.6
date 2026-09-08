@@ -57,7 +57,6 @@ object MtbHudCompactController {
         private val nextClimbDetail = root.findViewById<TextView?>(R.id.tvNextClimbDetail)
         private val pager = root.findViewById<ViewFlipper?>(R.id.pagerFlipper)
         private val pagerIndicator = root.findViewById<TextView?>(R.id.tvPagerIndicator)
-        private val mobileReleaseButton = root.findViewById<View?>(R.id.btnPageMobileRelease)
 
         private val topRow: ViewGroup? = hero?.getChildAt(0) as? ViewGroup
         private val neutralBackground: Drawable? = context.getDrawable(R.drawable.panel_bg)?.mutate()
@@ -71,7 +70,6 @@ object MtbHudCompactController {
         private var lastCurrentSoc: Int? = null
         private var lastRenderedSummary = ""
         private var navCardsSwapped = false
-        private var mobileReleasePageRemoved = false
         private var lastPagerChild = 0
         private var mapPolishAttempts = 0
         private var attributionView: TextView? = null
@@ -97,12 +95,10 @@ object MtbHudCompactController {
 
             configureNavigationCards()
             installSmoothMap()
-            removeMobileReleasePage()
             compactCoursePageText()
             compactSettingsPage()
             root.postDelayed({
-                removeMobileReleasePage()
-                compactCoursePageText()
+                    compactCoursePageText()
                 compactSettingsPage()
             }, 350L)
             hero?.viewTreeObserver?.addOnPreDrawListener(this)
@@ -418,22 +414,6 @@ object MtbHudCompactController {
             }
         }
 
-        private fun removeMobileReleasePage() {
-            if (mobileReleasePageRemoved) return
-            val flipper = pager ?: return
-            val anchor = mobileReleaseButton ?: return
-            var direct: View = anchor
-            while (direct.parent is ViewGroup && direct.parent !== flipper) {
-                direct = direct.parent as View
-            }
-            if (direct.parent === flipper) {
-                flipper.removeView(direct)
-                mobileReleasePageRemoved = true
-                lastPagerChild = flipper.displayedChild.coerceIn(0, (flipper.childCount - 1).coerceAtLeast(0))
-                updateCompactPagerIndicator()
-            }
-        }
-
         private fun updateCompactPagerIndicator() {
             val flipper = pager ?: return
             val indicator = pagerIndicator ?: return
@@ -442,10 +422,6 @@ object MtbHudCompactController {
             val lastIndex = count - 1
             var current = flipper.displayedChild.coerceIn(0, lastIndex)
 
-            if (mobileReleasePageRemoved && lastPagerChild == lastIndex && current == 0) {
-                flipper.displayedChild = lastIndex
-                current = lastIndex
-            }
             lastPagerChild = current
 
             val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배터리")

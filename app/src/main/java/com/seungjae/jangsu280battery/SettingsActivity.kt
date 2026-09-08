@@ -248,9 +248,6 @@ class SettingsActivity : Activity() {
         findViewById<Button>(R.id.btnSramDiagnostic).setOnClickListener {
             startActivity(Intent(this, SramBleActivity::class.java))
         }
-        findViewById<Button>(R.id.btnMobileRelease).setOnClickListener {
-            startActivity(Intent(this, AdminCenterActivity::class.java))
-        }
         findViewById<Button>(R.id.btnSettingsVersion).setOnClickListener { showVersionInfo() }
     }
 
