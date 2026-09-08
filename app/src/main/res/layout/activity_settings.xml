@@ -1,45 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/bg"
-    android:fillViewport="true">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="14dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-            <Button
-                android:id="@+id/btnSettingsBack"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:text="← 주행" />
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:text="설정"
-                android:textColor="@color/text_primary"
-                android:textSize="26sp"
-                android:textStyle="bold" />
+<?xml version='1.0' encoding='utf-8'?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/bg" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="14dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <Button android:id="@+id/btnSettingsBack" android:layout_width="wrap_content" android:layout_height="48dp" android:text="← 주행" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:text="설정" android:textColor="@color/text_primary" android:textSize="26sp" android:textStyle="bold" />
         </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/panelLegacyRiderServerSync"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_hero_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
+        <LinearLayout android:id="@+id/panelLegacyRiderServerSync" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_hero_bg" android:orientation="vertical" android:padding="15dp">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📡 Rider Control Center 자동동기화" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold" />
             <TextView android:id="@+id/tvSyncStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Rider Server 미연결" android:textColor="@color/text_secondary" android:textSize="12sp" />
             <EditText android:id="@+id/etSyncServerUrl" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:hint="서버 주소 예: http://192.168.0.10:8000" android:inputType="textUri" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
@@ -56,547 +22,85 @@
             </LinearLayout>
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="로드 Strava 파워커브, 라이더 분석 요약, GPX, 페이스 계획, 주행 ZIP을 서버에 자동 반영합니다. 인터넷이 끊기면 폰에 대기했다가 다음 연결 때 재전송합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_accent_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="음성 안내"
-                android:textColor="@color/text_primary"
-                android:textSize="19sp"
-                android:textStyle="bold" />
-            <Switch
-                android:id="@+id/switchSettingsVoice"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:checked="true"
-                android:text="자동 음성 안내 사용"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp" />
-            <TextView
-                android:id="@+id/tvDistanceInterval"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="거리 기준 안내 · 5 km마다"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-            <SeekBar
-                android:id="@+id/seekDistanceInterval"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:max="50"
-                android:progress="5" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="0 = 거리 기준 안내 끄기 · 1~50 km 간격"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-            <TextView
-                android:id="@+id/tvTimeInterval"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="시간 기준 안내 · 사용 안 함"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-            <SeekBar
-                android:id="@+id/seekTimeInterval"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:max="120"
-                android:progress="0" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="0 = 시간 기준 안내 끄기 · 1~120분 간격 · 거리/시간 중 먼저 도달한 기준으로 안내"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="음성 안내" android:textColor="@color/text_primary" android:textSize="19sp" android:textStyle="bold" />
+            <Switch android:id="@+id/switchSettingsVoice" android:layout_width="match_parent" android:layout_height="50dp" android:checked="true" android:text="자동 음성 안내 사용" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <TextView android:id="@+id/tvDistanceInterval" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="거리 기준 안내 · 5 km마다" android:textColor="@color/text_primary" android:textSize="15sp" android:textStyle="bold" />
+            <SeekBar android:id="@+id/seekDistanceInterval" android:layout_width="match_parent" android:layout_height="48dp" android:max="50" android:progress="5" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="0 = 거리 기준 안내 끄기 · 1~50 km 간격" android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:id="@+id/tvTimeInterval" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="시간 기준 안내 · 사용 안 함" android:textColor="@color/text_primary" android:textSize="15sp" android:textStyle="bold" />
+            <SeekBar android:id="@+id/seekTimeInterval" android:layout_width="match_parent" android:layout_height="48dp" android:max="120" android:progress="0" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="0 = 시간 기준 안내 끄기 · 1~120분 간격 · 거리/시간 중 먼저 도달한 기준으로 안내" android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:id="@+id/tvSettingsFinishTarget"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="충전권장 기준 잔량 15%"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <SeekBar
-                android:id="@+id/seekSettingsFinishTarget"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:max="98"
-                android:progress="14" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="1% ~ 99% · 다음 충전소에 도착할 때 남기고 싶은 잔량입니다. 다음 충전소가 없으면 종점 도착 잔량 기준입니다. 앱 권장은 이 잔량을 확보하도록 현재 충전지점에서 필요한 최소 충전 %를 계산합니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:id="@+id/tvSettingsFinishTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="충전권장 기준 잔량 15%" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <SeekBar android:id="@+id/seekSettingsFinishTarget" android:layout_width="match_parent" android:layout_height="48dp" android:max="98" android:progress="14" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="1% ~ 99% · 다음 충전소에 도착할 때 남기고 싶은 잔량입니다. 다음 충전소가 없으면 종점 도착 잔량 기준입니다. 앱 권장은 이 잔량을 확보하도록 현재 충전지점에서 필요한 최소 충전 %를 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_accent_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="충전 도달 알림"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <Switch
-                android:id="@+id/switchChargeAlert"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:checked="true"
-                android:text="충전 목표 도달 시 알림"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp" />
-            <TextView
-                android:id="@+id/tvChargeAlertTarget"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="기본 충전 알림 100%"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-            <SeekBar
-                android:id="@+id/seekChargeAlertTarget"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:max="50"
-                android:progress="50" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="50~100% · 임의주행의 기본 알림 목표입니다. 계획주행에서는 내가 충전소에 설정한 ‘충전 계획 %’에 도달하면 알려줍니다. 앱 권장 %는 별도 안내값이며 알림 목표를 바꾸지 않습니다. 그대로 꽂아두면 100%에서 한 번 더 알려줍니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="충전 도달 알림" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <Switch android:id="@+id/switchChargeAlert" android:layout_width="match_parent" android:layout_height="50dp" android:checked="true" android:text="충전 목표 도달 시 알림" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <TextView android:id="@+id/tvChargeAlertTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="기본 충전 알림 100%" android:textColor="@color/text_primary" android:textSize="15sp" android:textStyle="bold" />
+            <SeekBar android:id="@+id/seekChargeAlertTarget" android:layout_width="match_parent" android:layout_height="48dp" android:max="50" android:progress="50" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="50~100% · 임의주행의 기본 알림 목표입니다. 계획주행에서는 내가 충전소에 설정한 ‘충전 계획 %’에 도달하면 알려줍니다. 앱 권장 %는 별도 안내값이며 알림 목표를 바꾸지 않습니다. 그대로 꽂아두면 100%에서 한 번 더 알려줍니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="화면"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <Switch
-                android:id="@+id/switchSettingsKeepScreen"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:text="주행 화면 항상 켜기"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="화면" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <Switch android:id="@+id/switchSettingsKeepScreen" android:layout_width="match_parent" android:layout_height="50dp" android:text="주행 화면 항상 켜기" android:textColor="@color/text_primary" android:textSize="15sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="테스트 모드"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:id="@+id/tvSettingsCourse"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="테스트 기준 코스"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-            <Switch
-                android:id="@+id/switchSettingsTestMode"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:text="GPS 대신 테스트 위치 사용"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp" />
-            <TextView
-                android:id="@+id/tvSettingsTestKm"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="테스트 위치 0.0 km"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-            <SeekBar
-                android:id="@+id/seekSettingsTestKm"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:enabled="false"
-                android:max="1353"
-                android:progress="0" />
-            <TextView
-                android:id="@+id/tvSettingsTestHint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="테스트 모드를 켜면 GPS 없이 코스 진행 상황을 확인할 수 있습니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-            <Button
-                android:id="@+id/btnResetProgress"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="10dp"
-                android:text="진행 위치 / 실제 배터리 보정 초기화" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="테스트 모드" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvSettingsCourse" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="테스트 기준 코스" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Switch android:id="@+id/switchSettingsTestMode" android:layout_width="match_parent" android:layout_height="50dp" android:text="GPS 대신 테스트 위치 사용" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <TextView android:id="@+id/tvSettingsTestKm" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="테스트 위치 0.0 km" android:textColor="@color/text_primary" android:textSize="15sp" android:textStyle="bold" />
+            <SeekBar android:id="@+id/seekSettingsTestKm" android:layout_width="match_parent" android:layout_height="48dp" android:enabled="false" android:max="1353" android:progress="0" />
+            <TextView android:id="@+id/tvSettingsTestHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="테스트 모드를 켜면 GPS 없이 코스 진행 상황을 확인할 수 있습니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <Button android:id="@+id/btnResetProgress" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="10dp" android:text="진행 위치 / 실제 배터리 보정 초기화" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="배터리 학습 데이터"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:id="@+id/tvLearningSummary"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="학습 데이터 없음"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-            <Button
-                android:id="@+id/btnHistoricalLearning"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:layout_marginTop="10dp"
-                android:text="학습 관리 · 원본 A+ / FIT 백업" />
-            <TextView
-                android:id="@+id/tvHistoricalLearningSummary"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="학습 라이딩 0개"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-            <TextView
-                android:id="@+id/tvProtoSyncStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Avinox 원본 자동동기화 · Shizuku 확인 중"
-                android:textColor="@color/text_primary"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:orientation="horizontal">
-                <Button
-                    android:id="@+id/btnProtoPermission"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="Shizuku 권한"
-                    android:textSize="11sp" />
-                <Button
-                    android:id="@+id/btnProtoSync"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:text="원본 지금 동기화"
-                    android:textSize="11sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="배터리 학습 데이터" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvLearningSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="학습 데이터 없음" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Button android:id="@+id/btnHistoricalLearning" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="10dp" android:text="학습 관리 · 원본 A+ / FIT 백업" />
+            <TextView android:id="@+id/tvHistoricalLearningSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="학습 라이딩 0개" android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:id="@+id/tvProtoSyncStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Avinox 원본 자동동기화 · Shizuku 확인 중" android:textColor="@color/text_primary" android:textSize="12sp" android:textStyle="bold" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnProtoPermission" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="Shizuku 권한" android:textSize="11sp" />
+                <Button android:id="@+id/btnProtoSync" android:layout_width="0dp" android:layout_height="44dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="원본 지금 동기화" android:textSize="11sp" />
             </LinearLayout>
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="Avinox 앱에서 라이딩을 동기화한 뒤 cloud_ride_rec_*.proto를 자동 수집합니다. SOC·모드·Rider/Motor Power·Torque·Cadence·Gear를 같은 시간축으로 검증해 A+ 학습합니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="10sp" />
-            <TextView
-                android:id="@+id/tvAutoFitStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="9dp"
-                android:text="FIT 백업 자동폴더 미지정"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:orientation="horizontal">
-                <Button
-                    android:id="@+id/btnAutoFitFolder"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="FIT 백업 폴더"
-                    android:textSize="11sp" />
-                <Button
-                    android:id="@+id/btnAutoFitScan"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:text="FIT 백업 검색"
-                    android:textSize="11sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Avinox 앱에서 라이딩을 동기화한 뒤 cloud_ride_rec_*.proto를 자동 수집합니다. SOC·모드·Rider/Motor Power·Torque·Cadence·Gear를 같은 시간축으로 검증해 A+ 학습합니다." android:textColor="@color/text_secondary" android:textSize="10sp" />
+            <TextView android:id="@+id/tvAutoFitStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp" android:text="FIT 백업 자동폴더 미지정" android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnAutoFitFolder" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="FIT 백업 폴더" android:textSize="11sp" />
+                <Button android:id="@+id/btnAutoFitScan" android:layout_width="0dp" android:layout_height="44dp" android:layout_marginStart="6dp" android:layout_weight="1" android:text="FIT 백업 검색" android:textSize="11sp" />
             </LinearLayout>
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="FIT 단독은 원본 .proto를 가져올 수 없을 때만 B급 보조학습으로 사용합니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="10sp" />
-            <Button
-                android:id="@+id/btnClearLearning"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="10dp"
-                android:text="개인 배터리 학습 데이터 초기화" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="A+는 Avinox 원본 .proto의 실제 SOC·모드·파워를 함께 학습합니다. FIT 단독은 B급 백업입니다. 초기화해도 Avinox 앱의 원본 파일은 삭제하지 않습니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="FIT 단독은 원본 .proto를 가져올 수 없을 때만 B급 보조학습으로 사용합니다." android:textColor="@color/text_secondary" android:textSize="10sp" />
+            <Button android:id="@+id/btnClearLearning" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="10dp" android:text="개인 배터리 학습 데이터 초기화" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="A+는 Avinox 원본 .proto의 실제 SOC·모드·파워를 함께 학습합니다. FIT 단독은 B급 백업입니다. 초기화해도 Avinox 앱의 원본 파일은 삭제하지 않습니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="라이더 · eMTB 분석"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:id="@+id/tvRideInsightSummary"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:text="라이더 분석 데이터 없음"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-            <Button
-                android:id="@+id/btnRideInsights"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:text="파워커브 · 사람/모터 기여도 보기" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Rider Power만 사람의 운동능력에 사용합니다. Motor Power는 분리해 모터 출력 Wh/km와 페달링 효율 참고값을 계산합니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="라이더 · eMTB 분석" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvRideInsightSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="라이더 분석 데이터 없음" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Button android:id="@+id/btnRideInsights" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:text="파워커브 · 사람/모터 기여도 보기" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Rider Power만 사람의 운동능력에 사용합니다. Motor Power는 분리해 모터 출력 Wh/km와 페달링 효율 참고값을 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_accent_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="SRAM AXS BLE 실험실"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:text="SRAM 드레일러의 전체 READ/NOTIFY를 자동 수집하고 변속 전후에 바뀌는 UUID를 찾아냅니다. WRITE는 보내지 않습니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-            <Button
-                android:id="@+id/btnSramDiagnostic"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:layout_marginTop="8dp"
-                android:text="⚙ SRAM 자동 스캔 · 변속 캡처" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="SRAM AXS BLE 실험실" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="SRAM 드레일러의 전체 READ/NOTIFY를 자동 수집하고 변속 전후에 바뀌는 UUID를 찾아냅니다. WRITE는 보내지 않습니다." android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Button android:id="@+id/btnSramDiagnostic" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="8dp" android:text="⚙ SRAM 자동 스캔 · 변속 캡처" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_accent_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Avinox BLE 실험실"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:text="자전거가 BLE로 내보내는 서비스와 값을 직접 확인합니다. 실험 데이터는 개인 학습이나 배터리 예측에 반영되지 않습니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-            <Button
-                android:id="@+id/btnBleDiagnostic"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:layout_marginTop="8dp"
-                android:text="🧪 Avinox BLE 진단 시작" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Avinox BLE 실험실" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="자전거가 BLE로 내보내는 서비스와 값을 직접 확인합니다. 실험 데이터는 개인 학습이나 배터리 예측에 반영되지 않습니다." android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Button android:id="@+id/btnBleDiagnostic" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="8dp" android:text="🧪 Avinox BLE 진단 시작" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/panel_accent_bg"
-            android:orientation="vertical"
-            android:padding="15dp">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="앱 업데이트"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:id="@+id/tvUpdateStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:text="현재 버전 확인 중"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-            <Switch
-                android:id="@+id/switchBetaUpdates"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:layout_marginTop="4dp"
-                android:text="테스트판(Beta/RC)도 업데이트 대상에 포함"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp" />
-            <Button
-                android:id="@+id/btnCheckUpdate"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="최신 업데이트 확인" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:text="안정판이 기본입니다. 업데이트 확인 시 GitHub의 공개 릴리스 정보만 읽으며, GPX·FIT·위치·배터리·학습 데이터는 외부로 전송하지 않습니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/panel_accent_bg" android:orientation="vertical" android:padding="15dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="앱 업데이트" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvUpdateStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="현재 버전 확인 중" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <Switch android:id="@+id/switchBetaUpdates" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="4dp" android:text="테스트판(Beta/RC)도 업데이트 대상에 포함" android:textColor="@color/text_primary" android:textSize="14sp" />
+            <Button android:id="@+id/btnCheckUpdate" android:layout_width="match_parent" android:layout_height="48dp" android:text="최신 업데이트 확인" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="안정판이 기본입니다. 업데이트 확인 시 GitHub의 공개 릴리스 정보만 읽으며, GPX·FIT·위치·배터리·학습 데이터는 외부로 전송하지 않습니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
         </LinearLayout>
-
-        <Button
-            android:id="@+id/btnSettingsVersion"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="10dp"
-            android:text="버전 / 변경사항" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:layout_marginBottom="24dp"
-            android:text="※ 거리와 시간 자동 안내는 둘 다 켤 수 있습니다. 둘 중 먼저 설정 간격에 도달하면 한 번 안내하고 두 기준을 함께 다시 계산합니다."
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="30dp"
-            android:background="@drawable/panel_hero_bg"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="📦 모바일 소스 배포"
-                android:textColor="@color/text_primary"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="설정의 맨 마지막 메뉴입니다. ChatGPT에서 받은 전체 소스 ZIP을 선택해 GitHub main에 올리고, signed Release APK 생성까지 이어서 확인합니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btnMobileRelease"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:layout_marginTop="10dp"
-                android:text="📦 새 ZIP 모바일 배포 열기"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="최초 1회 GitHub Fine-grained PAT 연결이 필요합니다. 토큰은 Android Keystore로 암호화해 이 기기에만 저장합니다."
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-        </LinearLayout>
+        <Button android:id="@+id/btnSettingsVersion" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="10dp" android:text="버전 / 변경사항" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_marginBottom="24dp" android:text="※ 거리와 시간 자동 안내는 둘 다 켤 수 있습니다. 둘 중 먼저 설정 간격에 도달하면 한 번 안내하고 두 기준을 함께 다시 계산합니다." android:textColor="@color/text_secondary" android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

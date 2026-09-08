@@ -1,3 +1,8 @@
+# v0.34.36
+- AVINOX SYSTEM에서 eMTB 주행·코스·설정·학습·피드백·배터리 센터를 바로 열 수 있도록 완전 통합했습니다.
+- 모바일 소스 배포의 eMTB 페이지·구형 설정 바로가기·MainActivity/MtbHud 런타임 코드를 완전히 제거했습니다.
+- eMTB 내부 페이지는 배포 페이지 제거 후 6개로 정리하고 직접 페이지 진입 인덱스를 안정화했습니다.
+
 # v0.32.7 — PC Server Health + Sync Visibility
 - 앱 첫 화면에서 Rider Control Center PC `/api/health`를 직접 확인해 서버 연결 상태와 버전을 표시.
 - 새 PC entrypoint(`pc_entry=true`)는 정상 연결로, 예전 서버는 `구버전 · 업데이트 권장`으로 구분.

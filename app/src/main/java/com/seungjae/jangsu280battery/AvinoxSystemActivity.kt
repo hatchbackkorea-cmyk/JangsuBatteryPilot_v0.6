@@ -79,11 +79,24 @@ class AvinoxSystemActivity : Activity() {
         body.addView(header("AVINOX SYSTEM"))
 
         val emtb = panelBox(blueSoft, blue)
-        emtb.addView(title("eMTB 배터리 코파일럿", blue))
-        emtb.addView(note("주행 · 코스 · 배터리 예측 · 충전 계획"))
-        emtb.addView(actionButton("eMTB 주행 화면 열기", blue) {
-            startActivity(Intent(this, MainActivity::class.java))
-        }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(7) })
+        emtb.addView(title("eMTB · AVINOX", blue))
+        emtb.addView(note("기존 eMTB 기능을 AVINOX SYSTEM에서 바로 엽니다."))
+
+        fun emtbButton(label: String, page: Int, color: Int = blue) = actionButton(label, color) {
+            startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_PAGE, page))
+        }.apply { textSize = 13f }
+
+        fun emtbRow(leftText: String, leftPage: Int, rightText: String, rightPage: Int, rightColor: Int = blue) =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                addView(emtbButton(leftText, leftPage), LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(4) })
+                addView(emtbButton(rightText, rightPage, rightColor), LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4) })
+            }
+
+        emtb.addView(emtbRow("주행", MainActivity.PAGE_RIDE, "코스", MainActivity.PAGE_COURSE), LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(7) })
+        emtb.addView(emtbRow("eMTB 설정", MainActivity.PAGE_SETTINGS, "학습", MainActivity.PAGE_LEARNING), LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5) })
+        emtb.addView(emtbRow("피드백", MainActivity.PAGE_FEEDBACK, "배터리 센터", MainActivity.PAGE_BATTERY, red), LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5) })
         body.addView(emtb, panelLp())
 
         val compactRow = LinearLayout(this).apply {

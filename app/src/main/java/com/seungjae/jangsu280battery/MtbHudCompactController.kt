@@ -57,7 +57,6 @@ object MtbHudCompactController {
         private val nextClimbDetail = root.findViewById<TextView?>(R.id.tvNextClimbDetail)
         private val pager = root.findViewById<ViewFlipper?>(R.id.pagerFlipper)
         private val pagerIndicator = root.findViewById<TextView?>(R.id.tvPagerIndicator)
-        private val mobileReleaseButton = root.findViewById<View?>(R.id.btnPageMobileRelease)
 
         private val topRow: ViewGroup? = hero?.getChildAt(0) as? ViewGroup
         private val neutralBackground: Drawable? = context.getDrawable(R.drawable.panel_bg)?.mutate()
@@ -71,7 +70,6 @@ object MtbHudCompactController {
         private var lastCurrentSoc: Int? = null
         private var lastRenderedSummary = ""
         private var navCardsSwapped = false
-        private var mobileReleasePageRemoved = false
         private var lastPagerChild = 0
         private var mapPolishAttempts = 0
         private var attributionView: TextView? = null
@@ -97,12 +95,10 @@ object MtbHudCompactController {
 
             configureNavigationCards()
             installSmoothMap()
-            removeMobileReleasePage()
             compactCoursePageText()
             compactSettingsPage()
             root.postDelayed({
-                removeMobileReleasePage()
-                compactCoursePageText()
+                    compactCoursePageText()
                 compactSettingsPage()
             }, 350L)
             hero?.viewTreeObserver?.addOnPreDrawListener(this)
@@ -415,22 +411,6 @@ object MtbHudCompactController {
             block(view)
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) walk(view.getChildAt(i), block)
-            }
-        }
-
-        private fun removeMobileReleasePage() {
-            if (mobileReleasePageRemoved) return
-            val flipper = pager ?: return
-            val anchor = mobileReleaseButton ?: return
-            var direct: View = anchor
-            while (direct.parent is ViewGroup && direct.parent !== flipper) {
-                direct = direct.parent as View
-            }
-            if (direct.parent === flipper) {
-                flipper.removeView(direct)
-                mobileReleasePageRemoved = true
-                lastPagerChild = flipper.displayedChild.coerceIn(0, (flipper.childCount - 1).coerceAtLeast(0))
-                updateCompactPagerIndicator()
             }
         }
 

@@ -68,6 +68,14 @@ class MainActivity : Activity() {
         private const val REQ_GPX_IMPORT = 1005
         private const val REQ_POST_RIDE_FIT = 1006
         private const val REQ_BLUETOOTH = 1007
+
+        const val EXTRA_OPEN_PAGE = "timegate_open_page"
+        const val PAGE_RIDE = 0
+        const val PAGE_COURSE = 1
+        const val PAGE_SETTINGS = 2
+        const val PAGE_LEARNING = 3
+        const val PAGE_FEEDBACK = 4
+        const val PAGE_BATTERY = 5
     }
 
     private lateinit var courseRepo: CourseRepository
@@ -186,8 +194,6 @@ class MainActivity : Activity() {
     private lateinit var btnLearningGpx: Button
     private lateinit var btnLearningManage: Button
     private lateinit var btnLearningClear: Button
-    private lateinit var btnPageMobileRelease: Button
-    private lateinit var tvPageMobileReleaseStatus: TextView
     private lateinit var tvBatteryCenterSummary: TextView
     private lateinit var tvBatteryCenterSession: TextView
     private lateinit var btnBatteryCenterRefresh: Button
@@ -354,9 +360,9 @@ class MainActivity : Activity() {
         setupRidePositionControls()
         setupInlineSettings()
         setupLearningPage()
-        setupMobileReleasePage()
         setupBatteryCenterPage()
         setupSwipePager()
+        openRequestedPage()
         touchLocked = touchLockPrefs.getBoolean("locked", false)
         updatePagerIndicator()
 
@@ -369,6 +375,11 @@ class MainActivity : Activity() {
         renderCurrentMode()
         maybeAutoReinterpretAvinoxOriginals()
         // v0.31.7: update/install is admin-only from the first-screen Admin Center.
+    }
+
+    private fun openRequestedPage() {
+        val requested = intent.getIntExtra(EXTRA_OPEN_PAGE, -1)
+        if (requested in 0 until pagerFlipper.childCount) showPagerChild(requested)
     }
 
     private fun maybeAutoReinterpretAvinoxOriginals() {
@@ -506,8 +517,6 @@ class MainActivity : Activity() {
         btnLearningGpx = findViewById(R.id.btnLearningGpx)
         btnLearningManage = findViewById(R.id.btnLearningManage)
         btnLearningClear = findViewById(R.id.btnLearningClear)
-        btnPageMobileRelease = findViewById(R.id.btnPageMobileRelease)
-        tvPageMobileReleaseStatus = findViewById(R.id.tvPageMobileReleaseStatus)
         tvBatteryCenterSummary = findViewById(R.id.tvBatteryCenterSummary)
         tvBatteryCenterSession = findViewById(R.id.tvBatteryCenterSession)
         btnBatteryCenterRefresh = findViewById(R.id.btnBatteryCenterRefresh)
@@ -2410,19 +2419,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun setupMobileReleasePage() {
-        val repo = UpdateManager.repository().ifBlank { BuildConfig.UPDATE_REPOSITORY.orEmpty() }
-        tvPageMobileReleaseStatus.text = buildString {
-            append("현재 v${appVersionName()}")
-            if (repo.isNotBlank()) append(" · $repo")
-            append("\n새 소스 ZIP을 휴대폰에서 바로 GitHub main으로 배포할 수 있습니다.")
-        }
-        btnPageMobileRelease.text = "🔐 관리자 메뉴에서 모바일 배포"
-        btnPageMobileRelease.setOnClickListener {
-            startActivity(Intent(this, AdminCenterActivity::class.java))
-        }
-    }
-
     private fun setupBatteryCenterPage() {
         btnBatteryCenterForensics.setOnClickListener { startActivity(Intent(this, BatteryForensicsActivity::class.java)) }
         btnBatteryCenterRefresh.setOnClickListener { refreshBatteryCenterPage(full = true) }
@@ -2571,8 +2567,8 @@ class MainActivity : Activity() {
     }
 
     private fun updatePagerIndicator() {
-        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배포", "배터리")
-        val dots = (0..6).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
+        val labels = arrayOf("주행", "코스", "설정", "학습", "피드백", "배터리")
+        val dots = (0 until pagerFlipper.childCount).joinToString("  ") { if (it == pagerFlipper.displayedChild) "●" else "○" }
         tvPagerIndicator.text = if (touchLocked) {
             "🔒 터치잠금   $dots   ${labels[pagerFlipper.displayedChild]}"
         } else {
