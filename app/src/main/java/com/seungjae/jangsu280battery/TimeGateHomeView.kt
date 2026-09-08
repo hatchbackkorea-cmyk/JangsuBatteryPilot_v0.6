@@ -42,7 +42,7 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
         addHotspot(58f, 996f, 600f, 1098f) {
             onGranfondoClick?.invoke() ?: context.startActivity(Intent(context, RoadGranfondoActivity::class.java))
         }
-        addHotspot(58f, 1108f, 600f, 1210f, adminOnly = true) {
+        addHotspot(58f, 1108f, 600f, 1210f, avinoxOnly = true) {
             onAvinoxClick?.invoke() ?: context.startActivity(Intent(context, AvinoxSystemActivity::class.java))
         }
         addHotspot(58f, 1220f, 600f, 1322f, adminOnly = true) {
@@ -64,12 +64,22 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
         art.invalidate()
     }
 
+    private fun avinoxAccessAllowed(): Boolean {
+        if (adminUnlocked) return true
+        return runCatching {
+            @Suppress("DEPRECATION")
+            context.packageManager.getApplicationInfo(AVINOX_RIDE_PACKAGE, 0)
+            true
+        }.getOrDefault(false)
+    }
+
     private fun addHotspot(
         x1: Float,
         y1: Float,
         x2: Float,
         y2: Float,
         adminOnly: Boolean = false,
+        avinoxOnly: Boolean = false,
         longClick: (() -> Unit)? = null,
         click: () -> Unit
     ) {
@@ -78,10 +88,14 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
             isFocusable = true
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener {
-                if (adminOnly && !adminUnlocked) {
-                    Toast.makeText(context, "관리자 핸드폰에서만 열 수 있는 메뉴입니다.", Toast.LENGTH_SHORT).show()
-                } else {
-                    click()
+                when {
+                    adminOnly && !adminUnlocked -> {
+                        Toast.makeText(context, "관리자 핸드폰에서만 열 수 있는 메뉴입니다.", Toast.LENGTH_SHORT).show()
+                    }
+                    avinoxOnly && !avinoxAccessAllowed() -> {
+                        Toast.makeText(context, "Avinox Ride 앱이 설치된 핸드폰 또는 관리자 핸드폰에서 열 수 있습니다.", Toast.LENGTH_LONG).show()
+                    }
+                    else -> click()
                 }
             }
             if (longClick != null) setOnLongClickListener { longClick(); true }
@@ -129,7 +143,7 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
             menu(c, 772f, blue, Color.WHITE, "관전하기", "실시간 기록을 확인하세요", Icon.MONITOR)
             menu(c, 884f, black, Color.WHITE, "맵만들기", "GPX파일 불러오기 및 제작하기", Icon.MAP)
             menu(c, 996f, red, Color.WHITE, "그란폰도", "ROAD · 페이스 코치", Icon.BIKE)
-            menu(c, 1108f, black, Color.WHITE, "AVINOX SYSTEM", "eMTB · 배터리 · 학습 · 분석", Icon.BATTERY, !adminUnlocked)
+            menu(c, 1108f, black, Color.WHITE, "AVINOX SYSTEM", "eMTB · 배터리 · 학습 · 분석", Icon.BATTERY, !avinoxAccessAllowed())
             menu(c, 1220f, charcoal, Color.WHITE, "실험실", "테스트모드", Icon.LAB, !adminUnlocked)
             menu(c, 1332f, gray, black, "설정", "음성 · 화면 · 업데이트 · 버전", Icon.SETTINGS)
 
@@ -294,5 +308,6 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
     companion object {
         private const val REF_W = 941f
         private const val REF_H = 1672f
+        private const val AVINOX_RIDE_PACKAGE = "com.avinox.ride"
     }
 }
