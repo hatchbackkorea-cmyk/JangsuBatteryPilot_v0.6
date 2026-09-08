@@ -19,7 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import kotlin.math.roundToInt
 
-/** Admin-only Avinox/eMTB battery, learning and rider system. */
+/** Avinox/eMTB battery, learning and rider system for admin phones or phones with Avinox Ride installed. */
 class AvinoxSystemActivity : Activity() {
     private val bg = Color.WHITE
     private val panel = Color.rgb(247, 249, 252)
@@ -43,8 +43,9 @@ class AvinoxSystemActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sync = RiderServerSync(this)
-        if (!sync.isAdminDeviceCached()) {
-            Toast.makeText(this, "AVINOX SYSTEM은 관리자 핸드폰에서만 열 수 있습니다.", Toast.LENGTH_LONG).show()
+        val admin = sync.isAdminDeviceCached()
+        if (!admin && !isAvinoxRideInstalled()) {
+            Toast.makeText(this, "AVINOX SYSTEM은 Avinox Ride 앱이 설치된 핸드폰 또는 관리자 핸드폰에서 열 수 있습니다.", Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -55,15 +56,21 @@ class AvinoxSystemActivity : Activity() {
         insightStore = RideInsightStore(this)
         logManager = RideLogManager(this)
         buildUi()
-        if (sync.configured()) {
+        if (admin && sync.configured()) {
             sync.checkAdminStatusAsync { result ->
-                if (!result.ok && !sync.isAdminDeviceCached()) runOnUiThread {
-                    Toast.makeText(this, "관리자폰 권한이 확인되지 않아 AVINOX SYSTEM을 닫습니다.", Toast.LENGTH_LONG).show()
+                if (!result.ok && !sync.isAdminDeviceCached() && !isAvinoxRideInstalled()) runOnUiThread {
+                    Toast.makeText(this, "관리자폰 권한이 해제되었고 Avinox Ride 앱도 확인되지 않아 AVINOX SYSTEM을 닫습니다.", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
         }
     }
+
+    private fun isAvinoxRideInstalled(): Boolean = runCatching {
+        @Suppress("DEPRECATION")
+        packageManager.getApplicationInfo(AVINOX_RIDE_PACKAGE, 0)
+        true
+    }.getOrDefault(false)
 
     private fun buildUi() {
         val scroll = ScrollView(this).apply {
@@ -232,9 +239,10 @@ class AvinoxSystemActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }, LinearLayout.LayoutParams(0, dp(58), 1f))
         addView(TextView(this@AvinoxSystemActivity).apply {
-            text = "🔒 관리자"
+            val admin = RiderServerSync(this@AvinoxSystemActivity).isAdminDeviceCached()
+            text = if (admin) "✓ 관리자" else "✓ AVINOX"
             textSize = 12f
-            setTextColor(red)
+            setTextColor(if (admin) red else blue)
             setTypeface(typeface, Typeface.BOLD)
         })
     }
@@ -285,4 +293,8 @@ class AvinoxSystemActivity : Activity() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
+
+    companion object {
+        private const val AVINOX_RIDE_PACKAGE = "com.avinox.ride"
+    }
 }
