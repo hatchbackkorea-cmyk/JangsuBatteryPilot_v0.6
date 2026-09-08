@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -132,8 +133,59 @@ class SystemDiagnosticsClient(private val context: Context) {
             append("네트워크 · ").append(if (network) "연결" else "미연결/확인 불가").append('\n')
             append("정확한 위치 권한 · ").append(if (fine) "허용" else "필요").append('\n')
             append("저장 코스 · ").append(courses.size).append("개 · RACE 제작 ").append(raceCourses).append("개")
+            append("\n\n").append(timingReport())
         }
     }
+
+    private fun timingReport(): String = runCatching {
+        val store = RaceDataStore(app)
+        val s = store.snapshot()
+        val active = store.activeConfig()
+        val startGate = active?.first?.gates?.firstOrNull()
+        val rawFile = s.runId.takeIf { it.isNotBlank() }?.let { File(app.filesDir, "race/raw/$it.jsonl") }
+        val tail = mutableListOf<JSONObject>()
+        if (rawFile?.exists() == true) {
+            rawFile.forEachLine(Charsets.UTF_8) { line ->
+                runCatching { JSONObject(line) }.getOrNull()?.let { point ->
+                    tail += point
+                    if (tail.size > 2) tail.removeAt(0)
+                }
+            }
+        }
+        val latest = tail.lastOrNull()
+        val previous = tail.dropLast(1).lastOrNull()
+        val latestT = latest?.optLong("t", 0L) ?: 0L
+        val gpsAgeMs = if (latestT > 0L) (System.currentTimeMillis() - latestT).coerceAtLeast(0L) else -1L
+        val rawMoveM = if (latest != null && previous != null) {
+            Geo.distanceMeters(previous.optDouble("lat"), previous.optDouble("lon"), latest.optDouble("lat"), latest.optDouble("lon"))
+        } else null
+        val routeDeltaM = if (latest != null && previous != null) latest.optDouble("route_m") - previous.optDouble("route_m") else null
+        val startDistanceM = if (latest != null && startGate != null) {
+            Geo.distanceMeters(latest.optDouble("lat"), latest.optDouble("lon"), startGate.lat, startGate.lon)
+        } else null
+        buildString {
+            append("[계측 엔진]\n")
+            append("상태 · ").append(s.state).append(" · 이벤트 ").append(s.eventCode.ifBlank { "-" }).append('\n')
+            append("코스 · ").append(s.courseName.ifBlank { "-" }).append(" · ").append(s.routeM.toInt()).append('/').append(s.totalM.toInt()).append("m\n")
+            append("GPS 정확도 · ±").append(s.gpsAccuracyM.toInt()).append("m")
+            if (gpsAgeMs >= 0L) append(" · 마지막 GPS ").append(gpsAgeMs).append("ms 전")
+            append('\n')
+            if (latest != null) {
+                append("최근 GPS · lat=").append("%.6f".format(latest.optDouble("lat"))).append(" · lon=").append("%.6f".format(latest.optDouble("lon")))
+                append(" · speed=").append("%.1f".format(latest.optDouble("speed_mps", 0.0) * 3.6)).append("km/h\n")
+                append("매칭 · route=").append("%.1f".format(latest.optDouble("route_m"))).append("m · off=").append("%.1f".format(latest.optDouble("off_route_m"))).append("m")
+                if (routeDeltaM != null) append(" · Δroute=").append("%.1f".format(routeDeltaM)).append("m")
+                if (rawMoveM != null) append(" · ΔGPS=").append("%.1f".format(rawMoveM)).append("m")
+                append('\n')
+            } else append("최근 GPS 원시로그 · 없음\n")
+            if (startGate != null) {
+                append("START 게이트 · route=").append("%.1f".format(startGate.routeM)).append("m · width=").append("%.1f".format(startGate.widthM)).append("m")
+                if (startDistanceM != null) append(" · 현재 직선거리=").append("%.1f".format(startDistanceM)).append("m")
+                append('\n')
+            }
+            append("runId · ").append(s.runId.ifBlank { "-" })
+        }
+    }.getOrElse { "[계측 엔진]\n계측 진단 일부 실패 · ${safeMessage(it)}" }
 
     private fun compactChecks(json: JSONObject): String {
         val checks = json.optJSONArray("checks") ?: return "진단 항목 없음"
