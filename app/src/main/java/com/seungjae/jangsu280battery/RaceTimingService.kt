@@ -27,8 +27,10 @@ import kotlin.math.max
  * confidence layer. Satellite quality, GNSS speed/bearing, course progress and phone IMU activity
  * are combined to reject obvious position jumps and ambiguous START/CP/FINISH crossings.
  *
- * DELTA is intentionally gate based. It is refreshed only when a CP/FINISH gate is crossed and is
- * then held until the next gate, matching physical race timing displays.
+ * The phone DELTA is position based. From lap 2 onward it continuously compares the current lap's
+ * elapsed time with the immediately previous valid lap at the same matched route position. The
+ * previous lap reference is sampled during that lap and interpolated between samples, so DELTA
+ * changes live between CP gates as the rider gains or loses time.
  */
 class RaceTimingService : Service(), LocationListener {
     companion object {
@@ -69,7 +71,7 @@ class RaceTimingService : Service(), LocationListener {
     private var rejectedCrossingCandidates = 0
     private var lastFusionConfidence = 0.0
     private var lastLiveSendAt = 0L
-    private var heldDeltaMs: Long? = null
+    private var liveDeltaMs: Long? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -102,13 +104,27 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun releaseTimingWakeLock() { wakeLock?.let { if (it.isHeld) runCatching { it.release() } } }
 
+    private fun previousLapReference(cid: String): List<RaceReferencePoint> {
+        if (cid.isBlank()) return emptyList()
+        return store.completed()
+            .asSequence()
+            .filter { it.courseId == cid && it.status != "INVALID" && it.reference.size >= 2 }
+            .maxByOrNull { it.finishedAtMs }
+            ?.reference
+            ?.sortedBy { it.routeM }
+            ?: emptyList()
+    }
+
     private fun arm(input: RaceEventConfig, cid: String) {
         val loaded = runCatching { CourseRepository(this).loadCourse(cid) }.getOrElse { writeError("코스를 열 수 없습니다: ${it.message}"); return }
-        val normalized = RaceGateMath.normalize(input, loaded)
-        if (normalized.gates.size < 2) { writeError("START/FINISH 게이트가 없습니다."); return }
+        val normalizedBase = RaceGateMath.normalize(input, loaded)
+        if (normalizedBase.gates.size < 2) { writeError("START/FINISH 게이트가 없습니다."); return }
+        // Phone-side live delta is always against the immediately previous completed lap on this course.
+        // Server leader/BEST references do not override this local comparison.
+        val normalized = normalizedBase.copy(reference = previousLapReference(cid))
         config = normalized; course = loaded; courseId = cid; matcher = RaceRouteMatcher(loaded)
         state = "ARMED"; runId = UUID.randomUUID().toString(); runNumber = store.nextRunNumber(normalized.eventCode)
-        startAt = 0L; lastGateAt = 0L; nextGateIndex = 0; prev = null; previousRouteM = null; heldDeltaMs = null
+        startAt = 0L; lastGateAt = 0L; nextGateIndex = 0; prev = null; previousRouteM = null; liveDeltaMs = null
         sectors.clear(); referenceSamples.clear(); lastReferenceM = -1000.0; lastReferenceT = -1000L
         maxSpeedKph = 0.0; maxAccuracyM = 0.0; maxOffRouteM = 0.0; jumpCount = 0
         weakCrossingCount = 0; rejectedCrossingCandidates = 0; lastFusionConfidence = 0.0; lastLiveSendAt = 0L
@@ -130,7 +146,7 @@ class RaceTimingService : Service(), LocationListener {
         config = RaceGateMath.normalize(active.first, loaded); course = loaded; courseId = active.second; matcher = RaceRouteMatcher(loaded).apply { reset(snap.routeM) }
         state = snap.state; runId = snap.runId; runNumber = snap.runNumber; startAt = snap.startedAtMs; lastGateAt = snap.lastGateAtMs; nextGateIndex = snap.nextGateIndex
         sectors.clear(); sectors.addAll(snap.sectors); maxSpeedKph = snap.maxSpeedKph; maxAccuracyM = snap.maxGpsAccuracyM; maxOffRouteM = snap.maxOffRouteM; jumpCount = snap.jumpCount
-        prev = null; previousRouteM = snap.routeM; heldDeltaMs = snap.deltaMs; weakCrossingCount = 0; rejectedCrossingCandidates = 0; lastFusionConfidence = 0.0
+        prev = null; previousRouteM = snap.routeM; liveDeltaMs = snap.deltaMs; weakCrossingCount = 0; rejectedCrossingCandidates = 0; lastFusionConfidence = 0.0
         fusion.start()
         acquireTimingWakeLock(); startForeground(NOTIFICATION_ID, notification(if (state == "RUNNING") "RACE 계측 복구 · 기록 중" else "START 게이트 대기 복구")); requestGps()
     }
@@ -160,7 +176,8 @@ class RaceTimingService : Service(), LocationListener {
             accountFusionDecision(decision)
             val cross = decision.crossingTimeMs
             if (cross != null) {
-                state = "RUNNING"; startAt = cross; lastGateAt = cross; nextGateIndex = 1; heldDeltaMs = null
+                state = "RUNNING"; startAt = cross; lastGateAt = cross; nextGateIndex = 1
+                liveDeltaMs = referenceDeltaAt(startGate.routeM, 0L)
                 referenceSamples.clear(); referenceSamples += RaceReferencePoint(startGate.routeM, 0L)
                 updateNotification("RUNNING · ${cfg.name}")
             }
@@ -168,6 +185,9 @@ class RaceTimingService : Service(), LocationListener {
 
         if (state == "RUNNING") {
             val elapsed = (location.time - startAt).coerceAtLeast(0L)
+            // Core live-delta behavior: compare current elapsed against the previous lap at this
+            // exact matched route position on every GPS sample, not only at CP crossings.
+            liveDeltaMs = referenceDeltaAt(m.routeM, elapsed)
             if (m.routeM - lastReferenceM >= 10.0 || elapsed - lastReferenceT >= 1000L) {
                 referenceSamples += RaceReferencePoint(m.routeM, elapsed); lastReferenceM = m.routeM; lastReferenceT = elapsed
             }
@@ -181,10 +201,10 @@ class RaceTimingService : Service(), LocationListener {
                     else recordSector(gate, cross)
                 }
             }
-            if (state == "RUNNING") sendLiveIfDue(location, m.routeM, heldDeltaMs)
+            if (state == "RUNNING") sendLiveIfDue(location, m.routeM, liveDeltaMs)
         }
         prev = Location(location); previousRouteM = m.routeM
-        if (state == "ARMED" || state == "RUNNING") writeSnapshot(m.routeM, accuracy, heldDeltaMs)
+        if (state == "ARMED" || state == "RUNNING") writeSnapshot(m.routeM, accuracy, liveDeltaMs)
     }
 
     private fun accountFusionDecision(decision: RaceSensorFusion.Decision) {
@@ -207,9 +227,14 @@ class RaceTimingService : Service(), LocationListener {
         val split = (crossAt - startAt).coerceAtLeast(0L)
         val result = RaceSectorResult(idx, gate.name.ifBlank { "CP$idx" }, (crossAt - lastGateAt).coerceAtLeast(0L), split)
         sectors += result; lastGateAt = crossAt; nextGateIndex++
-        heldDeltaMs = referenceDeltaAt(gate.routeM, split)
+        liveDeltaMs = referenceDeltaAt(gate.routeM, split)
         if (cfg.eventCode != "PRACTICE") {
-            val payload = JSONObject().apply { put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("started_at_ms", startAt); put("sector_index", idx); put("sector_name", result.name); put("sector_ms", result.sectorMs); put("split_ms", result.splitMs); put("crossed_at_ms", crossAt); put("fusion_confidence", lastFusionConfidence); heldDeltaMs?.let { put("best_delta_ms", it) } }
+            val payload = JSONObject().apply {
+                put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("started_at_ms", startAt)
+                put("sector_index", idx); put("sector_name", result.name); put("sector_ms", result.sectorMs); put("split_ms", result.splitMs)
+                put("crossed_at_ms", crossAt); put("fusion_confidence", lastFusionConfidence)
+                liveDeltaMs?.let { put("previous_delta_ms", it) }
+            }
             store.enqueue("SECTOR", cfg.eventCode, payload, client.baseUrl()); Thread { runCatching { client.flushPending() } }.start()
         }
     }
@@ -218,7 +243,7 @@ class RaceTimingService : Service(), LocationListener {
         val cfg = config ?: return; val loaded = course ?: return; val finalIdx = sectors.size + 1
         val elapsed = (crossAt - startAt).coerceAtLeast(0L)
         sectors += RaceSectorResult(finalIdx, gate.name.ifBlank { "FINISH" }, (crossAt - lastGateAt).coerceAtLeast(0L), elapsed)
-        heldDeltaMs = referenceDeltaAt(gate.routeM, elapsed)
+        liveDeltaMs = referenceDeltaAt(gate.routeM, elapsed)
         referenceSamples += RaceReferencePoint(cfg.distanceM.coerceAtLeast(routeM), elapsed); val validation = validationStatus()
         val summary = RaceRunSummary(runId, runNumber, cfg.eventCode, cfg.name, courseId, loaded.name, startAt, crossAt, elapsed, validation, sectors.toList(), referenceSamples.distinctBy { it.routeM.toInt() }, maxSpeedKph, maxAccuracyM, maxOffRouteM)
         store.saveCompleted(summary)
@@ -229,11 +254,11 @@ class RaceTimingService : Service(), LocationListener {
                 put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname)
                 put("sensor_fusion", true); put("fusion_confidence", lastFusionConfidence); put("fusion_weak_crossings", weakCrossingCount); put("fusion_rejected_candidates", rejectedCrossingCandidates)
                 put("gnss_satellites_used", sensor.satellitesUsed); put("gnss_cn0_dbhz", sensor.averageCn0DbHz); put("gnss_constellations", sensor.constellationCount)
-                heldDeltaMs?.let { put("best_delta_ms", it) }
+                liveDeltaMs?.let { put("previous_delta_ms", it) }
             }
             store.enqueue("FINISH", cfg.eventCode, payload, client.baseUrl()); Thread { runCatching { client.flushPending() } }.start()
         }
-        state = "FINISHED"; writeSnapshot(cfg.distanceM, maxAccuracyM, heldDeltaMs, if (cfg.eventCode == "PRACTICE") "✓ 자동 랩 계측 · 휴대폰 저장 완료" else "✓ 센서융합 계측 · 휴대폰 저장 완료 · 서버 분류/동기화 중")
+        state = "FINISHED"; writeSnapshot(cfg.distanceM, maxAccuracyM, liveDeltaMs, if (cfg.eventCode == "PRACTICE") "✓ 자동 랩 계측 · 휴대폰 저장 완료" else "✓ 센서융합 계측 · 휴대폰 저장 완료 · 서버 분류/동기화 중")
         store.clearActiveConfig(); runCatching { locationManager.removeUpdates(this) }; fusion.stop(); releaseTimingWakeLock(); updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation"); stopForeground(false); stopSelf()
     }
 
@@ -244,8 +269,10 @@ class RaceTimingService : Service(), LocationListener {
         val sensor = fusion.snapshot()
         val payload = JSONObject().apply {
             put("event_code", cfg.eventCode); put("run_id", runId); put("run_number", runNumber); put("state", state); put("started_at_ms", startAt)
-            put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname); put("route_m", routeM); put("elapsed_ms", (location.time - startAt).coerceAtLeast(0L)); put("sector_index", sectors.size + 1)
-            put("speed_kph", if (location.hasSpeed()) location.speed * 3.6 else 0.0); put("gps_accuracy_m", if (location.hasAccuracy()) location.accuracy else 99f); delta?.let { put("leader_delta_ms", it) }; put("timestamp_ms", location.time)
+            put("profile_id", profile.profileId); put("name", profile.name); put("nickname", profile.nickname); put("route_m", routeM)
+            put("elapsed_ms", (location.time - startAt).coerceAtLeast(0L)); put("sector_index", sectors.size + 1)
+            put("speed_kph", if (location.hasSpeed()) location.speed * 3.6 else 0.0); put("gps_accuracy_m", if (location.hasAccuracy()) location.accuracy else 99f)
+            delta?.let { put("previous_delta_ms", it) }; put("timestamp_ms", location.time)
             put("sensor_fusion", true); put("gnss_satellites_used", sensor.satellitesUsed); put("gnss_cn0_dbhz", sensor.averageCn0DbHz); put("imu_available", sensor.imuAvailable)
         }
         Thread { runCatching { client.sendLive(cfg.eventCode, joined.token, payload) } }.start()
