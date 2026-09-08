@@ -143,9 +143,6 @@ class AdminCenterActivity : Activity() {
         }
         etWeight.addTextChangedListener(metricWatcher)
         etFtp.addTextChangedListener(metricWatcher)
-        findViewById<Button>(R.id.btnAdminMobileRelease).setOnClickListener {
-            if (authenticated) startActivity(Intent(this, ReleaseUploaderActivity::class.java))
-        }
         findViewById<Button>(R.id.btnAdminBleDiagnostic).setOnClickListener {
             if (authenticated) startActivity(Intent(this, BleDiagnosticActivity::class.java))
         }
@@ -195,7 +192,6 @@ class AdminCenterActivity : Activity() {
         listOf<View>(
             etName, etWeight, etFtp, switchAuto, switchBeta,
             btnSyncNow, btnSave, btnCheckUpdate,
-            findViewById(R.id.btnAdminMobileRelease),
             findViewById(R.id.btnAdminBleDiagnostic),
             findViewById(R.id.btnAdminSramDiagnostic)
         ).forEach { it.isEnabled = enabled }
@@ -270,7 +266,9 @@ class AdminCenterActivity : Activity() {
                         refreshUpdate("새 버전 v${info.versionName} 사용 가능")
                         UpdateManager.showUpdateDialog(this, info)
                     }
-                }.onFailure { refreshUpdate("업데이트 확인 실패 · ${it.message ?: "네트워크 확인"}") }
+                }.onFailure {
+                    refreshUpdate("업데이트 확인 실패 · ${it.message ?: "네트워크 확인"}")
+                }
             }
         }
     }
