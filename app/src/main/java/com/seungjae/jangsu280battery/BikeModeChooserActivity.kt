@@ -37,7 +37,7 @@ class BikeModeChooserActivity : Activity() {
         window.statusBarColor = Color.WHITE
         window.navigationBarColor = Color.WHITE
         @Suppress("DEPRECATION")
-        run { window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR }
+        run { window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR }
 
         sync = RiderServerSync(this)
         homeView = TimeGateHomeView(this).apply {
@@ -45,7 +45,6 @@ class BikeModeChooserActivity : Activity() {
             onTimingClick = { startActivity(Intent(this@BikeModeChooserActivity, RaceActivity::class.java)) }
             onWatchClick = { startActivity(Intent(this@BikeModeChooserActivity, RaceSpectatorActivity::class.java)) }
             onMapClick = { startActivity(Intent(this@BikeModeChooserActivity, RaceTrackBuilderActivity::class.java)) }
-            onEmtbClick = { startActivity(Intent(this@BikeModeChooserActivity, MainActivity::class.java)) }
             onGranfondoClick = { startActivity(Intent(this@BikeModeChooserActivity, RoadGranfondoActivity::class.java)) }
             onAvinoxClick = { startActivity(Intent(this@BikeModeChooserActivity, AvinoxSystemActivity::class.java)) }
             onLabClick = { startActivity(Intent(this@BikeModeChooserActivity, TimeGateLabActivity::class.java)) }
@@ -83,17 +82,15 @@ class BikeModeChooserActivity : Activity() {
 
     private fun showLegacyModeDialog() {
         val options = arrayOf(
-            "⚡ eMTB · 배터리 코파일럿",
             "🚴 ROAD · 그란폰도 페이스 코치",
             "⬆ 앱 업데이트 확인"
         )
         AlertDialog.Builder(this)
-            .setTitle("기존 Ride Copilot 기능")
+            .setTitle("빠른 기능")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> startActivity(Intent(this, MainActivity::class.java))
-                    1 -> startActivity(Intent(this, RoadGranfondoActivity::class.java))
-                    2 -> checkPublicUpdate()
+                    0 -> startActivity(Intent(this, RoadGranfondoActivity::class.java))
+                    1 -> checkPublicUpdate()
                 }
             }
             .setNegativeButton("닫기", null)
@@ -279,8 +276,11 @@ class BikeModeChooserActivity : Activity() {
             btnUpdate.isEnabled = true
             btnUpdate.text = "⬆ 앱 업데이트 확인"
             result.onSuccess { info ->
-                if (info == null) Toast.makeText(this, "현재 v${UpdateManager.currentVersion(this)} · 최신 안정판입니다.", Toast.LENGTH_LONG).show()
-                else UpdateManager.showUpdateDialog(this, info)
+                if (info == null) {
+                    Toast.makeText(this, "현재 v${UpdateManager.currentVersion(this)} · 최신 안정판입니다.", Toast.LENGTH_LONG).show()
+                } else {
+                    UpdateManager.showUpdateDialog(this, info)
+                }
             }.onFailure {
                 Toast.makeText(this, "업데이트 확인 실패: ${it.message ?: "네트워크를 확인하세요."}", Toast.LENGTH_LONG).show()
             }
