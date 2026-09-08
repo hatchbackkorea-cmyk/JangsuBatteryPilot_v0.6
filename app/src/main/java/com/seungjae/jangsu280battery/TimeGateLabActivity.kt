@@ -2,6 +2,7 @@ package com.seungjae.jangsu280battery
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -20,6 +21,7 @@ import kotlin.math.roundToInt
 class TimeGateLabActivity : Activity() {
     private val bg = Color.WHITE
     private val blueSoft = Color.rgb(232, 240, 255)
+    private val panel = Color.rgb(247, 249, 252)
     private val blue = Color.rgb(12, 91, 235)
     private val red = Color.rgb(255, 18, 56)
     private val primary = Color.rgb(8, 10, 13)
@@ -111,6 +113,14 @@ class TimeGateLabActivity : Activity() {
             resetProgress()
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         body.addView(test, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+
+        val sram = panelBox(panel, red)
+        sram.addView(title("SRAM AXS 데이터 수집", red))
+        sram.addView(note("드레일러 READ/NOTIFY 자동 수집 · 변속 전후 UUID 변화 캡처 · WRITE 전송 없음"))
+        sram.addView(actionButton("SRAM 자동 스캔 · 변속 캡처", red) {
+            startActivity(Intent(this, SramBleActivity::class.java))
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+        body.addView(sram, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
     }
 
     private fun updateTestUi() {
