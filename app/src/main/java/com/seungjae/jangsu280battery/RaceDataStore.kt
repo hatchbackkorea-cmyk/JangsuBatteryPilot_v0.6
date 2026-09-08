@@ -20,7 +20,9 @@ class RaceDataStore(context: Context) {
         val runId: String = "", val runNumber: Int = 0, val startedAtMs: Long = 0L, val lastGateAtMs: Long = 0L, val elapsedMs: Long = 0L,
         val routeM: Double = 0.0, val totalM: Double = 0.0, val deltaMs: Long? = null, val nextGateIndex: Int = 0, val currentSector: String = "",
         val gpsAccuracyM: Double = 0.0, val maxSpeedKph: Double = 0.0, val maxGpsAccuracyM: Double = 0.0, val maxOffRouteM: Double = 0.0,
-        val jumpCount: Int = 0, val validation: String = "REVIEW", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = ""
+        val jumpCount: Int = 0, val validation: String = "REVIEW", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
+        val leaderName: String = "", val leaderElapsedMs: Long? = null, val leaderDeltaMs: Long? = null, val estimatedRank: Int? = null,
+        val rankedCount: Int = 0, val participantCount: Int = 0
     ) {
         fun toJson() = JSONObject().apply {
             put("state", state); put("event_code", eventCode); put("event_name", eventName); put("course_id", courseId); put("course_name", courseName)
@@ -29,6 +31,8 @@ class RaceDataStore(context: Context) {
             put("next_gate_index", nextGateIndex); put("current_sector", currentSector); put("gps_accuracy_m", gpsAccuracyM)
             put("max_speed_kph", maxSpeedKph); put("max_gps_accuracy_m", maxGpsAccuracyM); put("max_off_route_m", maxOffRouteM)
             put("jump_count", jumpCount); put("validation", validation); finishRank?.let { put("finish_rank", it) }; put("server_status", serverStatus)
+            put("leader_name", leaderName); leaderElapsedMs?.let { put("leader_elapsed_ms", it) }; leaderDeltaMs?.let { put("leader_delta_ms", it) }
+            estimatedRank?.let { put("estimated_rank", it) }; put("ranked_count", rankedCount); put("participant_count", participantCount)
             put("sectors", JSONArray().apply { sectors.forEach { put(it.toJson()) } })
         }
         companion object {
@@ -41,7 +45,11 @@ class RaceDataStore(context: Context) {
                     o.optInt("next_gate_index", 0), o.optString("current_sector"), o.optDouble("gps_accuracy_m", 0.0), o.optDouble("max_speed_kph", 0.0),
                     o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0), o.optInt("jump_count", 0), o.optString("validation", "REVIEW"),
                     (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(RaceSectorResult::fromJson) },
-                    if (o.has("finish_rank") && !o.isNull("finish_rank")) o.optInt("finish_rank") else null, o.optString("server_status", "")
+                    if (o.has("finish_rank") && !o.isNull("finish_rank")) o.optInt("finish_rank") else null, o.optString("server_status", ""),
+                    o.optString("leader_name", ""), if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,
+                    if (o.has("leader_delta_ms") && !o.isNull("leader_delta_ms")) o.optLong("leader_delta_ms") else null,
+                    if (o.has("estimated_rank") && !o.isNull("estimated_rank")) o.optInt("estimated_rank") else null,
+                    o.optInt("ranked_count", 0), o.optInt("participant_count", 0)
                 )
             }
         }
@@ -49,6 +57,28 @@ class RaceDataStore(context: Context) {
 
     @Synchronized fun writeSnapshot(s: Snapshot) { prefs.edit().putString("snapshot", s.toJson().toString()).apply() }
     fun snapshot(): Snapshot = runCatching { Snapshot.fromJson(JSONObject(prefs.getString("snapshot", "{}"))) }.getOrDefault(Snapshot())
+
+    @Synchronized
+    fun updateLiveLeaderboard(
+        leaderName: String,
+        leaderElapsedMs: Long?,
+        leaderDeltaMs: Long?,
+        estimatedRank: Int?,
+        rankedCount: Int,
+        participantCount: Int
+    ) {
+        val current = snapshot()
+        writeSnapshot(
+            current.copy(
+                leaderName = leaderName,
+                leaderElapsedMs = leaderElapsedMs,
+                leaderDeltaMs = leaderDeltaMs,
+                estimatedRank = estimatedRank,
+                rankedCount = rankedCount.coerceAtLeast(0),
+                participantCount = participantCount.coerceAtLeast(0)
+            )
+        )
+    }
 
     fun saveActiveConfig(config: RaceEventConfig, courseId: String, reference: List<RaceReferencePoint>) {
         val o = config.copy(reference = reference).toJson().apply { put("local_course_id", courseId) }
