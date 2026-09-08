@@ -50,13 +50,7 @@ class BikeModeChooserActivity : Activity() {
             onLabClick = { startActivity(Intent(this@BikeModeChooserActivity, TimeGateLabActivity::class.java)) }
             onSettingsClick = { startActivity(Intent(this@BikeModeChooserActivity, TimeGateGeneralSettingsActivity::class.java)) }
             onSettingsLongClick = { showLegacyModeDialog() }
-            onBrandLongClick = {
-                if (sync.isAdminDeviceCached()) {
-                    startActivity(Intent(this@BikeModeChooserActivity, AdminCenterActivity::class.java))
-                } else {
-                    showAdminPhonePairDialog()
-                }
-            }
+            onBrandLongClick = { showAdminPhonePairStatusDialog() }
         }
         setContentView(homeView)
 
@@ -68,10 +62,7 @@ class BikeModeChooserActivity : Activity() {
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
         tvVersion.text = "TimeGate v$version"
         btnUpdate.setOnClickListener { checkPublicUpdate() }
-        btnAdmin.setOnClickListener {
-            if (sync.isAdminDeviceCached()) startActivity(Intent(this, AdminCenterActivity::class.java))
-            else refreshAdminVisibility()
-        }
+        btnAdmin.setOnClickListener { showAdminPhonePairStatusDialog() }
 
         refreshAdminVisibility()
         refreshServerHealth()
@@ -290,6 +281,19 @@ class BikeModeChooserActivity : Activity() {
     private fun refreshAdminVisibility() {
         btnAdmin.visibility = View.GONE
         if (::homeView.isInitialized) homeView.setAdminUnlocked(sync.isAdminDeviceCached())
+    }
+
+    private fun showAdminPhonePairStatusDialog() {
+        if (!sync.isAdminDeviceCached()) {
+            showAdminPhonePairDialog()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("관리자폰 등록됨")
+            .setMessage("이 휴대폰은 관리자폰으로 등록되어 있습니다. 실험실과 AVINOX SYSTEM의 관리자 전용 기능을 사용할 수 있습니다.")
+            .setPositiveButton("확인", null)
+            .setNeutralButton("재등록") { _, _ -> showAdminPhonePairDialog() }
+            .show()
     }
 
     private fun showAdminPhonePairDialog() {

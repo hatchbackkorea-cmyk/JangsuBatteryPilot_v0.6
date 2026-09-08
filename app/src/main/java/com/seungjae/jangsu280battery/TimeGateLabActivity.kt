@@ -114,6 +114,14 @@ class TimeGateLabActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         body.addView(test, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
 
+        val avinox = panelBox(panel, blue)
+        avinox.addView(title("AVINOX BLE 데이터 수집", blue))
+        avinox.addView(note("AMFLOW/AVINOX BLE 장치 검색 · READ/NOTIFY 값 수집 · 배터리 값 대조 · 로그 저장"))
+        avinox.addView(actionButton("AVINOX Bluetooth 진단 열기", blue) {
+            startActivity(Intent(this, BleDiagnosticActivity::class.java))
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+        body.addView(avinox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+
         val sram = panelBox(panel, red)
         sram.addView(title("SRAM AXS 데이터 수집", red))
         sram.addView(note("드레일러 READ/NOTIFY 자동 수집 · 변속 전후 UUID 변화 캡처 · WRITE 전송 없음"))
@@ -121,6 +129,14 @@ class TimeGateLabActivity : Activity() {
             startActivity(Intent(this, SramBleActivity::class.java))
         }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
         body.addView(sram, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+
+        val diagnostics = panelBox(panel, blue)
+        diagnostics.addView(title("전체 시스템 진단", primary))
+        diagnostics.addView(note("휴대폰 · GPS · 네트워크 · 코스 · Rider Control Center · DB · Tailscale/Funnel · 외부주소 · APK 상태 확인"))
+        diagnostics.addView(actionButton("전체 시스템 진단 열기", blue) {
+            startActivity(Intent(this, SystemDiagnosticsActivity::class.java))
+        }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+        body.addView(diagnostics, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
     }
 
     private fun updateTestUi() {
