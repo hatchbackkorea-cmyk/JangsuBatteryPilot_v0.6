@@ -1,0 +1,30 @@
+name: Retry TimeGate tenths display
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-time-tenths-retry.yml']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: python tools/apply_time_tenths.py
+      - run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Commit verified app update
+        run: |
+          git diff --check
+          git add app VERSION.txt
+          git -c user.name='TimeGate verification' -c user.email='noreply@users.noreply.github.com' commit -m 'TimeGate: display race timing to tenths'
+          git push origin HEAD:main
