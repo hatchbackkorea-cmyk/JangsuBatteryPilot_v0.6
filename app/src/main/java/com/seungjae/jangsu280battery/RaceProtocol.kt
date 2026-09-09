@@ -140,6 +140,9 @@ data class RaceRunSummary(
 }
 
 fun formatRaceTime(ms: Long): String {
-    val safe = ms.coerceAtLeast(0L); val minutes = safe / 60000; val sec = (safe % 60000) / 1000; val milli = safe % 1000
-    return if (minutes > 0) "%d:%02d.%03d".format(minutes, sec, milli) else "%d.%03d".format(sec, milli)
+    val rounded = ((ms.coerceAtLeast(0L) + 50L) / 100L) * 100L
+    val minutes = rounded / 60_000L
+    val seconds = (rounded % 60_000L) / 1_000L
+    val tenth = (rounded % 1_000L) / 100L
+    return if (minutes > 0) "%d:%02d.%d".format(minutes, seconds, tenth) else "%d.%d".format(seconds, tenth)
 }
