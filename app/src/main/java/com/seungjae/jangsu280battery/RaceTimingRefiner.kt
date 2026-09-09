@@ -4,7 +4,6 @@ import android.location.Location
 import java.util.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 
 /**
  * Refines a gate crossing from several GNSS fixes around the gate instead of trusting one pair.
@@ -62,7 +61,7 @@ class RaceTimingRefiner {
 
         val chosenNs = when {
             regression != null && speedMedian != null && abs(regression - speedMedian) <= AGREE_NS ->
-                ((regression + speedMedian) / 2L)
+                (regression + speedMedian) / 2L
             regression != null && speedMedian == null -> regression
             speedMedian != null -> speedMedian
             else -> return null
@@ -104,9 +103,8 @@ class RaceTimingRefiner {
         if (!slope.isFinite() || slope !in 0.6..25.0) return null
         val intercept = my - slope * mx
         val crossOffsetSec = -intercept / slope
-        if (!crossOffsetSec.isFinite() || abs(crossOffsetSec) > 2.0) return null
+        if (!crossOffsetSec.isFinite() || abs(crossOffsetSec) > 2.5) return null
 
-        // One robust second pass: reject fixes far from the first fitted trajectory.
         val residuals = pts.map { abs(it.y - (intercept + slope * it.x)) }.sorted()
         val medianResidual = residuals[residuals.size / 2]
         val limit = max(3.0, medianResidual * 2.5 + 1.0)
@@ -122,7 +120,7 @@ class RaceTimingRefiner {
         if (!slope2.isFinite() || slope2 !in 0.6..25.0) return preliminaryNs + (crossOffsetSec * 1_000_000_000.0).toLong()
         val intercept2 = my2 - slope2 * mx2
         val offset2 = -intercept2 / slope2
-        if (!offset2.isFinite() || abs(offset2) > 2.0) return preliminaryNs + (crossOffsetSec * 1_000_000_000.0).toLong()
+        if (!offset2.isFinite() || abs(offset2) > 2.5) return preliminaryNs + (crossOffsetSec * 1_000_000_000.0).toLong()
         return preliminaryNs + (offset2 * 1_000_000_000.0).toLong()
     }
 
@@ -132,9 +130,9 @@ class RaceTimingRefiner {
             val speed = fix.speedMps ?: fallbackSlope ?: return@mapNotNull null
             if (speed !in 0.8..25.0) return@mapNotNull null
             val travelSec = (gateRouteM - fix.routeM) / speed
-            if (!travelSec.isFinite() || abs(travelSec) > 2.5) return@mapNotNull null
+            if (!travelSec.isFinite() || abs(travelSec) > 3.0) return@mapNotNull null
             val predicted = fix.elapsedNs + (travelSec * 1_000_000_000.0).toLong()
-            if (abs(predicted - preliminaryNs) > 2_000_000_000L) return@mapNotNull null
+            if (abs(predicted - preliminaryNs) > 2_200_000_000L) return@mapNotNull null
             val accuracy = max(3.0, fix.accuracyM)
             val timeDistanceSec = abs(fix.elapsedNs - preliminaryNs) / 1_000_000_000.0
             val weight = (1.0 / (accuracy * accuracy)) * (1.0 / (1.0 + timeDistanceSec))
@@ -179,11 +177,13 @@ class RaceTimingRefiner {
 
     companion object {
         private const val HISTORY_NS = 5_000_000_000L
-        private const val WINDOW_MS = 1_600L
+        // 2.2 s on the pre-side lets ordinary 1 Hz phone GNSS still contribute at least three
+        // points once the one-second post-FINISH sample arrives. Faster 5 Hz devices contribute more.
+        private const val WINDOW_MS = 2_200L
         private const val MAX_ACCURACY_M = 45.0
         private const val MAX_ROUTE_WINDOW_M = 45.0
-        private const val MIN_SAMPLES = 4
-        private const val MIN_SPEED_SAMPLES = 3
+        private const val MIN_SAMPLES = 3
+        private const val MIN_SPEED_SAMPLES = 2
         private const val AGREE_NS = 800_000_000L
         private const val MAX_CORRECTION_NS = 1_500_000_000L
     }
