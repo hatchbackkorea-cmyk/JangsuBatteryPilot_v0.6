@@ -231,7 +231,7 @@ class RaceLapHistoryActivity : Activity() {
             val opt = TableRow(this)
             opt.addView(cell("OPT", true, BLUE, dp(64)))
             opt.addView(cell(formatTime(theoretical), true, BLUE, dp(112)))
-            opt.addView(cell("0.000", true, BLUE, dp(96)))
+            opt.addView(cell("0.0", true, BLUE, dp(96)))
             opt.addView(cell("—", false, BLUE, dp(104)))
             table.addView(opt)
         }
@@ -327,13 +327,7 @@ class RaceLapHistoryActivity : Activity() {
             .sortedBy { it.finishedAtMs }
             .toList()
 
-    private fun formatTime(ms: Long): String {
-        val safe = ms.coerceAtLeast(0L)
-        val minutes = safe / 60_000
-        val seconds = (safe % 60_000) / 1000
-        val milli = safe % 1000
-        return if (minutes > 0) "%d:%02d.%03d".format(minutes, seconds, milli) else "%d.%03d".format(seconds, milli)
-    }
+    private fun formatTime(ms: Long): String = formatRaceTime(ms)
 
     private fun formatClock(ms: Long): String = if (ms <= 0L) "—" else SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(ms))
 
