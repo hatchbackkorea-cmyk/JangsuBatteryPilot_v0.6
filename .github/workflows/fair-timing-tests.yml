@@ -1,0 +1,27 @@
+name: Fair timing regression tests
+on:
+  push:
+    branches: [main]
+    paths: ['app/src/main/java/com/seungjae/jangsu280battery/GateTimingMath.kt', 'app/src/main/java/com/seungjae/jangsu280battery/RaceTiming*.kt', 'app/src/test/**', '.github/workflows/fair-timing-tests.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle --no-daemon :app:testDebugUnitTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fair-timing-unit-tests
+          path: app/build/reports/tests/
