@@ -377,6 +377,11 @@ object RaceDebugUiInstaller {
         val df = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA)
         fun time(ms: Long) = if (ms > 0) df.format(Date(ms)) else "-"
         val fileHash = file?.takeIf { it.exists() }?.let { RaceGpxDownloadStatus.sha256(it) }.orEmpty()
+        val timingConfig = active?.first ?: joined?.config
+        val gates = timingConfig?.gates.orEmpty()
+        val nextGate = gates.getOrNull(snap.nextGateIndex)
+        val finishIndex = gates.indexOfLast { it.type.equals("FINISH", ignoreCase = true) }.let { if (it >= 0) it else gates.lastIndex }
+        val finishGate = gates.getOrNull(finishIndex)
 
         return buildString {
             append("[TimeGate DEBUG]\n")
@@ -391,6 +396,37 @@ object RaceDebugUiInstaller {
             append("계측 상태 · ").append(snap.state).append(" · runId=").append(snap.runId.ifBlank { "-" }).append('\n')
             append("코스 진행 · ").append(snap.routeM.toInt()).append('/').append(snap.totalM.toInt()).append("m\n")
             append("active config · ").append(active?.first?.eventCode ?: "-").append(" · courseId=").append(active?.second ?: "-").append('\n')
+
+            append("\n[계측/게이트]\n")
+            append("다음 게이트 · index=").append(snap.nextGateIndex).append('/').append(gates.lastIndex.coerceAtLeast(0))
+            if (nextGate != null) {
+                append(" · ").append(nextGate.name.ifBlank { nextGate.type })
+                    .append(" · ").append(nextGate.type)
+                    .append(" · route=").append(nextGate.routeM.toInt()).append("m")
+                    .append(" · width=").append(String.format(Locale.US, "%.1f", nextGate.widthM)).append("m")
+            } else append(" · 없음")
+            append('\n')
+            if (finishGate != null) {
+                append("FINISH · index=").append(finishIndex)
+                    .append(" · route=").append(finishGate.routeM.toInt()).append("m")
+                    .append(" · width=").append(String.format(Locale.US, "%.1f", finishGate.widthM)).append("m")
+                    .append(" · bearing=").append(String.format(Locale.US, "%.1f", finishGate.bearingDeg)).append("°\n")
+            } else {
+                append("FINISH · 없음\n")
+            }
+            append("현재 섹터 · ").append(snap.currentSector.ifBlank { "-" }).append(" · 완료 섹터=").append(snap.sectors.size).append('\n')
+            append("GPS 정확도 · 현재 ").append(String.format(Locale.US, "%.1f", snap.gpsAccuracyM)).append("m · 최대 ").append(String.format(Locale.US, "%.1f", snap.maxGpsAccuracyM)).append("m\n")
+            append("최대 코스이탈 · ").append(String.format(Locale.US, "%.1f", snap.maxOffRouteM)).append("m · 판정=").append(snap.validation).append('\n')
+            append("상태 메시지 · ").append(snap.serverStatus.ifBlank { "-" }).append('\n')
+            if (gates.isNotEmpty()) {
+                append("게이트 구성 · ")
+                gates.forEachIndexed { index, gate ->
+                    if (index > 0) append(" | ")
+                    append(index).append(':').append(gate.type).append('@').append(gate.routeM.toInt()).append("m/w").append(gate.widthM.toInt())
+                }
+                append('\n')
+            }
+
             append("\n[GPX 다운로드]\n")
             append("상태 · ").append(info.state).append(" · ").append(info.message).append('\n')
             append("서버 파일명 · ").append(info.serverFileName.ifBlank { "-" }).append('\n')
