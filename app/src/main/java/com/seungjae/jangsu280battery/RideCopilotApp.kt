@@ -48,6 +48,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
                     RaceSavedCourseBackfill.sync(activity)
                     RaceLiveLapDisplayInstaller.install(activity)
                     RaceEventExitUiInstaller.install(activity)
+                    RaceDebugUiInstaller.install(activity)
                 }
             }
             is RaceSavedCoursesActivity -> activity.window.decorView.post {
@@ -185,6 +186,7 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
             RaceNameLabelUiInstaller.uninstall(activity)
             RaceLiveLapDisplayInstaller.uninstall(activity)
             RaceEventExitUiInstaller.uninstall(activity)
+            RaceDebugUiInstaller.uninstall(activity)
         }
         if (activity is RaceTrackBuilderActivity) {
             RaceTrackGpsQualityOverlay.destroy(activity)

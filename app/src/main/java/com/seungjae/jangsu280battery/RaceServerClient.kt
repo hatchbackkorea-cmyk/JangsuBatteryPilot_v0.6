@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 
 /** RACE HTTP client. Sector/finish stay durable-queued; stale QR/field servers recover automatically. */
@@ -110,7 +111,9 @@ class RaceServerClient(context: Context) {
     }
 
     fun downloadCourse(eventCode: String): File {
-        val code = URLEncoder.encode(eventCode.trim().uppercase(), "UTF-8")
+        val cleanEventCode = eventCode.trim().uppercase()
+        val code = URLEncoder.encode(cleanEventCode, "UTF-8")
+        RaceGpxDownloadStatus.markChecking(app, cleanEventCode)
         var last: Throwable? = null
         for (base in candidateBaseUrls()) {
             try {
@@ -123,17 +126,39 @@ class RaceServerClient(context: Context) {
                     conn.disconnect()
                     throw HttpFailure(status, "대회 GPX 다운로드 실패 · HTTP $status")
                 }
-                val target = File(app.cacheDir, "race_${eventCode}_${System.currentTimeMillis()}.gpx")
+                val serverFileName = responseFileName(conn, cleanEventCode)
+                RaceGpxDownloadStatus.markDownloading(app, cleanEventCode, serverFileName)
+                val target = File(app.cacheDir, serverFileName).apply { if (exists()) delete() }
                 conn.inputStream.use { input -> target.outputStream().use { input.copyTo(it) } }
                 conn.disconnect()
+                val sha = RaceGpxDownloadStatus.sha256(target)
+                RaceGpxDownloadStatus.markDownloaded(app, cleanEventCode, serverFileName, sha, target.length())
                 adoptWorkingBase(base)
                 return target
             } catch (e: Throwable) {
                 last = e
-                if (e is HttpFailure && e.status in setOf(400, 401, 403, 409, 422)) throw e
+                if (e is HttpFailure && e.status in setOf(400, 401, 403, 409, 422)) {
+                    RaceGpxDownloadStatus.markFailed(app, cleanEventCode, e.message ?: "GPX 다운로드 실패")
+                    throw e
+                }
             }
         }
-        error("대회 GPX 다운로드 실패 · ${last?.message ?: "RACE 서버 연결을 확인하세요."}")
+        val message = "대회 GPX 다운로드 실패 · ${last?.message ?: "RACE 서버 연결을 확인하세요."}"
+        RaceGpxDownloadStatus.markFailed(app, cleanEventCode, message)
+        error(message)
+    }
+
+    private fun responseFileName(conn: HttpURLConnection, eventCode: String): String {
+        val disposition = conn.getHeaderField("Content-Disposition").orEmpty()
+        val utf8 = Regex("filename\\*=UTF-8''([^;]+)", RegexOption.IGNORE_CASE)
+            .find(disposition)?.groupValues?.getOrNull(1)
+            ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+        val normal = Regex("filename=\\\"?([^\\\";]+)\\\"?", RegexOption.IGNORE_CASE)
+            .find(disposition)?.groupValues?.getOrNull(1)
+        val raw = utf8 ?: normal ?: "race_${eventCode}.gpx"
+        val base = raw.substringAfterLast('/').substringAfterLast('\\').trim()
+        val safe = base.replace(Regex("[^0-9A-Za-z가-힣._ -]"), "_").take(120).ifBlank { "race_${eventCode}.gpx" }
+        return if (safe.lowercase().endsWith(".gpx")) safe else "$safe.gpx"
     }
 
     fun fetchReference(eventCode: String): List<RaceReferencePoint> {

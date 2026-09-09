@@ -22,7 +22,7 @@ import kotlin.math.abs
  * Browser for RACE courses already saved on the phone.
  *
  * This is deliberately local-first: a course stays visible here even if the PC/server was offline
- * when the user tapped "서버 등록". Administrator phones can manually retry the upload later.
+ * when the user tapped "서버 등록". Event-downloaded GPX files are also shown explicitly.
  */
 class RaceSavedCoursesActivity : Activity() {
     private lateinit var repo: CourseRepository
@@ -78,7 +78,7 @@ class RaceSavedCoursesActivity : Activity() {
             textSize = 12f
             setTextColor(Color.LTGRAY)
             setPadding(dp(14), dp(10), dp(14), dp(8))
-            text = "휴대폰에 저장된 RACE 코스는 서버 연결 여부와 관계없이 여기 남아 있습니다."
+            text = "휴대폰에 저장된 RACE 제작 코스와 경기에서 다운로드한 GPX를 모두 표시합니다."
         }
         root.addView(status)
 
@@ -103,37 +103,48 @@ class RaceSavedCoursesActivity : Activity() {
 
     private fun refreshList() {
         listBox.removeAllViews()
+        val eventEntries = RaceEventCourseRegistry.entries(this).associateBy { it.courseId }
         val courses = repo.listCourses().filter { meta ->
-            !meta.builtIn && repo.sourceFile(meta.id)?.let(::isRaceBuilderFile) == true
+            if (meta.builtIn) return@filter false
+            val builder = repo.sourceFile(meta.id)?.let(::isRaceBuilderFile) == true
+            builder || eventEntries.containsKey(meta.id)
         }
         if (courses.isEmpty()) {
             listBox.addView(TextView(this).apply {
-                text = "저장된 RACE 제작 코스가 없습니다."
+                text = "저장된 RACE 제작 코스나 경기 다운로드 GPX가 없습니다."
                 textSize = 15f
                 setTextColor(Color.LTGRAY)
                 setPadding(dp(8), dp(20), dp(8), dp(20))
             })
             return
         }
-        status.text = "저장된 RACE 코스 ${courses.size}개 · 서버가 끊겼던 때 저장한 코스도 여기서 확인하고 다시 등록할 수 있습니다."
+        val downloadedCount = courses.count { eventEntries.containsKey(it.id) }
+        status.text = "저장 코스 ${courses.size}개 · 경기 다운로드 GPX ${downloadedCount}개 · 서버 파일명도 함께 표시합니다."
         courses.forEach { meta ->
+            val eventEntry = eventEntries[meta.id]
             val gates = gatesFor(meta)
             val ready = gates.any { it.type == "START" } && gates.any { it.type == "FINISH" }
+            val displayName = eventEntry?.courseName?.takeIf { it.isNotBlank() } ?: meta.name
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 setBackgroundColor(Color.rgb(24, 31, 42))
             }
             row.addView(TextView(this).apply {
-                text = meta.name
+                text = if (eventEntry != null) "🏁 $displayName" else displayName
                 textSize = 17f
                 setTextColor(Color.WHITE)
                 setTypeface(typeface, Typeface.BOLD)
             })
             row.addView(TextView(this).apply {
-                text = "${"%.2f".format(Locale.US, meta.totalKm)} km · ${if (ready) "START/FINISH 있음" else "START/FINISH 미완성"}"
+                text = if (eventEntry != null) {
+                    val file = eventEntry.serverFileName.ifBlank { meta.fileName }
+                    "경기 다운로드 GPX · 파일: $file\n${eventEntry.eventName} · ${eventEntry.eventCode} · ${"%.2f".format(Locale.US, meta.totalKm)} km"
+                } else {
+                    "${"%.2f".format(Locale.US, meta.totalKm)} km · ${if (ready) "START/FINISH 있음" else "START/FINISH 미완성"}"
+                }
                 textSize = 12f
-                setTextColor(if (ready) Color.rgb(95, 220, 135) else Color.rgb(255, 184, 92))
+                setTextColor(if (eventEntry != null || ready) Color.rgb(95, 220, 135) else Color.rgb(255, 184, 92))
                 setPadding(0, dp(3), 0, dp(7))
             })
             val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -143,10 +154,18 @@ class RaceSavedCoursesActivity : Activity() {
                 setOnClickListener { showCourse(meta) }
             }, LinearLayout.LayoutParams(0, dp(46), 1f))
             buttons.addView(Button(this).apply {
-                text = "서버 다시 등록"
+                text = if (eventEntry != null) "이 코스 사용" else "서버 다시 등록"
                 isAllCaps = false
-                isEnabled = sync.isAdminDeviceCached()
-                setOnClickListener { publish(meta) }
+                isEnabled = eventEntry != null || sync.isAdminDeviceCached()
+                setOnClickListener {
+                    if (eventEntry != null) {
+                        runCatching { repo.setActive(meta.id) }
+                            .onSuccess { Toast.makeText(this@RaceSavedCoursesActivity, "경기 다운로드 코스를 선택했습니다.", Toast.LENGTH_SHORT).show() }
+                            .onFailure { Toast.makeText(this@RaceSavedCoursesActivity, "코스를 선택하지 못했습니다: ${it.message}", Toast.LENGTH_LONG).show() }
+                    } else {
+                        publish(meta)
+                    }
+                }
             }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(6) })
             row.addView(buttons)
             listBox.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
@@ -183,7 +202,7 @@ class RaceSavedCoursesActivity : Activity() {
         detailBox.addView(map, LinearLayout.LayoutParams(-1, 0, 1f))
         detailBox.addView(TextView(this).apply {
             val ready = gates.any { it.type == "START" } && gates.any { it.type == "FINISH" }
-            text = if (ready) "START/FINISH 포함 · 서버 등록 가능" else "START/FINISH 미완성 · PC에 올린 뒤 트랩을 추가할 수 있습니다."
+            text = if (ready) "START/FINISH 포함 · 서버 등록 가능" else "경기 다운로드 GPX 또는 START/FINISH 미완성 코스"
             textSize = 11f
             setTextColor(if (ready) Color.rgb(95, 220, 135) else Color.rgb(255, 184, 92))
             setPadding(0, dp(5), 0, 0)
