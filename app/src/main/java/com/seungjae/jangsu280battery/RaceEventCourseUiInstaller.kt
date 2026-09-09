@@ -26,6 +26,8 @@ object RaceEventCourseRegistry {
         val eventCode: String,
         val eventName: String,
         val courseName: String,
+        val serverFileName: String = "",
+        val sha256: String = "",
         val savedAtMs: Long
     )
 
@@ -33,23 +35,33 @@ object RaceEventCourseRegistry {
         val joined = RaceDataStore(context).lastJoined() ?: return null
         val id = joined.localCourseId.trim()
         if (id.isBlank() || CourseRepository(context).listCourses().none { it.id == id }) return null
+        val status = RaceGpxDownloadStatus.read(context).takeIf { it.eventCode.equals(joined.config.eventCode, true) }
+        val displayName = status?.courseName?.takeIf { it.isNotBlank() }
+            ?: RaceGpxDownloadStatus.resolveDisplayName(joined.config.courseName, status?.serverFileName.orEmpty())
         val entry = Entry(
             courseId = id,
             eventCode = joined.config.eventCode,
             eventName = joined.config.name,
-            courseName = joined.config.courseName,
-            savedAtMs = System.currentTimeMillis()
+            courseName = displayName,
+            serverFileName = status?.serverFileName.orEmpty(),
+            sha256 = status?.sha256.orEmpty(),
+            savedAtMs = status?.downloadedAtMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
         )
+        remember(context, entry)
+        RaceGpxDownloadStatus.markApplied(context, joined.config.eventCode, joined.config.name, displayName, id)
+        return entry
+    }
+
+    fun remember(context: Context, entry: Entry) {
         val prefs = context.applicationContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val old = runCatching { JSONArray(prefs.getString(KEY, "[]")) }.getOrDefault(JSONArray())
         val out = JSONArray()
         for (i in 0 until old.length()) {
             val o = old.optJSONObject(i) ?: continue
-            if (o.optString("course_id") != id) out.put(o)
+            if (o.optString("course_id") != entry.courseId) out.put(o)
         }
         out.put(entry.toJson())
         prefs.edit().putString(KEY, out.toString()).apply()
-        return entry
     }
 
     fun latest(context: Context): Entry? = entries(context).maxByOrNull { it.savedAtMs }
@@ -68,6 +80,8 @@ object RaceEventCourseRegistry {
         put("event_code", eventCode)
         put("event_name", eventName)
         put("course_name", courseName)
+        put("server_file_name", serverFileName)
+        put("sha256", sha256)
         put("saved_at_ms", savedAtMs)
     }
 
@@ -76,6 +90,8 @@ object RaceEventCourseRegistry {
         eventCode = o.optString("event_code"),
         eventName = o.optString("event_name"),
         courseName = o.optString("course_name"),
+        serverFileName = o.optString("server_file_name"),
+        sha256 = o.optString("sha256"),
         savedAtMs = o.optLong("saved_at_ms", 0L)
     )
 }
@@ -171,21 +187,22 @@ object RaceEventExitUiInstaller {
 
 /** Shows downloaded event GPX explicitly in the two course-browsing screens. */
 object RaceEventCourseQuickAccessInstaller {
-    private const val TAG = "timegate_event_course_quick_v03448"
+    private const val TAG = "timegate_event_course_quick_v03449"
 
     fun install(activity: Activity) {
         val entry = RaceEventCourseRegistry.latest(activity) ?: return
         val repo = CourseRepository(activity)
         if (repo.listCourses().none { it.id == entry.courseId }) return
         val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-        if (content.findViewWithTag<View>(TAG) != null) return
+        val existing = content.findViewWithTag<View>(TAG)
+        if (existing != null) (existing.parent as? ViewGroup)?.removeView(existing)
         val linear = firstLinear(content) ?: return
-        val courseLabel = entry.courseName.ifBlank { "경기 GPX" }
+        val fileLabel = entry.serverFileName.takeIf { it.isNotBlank() }?.let { "\n파일: $it" }.orEmpty()
         val button = Button(activity).apply {
             tag = TAG
-            text = "🏁 경기 다운로드 코스 · $courseLabel\n${entry.eventName} · ${entry.eventCode}"
+            text = "🏁 경기 다운로드 코스 · ${entry.courseName}\n${entry.eventName} · ${entry.eventCode}$fileLabel"
             isAllCaps = false
-            textSize = 12f
+            textSize = 11f
             setOnClickListener {
                 runCatching { repo.setActive(entry.courseId) }
                     .onSuccess { Toast.makeText(activity, "경기 다운로드 코스를 선택했습니다.", Toast.LENGTH_SHORT).show() }
@@ -193,7 +210,7 @@ object RaceEventCourseQuickAccessInstaller {
             }
         }
         val index = if (linear.childCount > 1) 1 else linear.childCount
-        linear.addView(button, index, LinearLayout.LayoutParams(-1, dp(activity, 58)).apply {
+        linear.addView(button, index, LinearLayout.LayoutParams(-1, dp(activity, 70)).apply {
             marginStart = dp(activity, 8)
             marginEnd = dp(activity, 8)
             topMargin = dp(activity, 4)
