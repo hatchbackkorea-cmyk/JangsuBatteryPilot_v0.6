@@ -2,6 +2,7 @@ package com.seungjae.jangsu280battery
 
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -11,18 +12,16 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.WeakHashMap
-import kotlin.math.abs
 
 /**
- * Keeps the live RACE screen limited to BEST/PREVIOUS/CURRENT while adding a compact event
- * leader/rank strip. Full lap history belongs on RaceLapHistoryActivity.
+ * Owns BEST/PREVIOUS/CURRENT and repurposes the old DELTA area as a simple course-best panel.
+ * Full lap history belongs on RaceLapHistoryActivity.
  */
 object RaceLiveLapDisplayInstaller {
     private const val TAG_HISTORY = "timegate_lap_history_v03444"
-    private const val TAG_LEADER_ROW = "timegate_live_leader_row_v03444"
-    private const val TAG_LEADER = "timegate_live_leader_v03444"
-    private const val TAG_LEADER_GAP = "timegate_live_leader_gap_v03444"
-    private const val TAG_RANK = "timegate_live_rank_v03444"
+    private const val TAG_OLD_LEADER_ROW = "timegate_live_leader_row_v03444"
+    private const val TAG_COURSE_BEST_LABEL = "timegate_course_best_label_v03453"
+    private const val TAG_COURSE_BEST_VALUE = "timegate_course_best_value_v03453"
     private data class State(val handler: Handler, val runnable: Runnable)
     private val states = WeakHashMap<RaceActivity, State>()
 
@@ -52,7 +51,7 @@ object RaceLiveLapDisplayInstaller {
         if (courseId.isBlank()) return
         val eventCode = snapshot.eventCode.ifBlank { active?.first?.eventCode.orEmpty() }.ifBlank { "PRACTICE" }.uppercase()
 
-        updateLeaderStrip(activity, root, snapshot, eventCode)
+        updateCourseBestPanel(activity, root, store, snapshot, eventCode, courseId)
 
         val sessionStore = RaceLapSessionStore(activity)
         if (snapshot.state == "RUNNING" && snapshot.startedAtMs > 0L) {
@@ -92,103 +91,93 @@ object RaceLiveLapDisplayInstaller {
         setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
     }
 
-    private fun updateLeaderStrip(activity: RaceActivity, root: ViewGroup, snapshot: RaceDataStore.Snapshot, eventCode: String) {
-        val row = ensureLeaderStrip(activity, root) ?: return
+    /**
+     * The base RaceActivity still owns a private reference to the old delta TextView. We physically
+     * remove that TextView from the hierarchy and replace it here, so the base 100 ms renderer can
+     * no longer overwrite this panel or cause another flicker race.
+     */
+    private fun updateCourseBestPanel(
+        activity: RaceActivity,
+        root: ViewGroup,
+        store: RaceDataStore,
+        snapshot: RaceDataStore.Snapshot,
+        eventCode: String,
+        courseId: String
+    ) {
+        val panel = ensureCourseBestPanel(activity, root) ?: return
+        panel.visibility = View.VISIBLE
+        val value = panel.findViewWithTag<TextView>(TAG_COURSE_BEST_VALUE) ?: return
+
         if (eventCode == "PRACTICE") {
-            row.visibility = View.GONE
+            val localBest = store.completed()
+                .asSequence()
+                .filter { it.courseId == courseId && it.status != "INVALID" }
+                .minByOrNull { it.elapsedMs }
+            value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return
         }
-        row.visibility = View.VISIBLE
+
         RaceLiveLeaderStatus.refreshIfDue(activity, snapshot)
         val live = RaceLiveLeaderStatus.cached(eventCode)
-        val durable = snapshot.takeIf { it.leaderElapsedMs != null || it.estimatedRank != null }
+        val leaderMs = live?.leaderElapsedMs ?: snapshot.leaderElapsedMs
+        val leaderName = live?.leaderName?.takeIf { it.isNotBlank() } ?: snapshot.leaderName
+        val leaderBib = live?.leaderBib.orEmpty().trim()
+        val leaderNickname = live?.leaderNickname.orEmpty().trim()
 
-        val leaderName = live?.leaderName?.takeIf { it.isNotBlank() } ?: durable?.leaderName.orEmpty()
-        val leaderMs = live?.leaderElapsedMs ?: durable?.leaderElapsedMs
-        val gapMs = live?.leaderDeltaMs ?: durable?.leaderDeltaMs
-        val rank = live?.estimatedRank ?: durable?.estimatedRank
-        val ranked = live?.rankedCount ?: durable?.rankedCount ?: 0
-        val participants = live?.participantCount ?: durable?.participantCount ?: 0
-
-        val leaderView = row.findViewWithTag<TextView>(TAG_LEADER)
-        val gapView = row.findViewWithTag<TextView>(TAG_LEADER_GAP)
-        val rankView = row.findViewWithTag<TextView>(TAG_RANK)
-
-        leaderView?.text = if (leaderMs == null) {
-            "LEADER  —"
-        } else {
-            buildString {
-                append("LEADER  ").append(formatTime(leaderMs))
-                if (leaderName.isNotBlank()) append(" · ").append(leaderName)
-            }
+        if (leaderMs == null) {
+            value.text = "기록 대기 중"
+            return
         }
 
-        if (gapMs == null) {
-            gapView?.text = "GAP  —"
-            gapView?.setTextColor(Color.LTGRAY)
-        } else when {
-            gapMs < 0L -> {
-                gapView?.text = "GAP  +%.1f".format(abs(gapMs) / 1000.0)
-                gapView?.setTextColor(Color.rgb(70, 150, 255))
-            }
-            gapMs > 0L -> {
-                gapView?.text = "GAP  −%.1f".format(abs(gapMs) / 1000.0)
-                gapView?.setTextColor(Color.rgb(255, 65, 75))
-            }
-            else -> {
-                gapView?.text = "GAP  0.0"
-                gapView?.setTextColor(Color.WHITE)
-            }
+        val identity = buildList {
+            if (leaderBib.isNotBlank()) add(leaderBib)
+            if (leaderName.isNotBlank()) add(leaderName.trim())
+            if (leaderNickname.isNotBlank() && !leaderNickname.equals(leaderName.trim(), ignoreCase = true)) add(leaderNickname)
+            add(formatTime(leaderMs))
         }
-
-        rankView?.text = buildString {
-            append(if (rank != null) "P$rank" else "P—")
-            when {
-                participants > 0 -> append(" · 참가 ").append(participants)
-                ranked > 0 -> append(" / ").append(ranked)
-            }
-        }
+        value.text = identity.joinToString("   ")
     }
 
-    private fun ensureLeaderStrip(activity: RaceActivity, root: ViewGroup): LinearLayout? {
-        root.findViewWithTag<LinearLayout>(TAG_LEADER_ROW)?.let { return it }
-        val deltaLabel = findText(root, "DELTA · PREVIOUS") ?: return null
-        val deltaPanel = deltaLabel.parent as? LinearLayout ?: return null
-        val parent = deltaPanel.parent as? LinearLayout ?: return null
-        val row = LinearLayout(activity).apply {
-            tag = TAG_LEADER_ROW
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(activity, 9), 0, dp(activity, 9), 0)
-            setBackgroundColor(Color.rgb(28, 28, 28))
+    private fun ensureCourseBestPanel(activity: RaceActivity, root: ViewGroup): LinearLayout? {
+        // Remove the old secondary LEADER/GAP/P row. Its information now lives in the large panel.
+        root.findViewWithTag<View>(TAG_OLD_LEADER_ROW)?.let { old ->
+            (old.parent as? ViewGroup)?.removeView(old)
         }
-        row.addView(TextView(activity).apply {
-            tag = TAG_LEADER
-            text = "LEADER  —"
-            textSize = 11f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER_VERTICAL
-            maxLines = 1
-        }, LinearLayout.LayoutParams(0, -1, 1.45f))
-        row.addView(TextView(activity).apply {
-            tag = TAG_LEADER_GAP
-            text = "GAP  —"
-            textSize = 12f
+
+        root.findViewWithTag<TextView>(TAG_COURSE_BEST_VALUE)?.let { existing ->
+            return existing.parent as? LinearLayout
+        }
+
+        val oldLabel = findText(root, "DELTA · PREVIOUS") ?: findText(root, "코스 최고 기록") ?: return null
+        val panel = oldLabel.parent as? LinearLayout ?: return null
+        panel.removeAllViews()
+        panel.orientation = LinearLayout.VERTICAL
+        panel.gravity = Gravity.CENTER
+        panel.setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 8))
+        panel.setBackgroundColor(Color.rgb(38, 38, 38))
+
+        panel.addView(TextView(activity).apply {
+            tag = TAG_COURSE_BEST_LABEL
+            text = "코스 최고 기록"
+            textSize = 14f
             setTextColor(Color.LTGRAY)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(0, -1, 0.75f))
-        row.addView(TextView(activity).apply {
-            tag = TAG_RANK
-            text = "P—"
-            textSize = 11f
+            includeFontPadding = false
+        }, LinearLayout.LayoutParams(-1, dp(activity, 28)))
+
+        panel.addView(TextView(activity).apply {
+            tag = TAG_COURSE_BEST_VALUE
+            text = "기록 대기 중"
+            textSize = 30f
             setTextColor(Color.WHITE)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END
-        }, LinearLayout.LayoutParams(0, -1, 0.8f))
-        val index = (parent.indexOfChild(deltaPanel) + 1).coerceAtMost(parent.childCount)
-        parent.addView(row, index, LinearLayout.LayoutParams(-1, dp(activity, 42)))
-        return row
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            includeFontPadding = false
+            isSingleLine = true
+        }, LinearLayout.LayoutParams(-1, 0, 1f))
+        return panel
     }
 
     private fun installHistoryButton(activity: RaceActivity, root: ViewGroup, courseId: String, eventCode: String) {
