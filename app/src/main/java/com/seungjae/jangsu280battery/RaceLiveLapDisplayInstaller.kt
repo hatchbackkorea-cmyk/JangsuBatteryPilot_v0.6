@@ -88,14 +88,15 @@ object RaceLiveLapDisplayInstaller {
 
         setBlock(bestBlock, bestLapNo, best?.elapsedMs)
         setBlock(previousBlock, previousLapNo, previous?.elapsedMs)
-        setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
+
+        val verifying = snapshot.state == "FINISHED" && snapshot.serverStatus.contains("랩타임 확인중")
+        if (verifying) {
+            setBlockText(currentBlock, currentLapNo, "확인중")
+        } else {
+            setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
+        }
     }
 
-    /**
-     * The base RaceActivity still owns a private reference to the old delta TextView. We physically
-     * remove that TextView from the hierarchy and replace it here, so the base 100 ms renderer can
-     * no longer overwrite this panel or cause another flicker race.
-     */
     private fun updateCourseBestPanel(
         activity: RaceActivity,
         root: ViewGroup,
@@ -139,7 +140,6 @@ object RaceLiveLapDisplayInstaller {
     }
 
     private fun ensureCourseBestPanel(activity: RaceActivity, root: ViewGroup): LinearLayout? {
-        // Remove the old secondary LEADER/GAP/P row. Its information now lives in the large panel.
         root.findViewWithTag<View>(TAG_OLD_LEADER_ROW)?.let { old ->
             (old.parent as? ViewGroup)?.removeView(old)
         }
@@ -237,6 +237,11 @@ object RaceLiveLapDisplayInstaller {
     private fun setBlock(block: Block, lapNumber: Int?, elapsedMs: Long?) {
         block.lap.text = lapNumber?.toString() ?: "—"
         block.time.text = elapsedMs?.let(::formatTime) ?: "—"
+    }
+
+    private fun setBlockText(block: Block, lapNumber: Int?, value: String) {
+        block.lap.text = lapNumber?.toString() ?: "—"
+        block.time.text = value
     }
 
     private fun formatTime(ms: Long): String {
