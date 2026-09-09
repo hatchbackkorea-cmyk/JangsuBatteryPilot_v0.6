@@ -22,11 +22,7 @@ import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
 
-/**
- * Foreground RACE timing owner. Timing continues when the Activity is closed or the screen is off.
- * Swiping the app away still stops the service through AndroidManifest stopWithTask=true.
- * Raw GNSS is journaled locally; FINISH is saved locally before any server upload.
- */
+/** Foreground owner of TimeGate RACE timing. */
 class RaceTimingService : Service(), LocationListener {
     companion object {
         const val ACTION_ARM = "com.seungjae.jangsu280battery.RACE_ARM"
@@ -36,18 +32,16 @@ class RaceTimingService : Service(), LocationListener {
         private const val CHANNEL = "race_timing"
         private const val NOTIFICATION_ID = 8803
 
-        // START must not be missed just because the timing service received its first fix
-        // immediately after the physical gate. Normal line crossing remains authoritative;
-        // this window is used only as a guarded fallback.
         private const val START_SEED_MAX_AGE_MS = 8_000L
         private const val START_RECOVERY_MAX_ROUTE_M = 60.0
         private const val START_RECOVERY_MAX_ACCURACY_M = 35.0
         private const val START_RECOVERY_MIN_SPEED_MPS = 1.0
         private const val START_RECOVERY_MIN_PROGRESS_M = 1.0
 
-        // Keep FINISH visible long enough to be readable, then automatically prepare the next lap.
-        // Timing is paused during this short display window so the finished run cannot collect extra
-        // GPS samples after the physical FINISH line.
+        // START is refined while the rider continues riding. FINISH waits one second so fixes from
+        // both sides of the physical line are available before the official lap time is committed.
+        private const val START_REFINE_DELAY_MS = 1_000L
+        private const val FINISH_REFINE_DELAY_MS = 1_000L
         private const val NEXT_LAP_REARM_DELAY_MS = 1_500L
     }
 
@@ -55,9 +49,12 @@ class RaceTimingService : Service(), LocationListener {
     private lateinit var store: RaceDataStore
     private lateinit var client: RaceServerClient
     private lateinit var fusion: RaceSensorFusion
+    private val timingRefiner = RaceTimingRefiner()
     private var wakeLock: PowerManager.WakeLock? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var nextLapRunnable: Runnable? = null
+    private var finishFinalizeRunnable: Runnable? = null
+
     private var config: RaceEventConfig? = null
     private var course: CourseData? = null
     private var courseId = ""
@@ -86,6 +83,18 @@ class RaceTimingService : Service(), LocationListener {
     private var lastLiveSendAt = 0L
     private var liveDeltaMs: Long? = null
     private var recoveredStart = false
+
+    private var preliminaryStartAt = 0L
+    private var startRefined = false
+    private var startRefinementMs = 0L
+    private var startUncertaintyMs = 0L
+    private var pendingFinishGate: RaceGate? = null
+    private var preliminaryFinishAt = 0L
+    private var pendingFinishRouteM = 0.0
+    private var finishRefinementMs = 0L
+    private var timingUncertaintyMs = 0L
+    private var timingRefinementSamples = 0
+    private var timingRefinementMethod = "PAIR_INTERPOLATION"
 
     override fun onCreate() {
         super.onCreate()
@@ -126,6 +135,12 @@ class RaceTimingService : Service(), LocationListener {
         nextLapRunnable = null
     }
 
+    private fun cancelFinishFinalize() {
+        finishFinalizeRunnable?.let(mainHandler::removeCallbacks)
+        finishFinalizeRunnable = null
+        pendingFinishGate = null
+    }
+
     private fun previousLapReference(cid: String): List<RaceReferencePoint> {
         if (cid.isBlank()) return emptyList()
         return store.completed()
@@ -139,6 +154,7 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun arm(input: RaceEventConfig, cid: String, nextLap: Boolean = false) {
         cancelNextLapRearm()
+        cancelFinishFinalize()
         val loaded = runCatching { CourseRepository(this).loadCourse(cid) }
             .getOrElse { writeError("코스를 열 수 없습니다: ${it.message}"); return }
         val normalizedBase = RaceGateMath.normalize(input, loaded)
@@ -176,6 +192,17 @@ class RaceTimingService : Service(), LocationListener {
         rejectedCrossingCandidates = 0
         lastFusionConfidence = 0.0
         lastLiveSendAt = 0L
+        preliminaryStartAt = 0L
+        startRefined = false
+        startRefinementMs = 0L
+        startUncertaintyMs = 0L
+        preliminaryFinishAt = 0L
+        pendingFinishRouteM = 0.0
+        finishRefinementMs = 0L
+        timingUncertaintyMs = 0L
+        timingRefinementSamples = 0
+        timingRefinementMethod = "PAIR_INTERPOLATION"
+        timingRefiner.reset()
 
         store.saveActiveConfig(normalized, cid, normalized.reference)
         fusion.start()
@@ -201,12 +228,6 @@ class RaceTimingService : Service(), LocationListener {
         Thread { runCatching { client.flushPending() } }.start()
     }
 
-    /**
-     * Carry a very recent GPS fix into the timing service. Before this fix, arm() always threw the
-     * previous point away, so a rider could physically cross START while the service was switching
-     * from the activity/discovery owner to RaceTimingService and the first timing fix would already
-     * be inside the course.
-     */
     private fun seedPreviousGps(startGate: RaceGate) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         val seed = runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() ?: return
@@ -217,6 +238,7 @@ class RaceTimingService : Service(), LocationListener {
         val match = matcher?.match(seed) ?: return
         prev = Location(seed)
         previousRouteM = match.routeM
+        timingRefiner.add(seed, match.routeM)
     }
 
     private fun recoverIfNeeded() {
@@ -232,6 +254,8 @@ class RaceTimingService : Service(), LocationListener {
         runId = snap.runId
         runNumber = snap.runNumber
         startAt = snap.startedAtMs
+        preliminaryStartAt = startAt
+        startRefined = true
         lastGateAt = snap.lastGateAtMs
         nextGateIndex = snap.nextGateIndex
         sectors.clear()
@@ -249,6 +273,7 @@ class RaceTimingService : Service(), LocationListener {
         rejectedCrossingCandidates = 0
         lastFusionConfidence = 0.0
         recoveredStart = false
+        timingRefiner.reset()
         fusion.start()
         if (state == "ARMED") config?.gates?.firstOrNull()?.let(::seedPreviousGps)
         acquireTimingWakeLock()
@@ -272,6 +297,7 @@ class RaceTimingService : Service(), LocationListener {
     override fun onLocationChanged(location: Location) {
         val cfg = config ?: return
         val m = matcher?.match(location) ?: return
+        timingRefiner.add(location, m.routeM)
         val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 99.0
         maxAccuracyM = max(maxAccuracyM, accuracy)
         maxOffRouteM = max(maxOffRouteM, m.distanceM)
@@ -289,24 +315,22 @@ class RaceTimingService : Service(), LocationListener {
         if (state == "ARMED") {
             val startGate = cfg.gates.first()
             var crossAt: Long? = null
-
             if (p != null) {
                 val decision = fusion.evaluateCrossing(p, location, startGate, priorRouteM, m.routeM)
                 accountFusionDecision(decision)
                 crossAt = decision.crossingTimeMs
             }
-
             if (crossAt == null && shouldRecoverMissedStart(location, m, startGate, priorRouteM)) {
                 crossAt = estimateRecoveredStartTime(location, m, startGate, priorRouteM)
                 recoveredStart = true
                 weakCrossingCount++
                 lastFusionConfidence = max(lastFusionConfidence, 0.55)
             }
-
             if (crossAt != null) beginRun(startGate, crossAt)
         }
 
         if (state == "RUNNING") {
+            maybeRefineStart(location.time)
             val elapsed = (location.time - startAt).coerceAtLeast(0L)
             liveDeltaMs = referenceDeltaAt(m.routeM, elapsed)
             if (m.routeM - lastReferenceM >= 10.0 || elapsed - lastReferenceT >= 1000L) {
@@ -327,9 +351,6 @@ class RaceTimingService : Service(), LocationListener {
                 }
                 if (cross != null) {
                     if (routeRecovered) {
-                        // This is still a normal ordered gate crossing: route progress bracketed the
-                        // exact gate and spatial/bearing guards passed. Count it for diagnostics but
-                        // do not demote an otherwise clean lap to REVIEW.
                         routeRecoveryCount++
                         lastFusionConfidence = max(lastFusionConfidence, 0.55)
                     }
@@ -338,11 +359,6 @@ class RaceTimingService : Service(), LocationListener {
                 }
             }
 
-            // FINISH must never be blocked by a missed intermediate CP. The normal ordered gate
-            // sequence remains primary, but once course progress reaches the end we also test the
-            // real FINISH gate directly. A finish reached through this branch means at least one
-            // intermediate configured gate was skipped, so the run remains REVIEW even if the
-            // final FINISH crossing itself is spatially credible.
             if (state == "RUNNING" && p != null) {
                 val finishIndex = cfg.gates.indexOfLast { it.type.equals("FINISH", ignoreCase = true) }
                     .let { if (it >= 0) it else cfg.gates.lastIndex }
@@ -386,6 +402,8 @@ class RaceTimingService : Service(), LocationListener {
         val cfg = config ?: return
         state = "RUNNING"
         startAt = crossAt.coerceAtMost(System.currentTimeMillis())
+        preliminaryStartAt = startAt
+        startRefined = false
         lastGateAt = startAt
         nextGateIndex = 1
         liveDeltaMs = referenceDeltaAt(startGate.routeM, 0L)
@@ -395,16 +413,46 @@ class RaceTimingService : Service(), LocationListener {
             startGate.routeM,
             prev?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0,
             liveDeltaMs,
-            if (recoveredStart) "START 복구 · 계측 중" else "계측 중"
+            if (recoveredStart) "START 복구 · 계측 중" else "계측 중 · START 정밀보정 대기"
         )
         updateNotification(if (recoveredStart) "RUNNING · START 복구 · ${cfg.name}" else "RUNNING · ${cfg.name}")
     }
 
-    /**
-     * Guarded recovery for the exact field failure where the first service-owned GPS sample is
-     * already just beyond START. It does not widen the gate itself. The rider must be on the course,
-     * close to START by route progress, moving forward, and have a usable GPS fix.
-     */
+    private fun maybeRefineStart(nowEpochMs: Long) {
+        if (startRefined || preliminaryStartAt <= 0L || nowEpochMs < preliminaryStartAt + START_REFINE_DELAY_MS) return
+        val gate = config?.gates?.firstOrNull() ?: return
+        val result = timingRefiner.refine(gate.routeM, preliminaryStartAt)
+        startRefined = true
+        if (result == null) return
+        val oldStart = startAt
+        val refined = result.epochMs.coerceAtMost(nowEpochMs)
+        val delta = refined - oldStart
+        if (abs(delta) > 1_500L) return
+        startAt = refined
+        startRefinementMs = delta
+        startUncertaintyMs = result.uncertaintyMs
+
+        if (sectors.isEmpty()) {
+            lastGateAt = refined
+        } else {
+            val adjusted = sectors.mapIndexed { i, s ->
+                s.copy(
+                    sectorMs = if (i == 0) (s.sectorMs - delta).coerceAtLeast(0L) else s.sectorMs,
+                    splitMs = (s.splitMs - delta).coerceAtLeast(0L)
+                )
+            }
+            sectors.clear(); sectors.addAll(adjusted)
+        }
+        if (referenceSamples.isNotEmpty()) {
+            val adjusted = referenceSamples.mapIndexed { i, p ->
+                if (i == 0) RaceReferencePoint(p.routeM, 0L)
+                else RaceReferencePoint(p.routeM, (p.elapsedMs - delta).coerceAtLeast(0L))
+            }
+            referenceSamples.clear(); referenceSamples.addAll(adjusted)
+        }
+        if (lastReferenceT >= 0L) lastReferenceT = (lastReferenceT - delta).coerceAtLeast(0L)
+    }
+
     private fun shouldRecoverMissedStart(
         location: Location,
         match: RaceRouteMatcher.Match,
@@ -442,12 +490,6 @@ class RaceTimingService : Service(), LocationListener {
         return (location.time - backMs).coerceAtMost(location.time)
     }
 
-    /**
-     * Secondary gate recovery using the route matcher. It is used only while already RUNNING and
-     * only when the previous/current route positions actually bracket the configured gate. Spatial
-     * proximity and forward bearing still have to agree, so this cannot manufacture a crossing from
-     * a distant GPS point. The estimated crossing time is interpolated between the two real fixes.
-     */
     private fun routeProgressCrossingTime(
         previous: Location,
         current: Location,
@@ -523,15 +565,69 @@ class RaceTimingService : Service(), LocationListener {
         }
     }
 
+    /**
+     * FINISH detection is provisional. Keep GPS running for one second and show "랩타임 확인중".
+     * The final record is written only after multi-fix route/speed refinement has completed.
+     */
     private fun finishRun(gate: RaceGate, crossAt: Long, routeM: Double) {
+        if (state != "RUNNING") return
+        maybeRefineStart(crossAt)
+        val preliminaryElapsed = (crossAt - startAt).coerceAtLeast(0L)
+        val finalIdx = sectors.size + 1
+        sectors += RaceSectorResult(
+            finalIdx,
+            gate.name.ifBlank { "FINISH" },
+            (crossAt - lastGateAt).coerceAtLeast(0L),
+            preliminaryElapsed
+        )
+        state = "FINISHED"
+        pendingFinishGate = gate
+        preliminaryFinishAt = crossAt
+        pendingFinishRouteM = routeM
+        liveDeltaMs = referenceDeltaAt(gate.routeM, preliminaryElapsed)
+        writeSnapshot(
+            config?.distanceM ?: routeM,
+            maxAccuracyM,
+            liveDeltaMs,
+            "랩타임 확인중 · 1초 GPS 궤적 정밀보정"
+        )
+        updateNotification("FINISH · 랩타임 확인중")
+
+        val task = Runnable {
+            if (state != "FINISHED" || pendingFinishGate == null) return@Runnable
+            finalizePendingFinish()
+        }
+        finishFinalizeRunnable = task
+        mainHandler.postDelayed(task, FINISH_REFINE_DELAY_MS)
+    }
+
+    private fun finalizePendingFinish() {
         val cfg = config ?: return
         val loaded = course ?: return
+        val gate = pendingFinishGate ?: return
         val finishedCourseId = courseId
-        val finalIdx = sectors.size + 1
-        val elapsed = (crossAt - startAt).coerceAtLeast(0L)
-        sectors += RaceSectorResult(finalIdx, gate.name.ifBlank { "FINISH" }, (crossAt - lastGateAt).coerceAtLeast(0L), elapsed)
+        maybeRefineStart(preliminaryFinishAt + FINISH_REFINE_DELAY_MS)
+
+        val refined = timingRefiner.refine(gate.routeM, preliminaryFinishAt)
+        val candidateFinish = refined?.epochMs ?: preliminaryFinishAt
+        val finalCrossAt = candidateFinish.coerceAtLeast(startAt + 1L)
+        finishRefinementMs = finalCrossAt - preliminaryFinishAt
+        timingRefinementSamples = refined?.sampleCount ?: 2
+        timingRefinementMethod = refined?.method ?: "PAIR_INTERPOLATION"
+        val finishUncertainty = refined?.uncertaintyMs ?: 900L
+        timingUncertaintyMs = (startUncertaintyMs + finishUncertainty).coerceIn(80L, 2_000L)
+
+        val elapsed = (finalCrossAt - startAt).coerceAtLeast(0L)
+        if (sectors.isNotEmpty()) {
+            val last = sectors.last()
+            sectors[sectors.lastIndex] = last.copy(
+                sectorMs = (finalCrossAt - lastGateAt).coerceAtLeast(0L),
+                splitMs = elapsed
+            )
+        }
         liveDeltaMs = referenceDeltaAt(gate.routeM, elapsed)
-        referenceSamples += RaceReferencePoint(cfg.distanceM.coerceAtLeast(routeM), elapsed)
+        referenceSamples += RaceReferencePoint(cfg.distanceM.coerceAtLeast(pendingFinishRouteM), elapsed)
+
         val validation = validationStatus()
         val reasons = validationReasons()
         val summary = RaceRunSummary(
@@ -542,7 +638,7 @@ class RaceTimingService : Service(), LocationListener {
             finishedCourseId,
             loaded.name,
             startAt,
-            crossAt,
+            finalCrossAt,
             elapsed,
             validation,
             sectors.toList(),
@@ -552,6 +648,7 @@ class RaceTimingService : Service(), LocationListener {
             maxOffRouteM
         )
         store.saveCompleted(summary)
+
         if (cfg.eventCode != "PRACTICE") {
             val profile = RaceProfileStore.profile(this)
             val sensor = fusion.snapshot()
@@ -571,29 +668,36 @@ class RaceTimingService : Service(), LocationListener {
                 put("gnss_satellites_used", sensor.satellitesUsed)
                 put("gnss_cn0_dbhz", sensor.averageCn0DbHz)
                 put("gnss_constellations", sensor.constellationCount)
+                put("timing_refined", refined != null || startRefinementMs != 0L)
+                put("timing_refinement_method", timingRefinementMethod)
+                put("timing_refinement_samples", timingRefinementSamples)
+                put("timing_uncertainty_ms", timingUncertaintyMs)
+                put("start_refinement_ms", startRefinementMs)
+                put("finish_refinement_ms", finishRefinementMs)
+                put("preliminary_finish_at_ms", preliminaryFinishAt)
                 liveDeltaMs?.let { put("previous_delta_ms", it) }
             }
             store.enqueue("FINISH", cfg.eventCode, payload, client.baseUrl())
             Thread { runCatching { client.flushPending() } }.start()
         }
 
-        state = "FINISHED"
-        val finishStatus = if (cfg.eventCode == "PRACTICE") {
-            "✓ 자동 랩 저장 완료 · 다음 LAP 자동 준비 중"
-        } else if (recoveredStart) {
-            "✓ START 복구 계측 · 저장 완료 · 서버 동기화 · 다음 LAP 자동 준비 중"
-        } else {
-            "✓ 센서융합 계측 · 저장 완료 · 서버 동기화 · 다음 LAP 자동 준비 중"
+        val finishStatus = buildString {
+            append("✓ 랩타임 확정 · ").append(formatRaceTime(elapsed))
+            append(" · 정밀보정 ")
+            if (finishRefinementMs == 0L && startRefinementMs == 0L) append("유지")
+            else append("적용")
+            append(" · 추정오차 ±").append(timingUncertaintyMs).append("ms")
+            if (cfg.eventCode != "PRACTICE") append(" · 서버 동기화")
+            append(" · 다음 LAP 자동 준비 중")
         }
         writeSnapshot(cfg.distanceM, maxAccuracyM, liveDeltaMs, finishStatus)
 
-        // Freeze the completed lap cleanly while FINISH is on screen. Do not stop the service or
-        // clear the active configuration: this timing session is continuous and must automatically
-        // arm the next lap without another START-button press.
+        finishFinalizeRunnable = null
+        pendingFinishGate = null
         runCatching { locationManager.removeUpdates(this) }
         fusion.stop()
         releaseTimingWakeLock()
-        updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation · 다음 LAP 준비")
+        updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation · 정밀보정 완료")
 
         val task = Runnable {
             if (state != "FINISHED") return@Runnable
@@ -657,7 +761,7 @@ class RaceTimingService : Service(), LocationListener {
         val previous = store.snapshot()
         val elapsed = if (state == "RUNNING" && startAt > 0L) {
             (System.currentTimeMillis() - startAt).coerceAtLeast(0L)
-        } else if (state == "FINISHED") previous.elapsedMs else previous.elapsedMs
+        } else previous.elapsedMs
         val currentName = if (cfg != null && nextGateIndex in cfg.gates.indices) cfg.gates[nextGateIndex].name else ""
         val finalElapsed = if (state == "FINISHED" && startAt > 0L && sectors.isNotEmpty()) sectors.last().splitMs else elapsed
         store.writeSnapshot(
@@ -691,6 +795,7 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun writeError(message: String) {
         cancelNextLapRearm()
+        cancelFinishFinalize()
         fusion.stop()
         releaseTimingWakeLock()
         store.writeSnapshot(store.snapshot().copy(state = "STOPPED", serverStatus = message))
@@ -698,6 +803,7 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun stopRace() {
         cancelNextLapRearm()
+        cancelFinishFinalize()
         runCatching { locationManager.removeUpdates(this) }
         fusion.stop()
         releaseTimingWakeLock()
@@ -734,6 +840,7 @@ class RaceTimingService : Service(), LocationListener {
 
     override fun onDestroy() {
         cancelNextLapRearm()
+        cancelFinishFinalize()
         runCatching { locationManager.removeUpdates(this) }
         fusion.stop()
         releaseTimingWakeLock()
