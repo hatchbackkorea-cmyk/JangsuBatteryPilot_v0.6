@@ -283,16 +283,54 @@ class RaceTimingService : Service(), LocationListener {
                 lastReferenceM = m.routeM
                 lastReferenceT = elapsed
             }
+
             if (nextGateIndex in cfg.gates.indices && p != null) {
                 val gate = cfg.gates[nextGateIndex]
                 val decision = fusion.evaluateCrossing(p, location, gate, priorRouteM, m.routeM)
                 accountFusionDecision(decision)
-                val cross = decision.crossingTimeMs
+                var cross = decision.crossingTimeMs
+                var routeRecovered = false
+                if (cross == null) {
+                    cross = routeProgressCrossingTime(p, location, gate, priorRouteM, m.routeM)
+                    routeRecovered = cross != null
+                }
                 if (cross != null) {
+                    if (routeRecovered) {
+                        weakCrossingCount++
+                        lastFusionConfidence = max(lastFusionConfidence, 0.55)
+                    }
                     if (gate.type == "FINISH" || nextGateIndex == cfg.gates.lastIndex) finishRun(gate, cross, m.routeM)
                     else recordSector(gate, cross)
                 }
             }
+
+            // FINISH must never be blocked by a missed intermediate CP. The normal ordered gate
+            // sequence remains primary, but once course progress reaches the end we also test the
+            // real FINISH gate directly. This fixes the field case where routeM reached 1244/1244m
+            // and the timer kept RUNNING because nextGateIndex was still an earlier CP.
+            if (state == "RUNNING" && p != null) {
+                val finishIndex = cfg.gates.indexOfLast { it.type.equals("FINISH", ignoreCase = true) }
+                    .let { if (it >= 0) it else cfg.gates.lastIndex }
+                val finishGate = cfg.gates.getOrNull(finishIndex)
+                if (finishGate != null && nextGateIndex < finishIndex && m.routeM >= finishGate.routeM - 45.0) {
+                    val finishDecision = fusion.evaluateCrossing(p, location, finishGate, priorRouteM, m.routeM)
+                    accountFusionDecision(finishDecision)
+                    var finishCross = finishDecision.crossingTimeMs
+                    var routeRecovered = false
+                    if (finishCross == null) {
+                        finishCross = routeProgressCrossingTime(p, location, finishGate, priorRouteM, m.routeM)
+                        routeRecovered = finishCross != null
+                    }
+                    if (finishCross != null) {
+                        if (routeRecovered || nextGateIndex < finishIndex) {
+                            weakCrossingCount++
+                            lastFusionConfidence = max(lastFusionConfidence, 0.55)
+                        }
+                        finishRun(finishGate, finishCross, m.routeM)
+                    }
+                }
+            }
+
             if (state == "RUNNING") sendLiveIfDue(location, m.routeM, liveDeltaMs)
         }
 
@@ -360,6 +398,41 @@ class RaceTimingService : Service(), LocationListener {
         val speed = if (location.hasSpeed()) location.speed.toDouble().coerceAtLeast(START_RECOVERY_MIN_SPEED_MPS) else START_RECOVERY_MIN_SPEED_MPS
         val backMs = (((current - gate.routeM).coerceAtLeast(0.0) / speed) * 1000.0).toLong().coerceAtMost(8_000L)
         return (location.time - backMs).coerceAtMost(location.time)
+    }
+
+    /**
+     * Secondary gate recovery using the route matcher. It is used only while already RUNNING and
+     * only when the previous/current route positions actually bracket the configured gate. Spatial
+     * proximity and forward bearing still have to agree, so this cannot manufacture a crossing from
+     * a distant GPS point. The estimated crossing time is interpolated between the two real fixes.
+     */
+    private fun routeProgressCrossingTime(
+        previous: Location,
+        current: Location,
+        gate: RaceGate,
+        priorRouteM: Double?,
+        currentRouteM: Double
+    ): Long? {
+        val prior = priorRouteM ?: return null
+        val progress = currentRouteM - prior
+        if (progress <= 0.25) return null
+        if (prior > gate.routeM || currentRouteM < gate.routeM) return null
+
+        val previousDistance = Geo.distanceMeters(previous.latitude, previous.longitude, gate.lat, gate.lon)
+        val currentDistance = Geo.distanceMeters(current.latitude, current.longitude, gate.lat, gate.lon)
+        val worstAccuracy = max(
+            if (previous.hasAccuracy()) previous.accuracy.toDouble() else 99.0,
+            if (current.hasAccuracy()) current.accuracy.toDouble() else 99.0
+        )
+        if (worstAccuracy > 70.0) return null
+        val allowedDistance = max(18.0, gate.widthM / 2.0 + worstAccuracy + 5.0).coerceAtMost(45.0)
+        if (minOf(previousDistance, currentDistance) > allowedDistance) return null
+        if (current.hasBearing() && current.hasSpeed() && current.speed >= 1.5f &&
+            bearingDelta(current.bearing.toDouble(), gate.bearingDeg) > 100.0
+        ) return null
+
+        val f = ((gate.routeM - prior) / progress).coerceIn(0.0, 1.0)
+        return previous.time + ((current.time - previous.time) * f).toLong()
     }
 
     private fun bearingDelta(a: Double, b: Double): Double =
@@ -545,7 +618,7 @@ class RaceTimingService : Service(), LocationListener {
                 jumpCount = jumpCount,
                 validation = validationStatus(),
                 sectors = sectors.toList(),
-                serverStatus = serverStatus ?: previous.serverStatus
+                serverStatus = serverStatus ?: previous.serverStatus.takeIf { previous.state == state }.orEmpty()
             )
         )
     }
