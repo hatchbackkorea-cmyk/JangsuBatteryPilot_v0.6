@@ -41,7 +41,8 @@ data class RaceEventConfig(
     val gates: List<RaceGate>,
     val reference: List<RaceReferencePoint> = emptyList(),
     val leaderName: String = "",
-    val leaderElapsedMs: Long? = null
+    val leaderElapsedMs: Long? = null,
+    val fairPolicyJson: String = ""
 ) {
     fun toJson() = JSONObject().apply {
         put("event_id", eventId); put("event_code", eventCode); put("name", name)
@@ -51,6 +52,7 @@ data class RaceEventConfig(
         put("reference", JSONArray().apply { reference.forEach { put(it.toJson()) } })
         put("leader_name", leaderName)
         leaderElapsedMs?.let { put("leader_elapsed_ms", it) }
+        if (fairPolicyJson.isNotBlank()) put("fair_policy", JSONObject(fairPolicyJson))
     }
 
     companion object {
@@ -67,7 +69,8 @@ data class RaceEventConfig(
                 gates = (0 until gatesA.length()).mapNotNull { gatesA.optJSONObject(it)?.let(RaceGate::fromJson) },
                 reference = (0 until refA.length()).mapNotNull { refA.optJSONObject(it)?.let(RaceReferencePoint::fromJson) },
                 leaderName = o.optString("leader_name", ""),
-                leaderElapsedMs = if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null
+                leaderElapsedMs = if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,
+                fairPolicyJson = o.optJSONObject("fair_policy")?.toString().orEmpty()
             )
         }
     }
@@ -108,13 +111,15 @@ data class RaceRunSummary(
     val reference: List<RaceReferencePoint>,
     val maxSpeedKph: Double,
     val maxGpsAccuracyM: Double,
-    val maxOffRouteM: Double
+    val maxOffRouteM: Double,
+    val timingJson: String = ""
 ) {
     fun toJson() = JSONObject().apply {
         put("run_id", runId); put("run_number", runNumber); put("event_code", eventCode); put("event_name", eventName)
         put("course_id", courseId); put("course_name", courseName); put("started_at_ms", startedAtMs); put("finished_at_ms", finishedAtMs)
         put("elapsed_ms", elapsedMs); put("status", status); put("max_speed_kph", maxSpeedKph)
         put("max_gps_accuracy_m", maxGpsAccuracyM); put("max_off_route_m", maxOffRouteM)
+        if (timingJson.isNotBlank()) put("timing", JSONObject(timingJson))
         put("sectors", JSONArray().apply { sectors.forEach { put(it.toJson()) } })
         put("reference", JSONArray().apply { reference.forEach { put(it.toJson()) } })
     }
@@ -127,7 +132,8 @@ data class RaceRunSummary(
                 o.optLong("elapsed_ms"), o.optString("status", "REVIEW"),
                 (0 until s.length()).mapNotNull { s.optJSONObject(it)?.let(RaceSectorResult::fromJson) },
                 (0 until r.length()).mapNotNull { r.optJSONObject(it)?.let(RaceReferencePoint::fromJson) },
-                o.optDouble("max_speed_kph", 0.0), o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0)
+                o.optDouble("max_speed_kph", 0.0), o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0),
+                o.optJSONObject("timing")?.toString().orEmpty()
             )
         }
     }

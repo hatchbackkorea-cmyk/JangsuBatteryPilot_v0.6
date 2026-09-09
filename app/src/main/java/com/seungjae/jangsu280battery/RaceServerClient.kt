@@ -193,6 +193,7 @@ class RaceServerClient(context: Context) {
             if (eventCode != "PRACTICE" && token.isBlank()) continue
             val ok = runCatching {
                 when (type) {
+                    "START" -> sendLive(eventCode, token, payload)
                     "SECTOR" -> sendSector(eventCode, token, payload)
                     "FINISH" -> sendFinish(eventCode, token, payload)
                     else -> JSONObject()

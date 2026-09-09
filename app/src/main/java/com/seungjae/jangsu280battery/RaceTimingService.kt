@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import org.json.JSONArray
@@ -87,14 +88,27 @@ class RaceTimingService : Service(), LocationListener {
     private var preliminaryStartAt = 0L
     private var startRefined = false
     private var startRefinementMs = 0L
-    private var startUncertaintyMs = 0L
+    private var startUncertaintyMs: Long? = null
     private var pendingFinishGate: RaceGate? = null
     private var preliminaryFinishAt = 0L
     private var pendingFinishRouteM = 0.0
     private var finishRefinementMs = 0L
-    private var timingUncertaintyMs = 0L
+    private var timingUncertaintyMs: Long? = null
     private var timingRefinementSamples = 0
     private var timingRefinementMethod = "PAIR_INTERPOLATION"
+    private var clockOffsetMs: Long? = null
+    private var startAudit: JSONObject? = null
+    private var timingRecovered = false
+    private var lastFix: Location? = null
+    private val finishTail = mutableListOf<Location>()
+    private var finishDisplay: RaceDataStore.Snapshot? = null
+    private var finishDisplayUntil = 0L
+    private fun timingNow(): Long = (clockOffsetMs ?: (System.currentTimeMillis()-SystemClock.elapsedRealtime()))+SystemClock.elapsedRealtime()
+    private fun stableLocation(raw: Location): Location {
+        if (clockOffsetMs == null) clockOffsetMs = raw.time-raw.elapsedRealtimeNanos/1_000_000L
+        return Location(raw).apply { time=clockOffsetMs!!+raw.elapsedRealtimeNanos/1_000_000L }
+    }
+
 
     override fun onCreate() {
         super.onCreate()
@@ -153,6 +167,9 @@ class RaceTimingService : Service(), LocationListener {
     }
 
     private fun arm(input: RaceEventConfig, cid: String, nextLap: Boolean = false) {
+        if (pendingFinishGate != null) finalizePendingFinish(rearm = false)
+        if (!nextLap) { clockOffsetMs=null; finishDisplay=null }
+        startAudit=null; timingRecovered=false; finishTail.clear()
         cancelNextLapRearm()
         cancelFinishFinalize()
         val loaded = runCatching { CourseRepository(this).loadCourse(cid) }
@@ -195,11 +212,11 @@ class RaceTimingService : Service(), LocationListener {
         preliminaryStartAt = 0L
         startRefined = false
         startRefinementMs = 0L
-        startUncertaintyMs = 0L
+        startUncertaintyMs = null
         preliminaryFinishAt = 0L
         pendingFinishRouteM = 0.0
         finishRefinementMs = 0L
-        timingUncertaintyMs = 0L
+        timingUncertaintyMs = null
         timingRefinementSamples = 0
         timingRefinementMethod = "PAIR_INTERPOLATION"
         timingRefiner.reset()
@@ -224,14 +241,15 @@ class RaceTimingService : Service(), LocationListener {
             NOTIFICATION_ID,
             notification(if (nextLap) "다음 LAP · START 게이트 대기" else "START 게이트 대기 · 화면 꺼져도 자동 계측")
         )
-        requestGps()
+        if (!nextLap) requestGps()
         Thread { runCatching { client.flushPending() } }.start()
     }
 
     private fun seedPreviousGps(startGate: RaceGate) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        val seed = runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() ?: return
-        val ageMs = abs(System.currentTimeMillis() - seed.time)
+        val seedRaw = runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() ?: return
+        val seed = stableLocation(seedRaw)
+        val ageMs = abs(SystemClock.elapsedRealtime()-seed.elapsedRealtimeNanos/1_000_000L)
         if (ageMs > START_SEED_MAX_AGE_MS) return
         val gateDistance = Geo.distanceMeters(seed.latitude, seed.longitude, startGate.lat, startGate.lon)
         if (gateDistance > max(140.0, startGate.widthM * 6.0)) return
@@ -241,7 +259,25 @@ class RaceTimingService : Service(), LocationListener {
         timingRefiner.add(seed, match.routeM)
     }
 
+    private fun cfgJson(): JSONObject = (config?.toJson() ?: JSONObject()).put("local_course_id",courseId)
+    private fun recoverPendingFinish(): Boolean {
+        val saved=RaceFairTiming.readPending(this) ?: return false
+        val c=saved.optJSONObject("config") ?: return false
+        val snap=RaceDataStore.Snapshot.fromJson(saved.getJSONObject("snapshot"))
+        val cid=c.optString("local_course_id")
+        val loaded=runCatching { CourseRepository(this).loadCourse(cid) }.getOrNull() ?: return false
+        config=RaceGateMath.normalize(RaceEventConfig.fromJson(c),loaded);course=loaded;courseId=cid
+        state="FINISHED";runId=snap.runId;runNumber=snap.runNumber;startAt=snap.startedAtMs;lastGateAt=snap.lastGateAtMs
+        preliminaryStartAt=saved.optLong("original_start",startAt);preliminaryFinishAt=saved.optLong("original_finish",startAt+snap.elapsedMs)
+        clockOffsetMs=saved.optLong("clock_offset");startAudit=saved.optJSONObject("start_audit");startRefined=true
+        sectors.clear();sectors.addAll(snap.sectors);maxAccuracyM=snap.maxGpsAccuracyM;maxOffRouteM=snap.maxOffRouteM
+        maxSpeedKph=snap.maxSpeedKph;jumpCount=snap.jumpCount;timingRecovered=true
+        pendingFinishGate=config!!.gates.last();pendingFinishRouteM=snap.totalM
+        finalizePendingFinish(rearm=false)
+        return true
+    }
     private fun recoverIfNeeded() {
+        if (recoverPendingFinish()) return
         val snap = store.snapshot()
         if (snap.state != "ARMED" && snap.state != "RUNNING") return
         val active = store.activeConfig() ?: return
@@ -254,7 +290,9 @@ class RaceTimingService : Service(), LocationListener {
         runId = snap.runId
         runNumber = snap.runNumber
         startAt = snap.startedAtMs
+        if (snap.startedElapsedNs > 0L) clockOffsetMs=startAt-snap.startedElapsedNs/1_000_000L
         preliminaryStartAt = startAt
+        timingRecovered = true
         startRefined = true
         lastGateAt = snap.lastGateAtMs
         nextGateIndex = snap.nextGateIndex
@@ -294,10 +332,19 @@ class RaceTimingService : Service(), LocationListener {
             .onFailure { writeError("GPS 시작 실패: ${it.message}") }
     }
 
-    override fun onLocationChanged(location: Location) {
+    override fun onLocationChanged(rawLocation: Location) {
+        if (rawLocation.elapsedRealtimeNanos <= 0L) return
+        val location = stableLocation(rawLocation)
+        if (lastFix != null && location.elapsedRealtimeNanos <= lastFix!!.elapsedRealtimeNanos) return
+        lastFix = Location(location)
         val cfg = config ?: return
         val m = matcher?.match(location) ?: return
         timingRefiner.add(location, m.routeM)
+        if (state == "FINISHED" && pendingFinishGate != null) {
+            finishTail.add(Location(location))
+            store.appendRaw(runId, location, m.routeM, m.distanceM)
+            return
+        }
         val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 99.0
         maxAccuracyM = max(maxAccuracyM, accuracy)
         maxOffRouteM = max(maxOffRouteM, m.distanceM)
@@ -401,7 +448,7 @@ class RaceTimingService : Service(), LocationListener {
     private fun beginRun(startGate: RaceGate, crossAt: Long) {
         val cfg = config ?: return
         state = "RUNNING"
-        startAt = crossAt.coerceAtMost(System.currentTimeMillis())
+        startAt = crossAt.coerceAtMost(timingNow())
         preliminaryStartAt = startAt
         startRefined = false
         lastGateAt = startAt
@@ -416,14 +463,22 @@ class RaceTimingService : Service(), LocationListener {
             if (recoveredStart) "START 복구 · 계측 중" else "계측 중 · START 정밀보정 대기"
         )
         updateNotification(if (recoveredStart) "RUNNING · START 복구 · ${cfg.name}" else "RUNNING · ${cfg.name}")
+        if (cfg.eventCode != "PRACTICE") {
+            store.enqueue("START",cfg.eventCode,JSONObject().apply {
+                put("event_code",cfg.eventCode);put("run_id",runId);put("run_number",runNumber)
+                put("started_at_ms",startAt);put("timestamp_ms",startAt);put("elapsed_ms",0)
+                put("state","RUNNING");put("route_m",startGate.routeM);put("fair_policy",runCatching{JSONObject(cfg.fairPolicyJson)}.getOrDefault(JSONObject()))
+            },client.baseUrl())
+        }
     }
 
     private fun maybeRefineStart(nowEpochMs: Long) {
         if (startRefined || preliminaryStartAt <= 0L || nowEpochMs < preliminaryStartAt + START_REFINE_DELAY_MS) return
         val gate = config?.gates?.firstOrNull() ?: return
-        val result = timingRefiner.refine(gate.routeM, preliminaryStartAt)
+        val result = timingRefiner.refine(gate, preliminaryStartAt)
         startRefined = true
         if (result == null) return
+        startAudit = result.audit
         val oldStart = startAt
         val refined = result.epochMs.coerceAtMost(nowEpochMs)
         val delta = refined - oldStart
@@ -584,6 +639,9 @@ class RaceTimingService : Service(), LocationListener {
         pendingFinishGate = gate
         preliminaryFinishAt = crossAt
         pendingFinishRouteM = routeM
+        finishTail.clear()
+        prev?.let { finishTail.add(Location(it)) }
+        lastFix?.let { finishTail.add(Location(it)) }
         liveDeltaMs = referenceDeltaAt(gate.routeM, preliminaryElapsed)
         writeSnapshot(
             config?.distanceM ?: routeM,
@@ -592,6 +650,11 @@ class RaceTimingService : Service(), LocationListener {
             "랩타임 확인중 · 1초 GPS 궤적 정밀보정"
         )
         updateNotification("FINISH · 랩타임 확인중")
+        RaceFairTiming.savePending(this, JSONObject().apply {
+            put("config", cfgJson());put("snapshot", store.snapshot().toJson())
+            put("original_start", preliminaryStartAt);put("original_finish",preliminaryFinishAt)
+            put("start_audit",startAudit ?: JSONObject.NULL);put("clock_offset",clockOffsetMs ?: 0L)
+        })
 
         val task = Runnable {
             if (state != "FINISHED" || pendingFinishGate == null) return@Runnable
@@ -601,21 +664,21 @@ class RaceTimingService : Service(), LocationListener {
         mainHandler.postDelayed(task, FINISH_REFINE_DELAY_MS)
     }
 
-    private fun finalizePendingFinish() {
+    private fun finalizePendingFinish(rearm: Boolean = true) {
         val cfg = config ?: return
         val loaded = course ?: return
         val gate = pendingFinishGate ?: return
         val finishedCourseId = courseId
         maybeRefineStart(preliminaryFinishAt + FINISH_REFINE_DELAY_MS)
 
-        val refined = timingRefiner.refine(gate.routeM, preliminaryFinishAt)
+        val refined = timingRefiner.refine(gate, preliminaryFinishAt)
         val candidateFinish = refined?.epochMs ?: preliminaryFinishAt
         val finalCrossAt = candidateFinish.coerceAtLeast(startAt + 1L)
         finishRefinementMs = finalCrossAt - preliminaryFinishAt
         timingRefinementSamples = refined?.sampleCount ?: 2
         timingRefinementMethod = refined?.method ?: "PAIR_INTERPOLATION"
-        val finishUncertainty = refined?.uncertaintyMs ?: 900L
-        timingUncertaintyMs = (startUncertaintyMs + finishUncertainty).coerceIn(80L, 2_000L)
+        val finishUncertainty = refined?.uncertaintyMs
+        timingUncertaintyMs = if (startUncertaintyMs != null && finishUncertainty != null) startUncertaintyMs!! + finishUncertainty else null
 
         val elapsed = (finalCrossAt - startAt).coerceAtLeast(0L)
         if (sectors.isNotEmpty()) {
@@ -630,6 +693,7 @@ class RaceTimingService : Service(), LocationListener {
 
         val validation = validationStatus()
         val reasons = validationReasons()
+        val timingAudit = RaceFairTiming.audit(cfg, startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, reasons)
         val summary = RaceRunSummary(
             runId,
             runNumber,
@@ -645,7 +709,8 @@ class RaceTimingService : Service(), LocationListener {
             referenceSamples.distinctBy { it.routeM.toInt() },
             maxSpeedKph,
             maxAccuracyM,
-            maxOffRouteM
+            maxOffRouteM,
+            timingJson = timingAudit.toString()
         )
         store.saveCompleted(summary)
 
@@ -686,25 +751,34 @@ class RaceTimingService : Service(), LocationListener {
             append(" · 정밀보정 ")
             if (finishRefinementMs == 0L && startRefinementMs == 0L) append("유지")
             else append("적용")
-            append(" · 추정오차 ±").append(timingUncertaintyMs).append("ms")
+            append(if (timingAudit.optString("quality") == "ACCEPTED") " · 계측기준 충족(시범)" else " · 계측 검토")
+            if (timingUncertaintyMs == null) append(" · 여유폭 판단 불가")
+            else append(" · 판정여유폭 ±").append(timingUncertaintyMs).append("ms(잠정)")
             if (cfg.eventCode != "PRACTICE") append(" · 서버 동기화")
             append(" · 다음 LAP 자동 준비 중")
         }
         writeSnapshot(cfg.distanceM, maxAccuracyM, liveDeltaMs, finishStatus)
 
+        finishFinalizeRunnable?.let(mainHandler::removeCallbacks)
         finishFinalizeRunnable = null
         pendingFinishGate = null
-        runCatching { locationManager.removeUpdates(this) }
-        fusion.stop()
-        releaseTimingWakeLock()
-        updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation · 정밀보정 완료")
-
-        val task = Runnable {
-            if (state != "FINISHED") return@Runnable
+        RaceFairTiming.clearPending(this)
+        updateNotification("FINISH ${formatRaceTime(elapsed)} · 기록 저장")
+        if (rearm) {
+            val tail = finishTail.map { Location(it) }
+            finishDisplay = store.snapshot()
+            finishDisplayUntil = SystemClock.elapsedRealtime()+NEXT_LAP_REARM_DELAY_MS
             arm(cfg, finishedCourseId, nextLap = true)
+            prev=null;previousRouteM=null;lastFix=null;matcher=RaceRouteMatcher(loaded);timingRefiner.reset()
+            val startGate=cfg.gates.first()
+            val shared=Geo.distanceMeters(startGate.lat,startGate.lon,gate.lat,gate.lon)<=1.0 && bearingDelta(startGate.bearingDeg,gate.bearingDeg)<=15.0
+            if(shared){
+                beginRun(startGate,finalCrossAt)
+                startRefined=true;startUncertaintyMs=finishUncertainty
+                startAudit=refined?.audit?.let { JSONObject(it.toString()).put("gate",startGate.toJson()) }
+            }
+            tail.filter { !shared || it.time > finalCrossAt }.distinctBy { it.elapsedRealtimeNanos }.sortedBy { it.elapsedRealtimeNanos }.forEach { onLocationChanged(it) }
         }
-        nextLapRunnable = task
-        mainHandler.postDelayed(task, NEXT_LAP_REARM_DELAY_MS)
     }
 
     private fun sendLiveIfDue(location: Location, routeM: Double, delta: Long?) {
@@ -742,6 +816,7 @@ class RaceTimingService : Service(), LocationListener {
     }
 
     private fun validationReasons(): List<String> = buildList {
+        if (timingRecovered) add("TIMING_RECOVERY")
         if (jumpCount > 0) add("GPS_JUMP")
         if (maxOffRouteM > 120.0) add("OFF_ROUTE_SEVERE") else if (maxOffRouteM > 60.0) add("OFF_ROUTE")
         if (maxAccuracyM > 100.0) add("GPS_ACCURACY_SEVERE") else if (maxAccuracyM > 50.0) add("GPS_ACCURACY")
@@ -758,9 +833,12 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun writeSnapshot(routeM: Double, accuracy: Double, delta: Long?, serverStatus: String? = null) {
         val cfg = config
+        if (state == "ARMED" && finishDisplay != null && SystemClock.elapsedRealtime()<finishDisplayUntil) {
+            store.writeSnapshot(finishDisplay!!);return
+        }
         val previous = store.snapshot()
         val elapsed = if (state == "RUNNING" && startAt > 0L) {
-            (System.currentTimeMillis() - startAt).coerceAtLeast(0L)
+            (timingNow() - startAt).coerceAtLeast(0L)
         } else previous.elapsedMs
         val currentName = if (cfg != null && nextGateIndex in cfg.gates.indices) cfg.gates[nextGateIndex].name else ""
         val finalElapsed = if (state == "FINISHED" && startAt > 0L && sectors.isNotEmpty()) sectors.last().splitMs else elapsed
@@ -774,6 +852,7 @@ class RaceTimingService : Service(), LocationListener {
                 runId = runId,
                 runNumber = runNumber,
                 startedAtMs = startAt,
+                startedElapsedNs = if (startAt > 0L && clockOffsetMs != null) (startAt-clockOffsetMs!!)*1_000_000L else 0L,
                 lastGateAtMs = lastGateAt,
                 elapsedMs = finalElapsed,
                 routeM = routeM,
@@ -802,6 +881,7 @@ class RaceTimingService : Service(), LocationListener {
     }
 
     private fun stopRace() {
+        if (pendingFinishGate != null) finalizePendingFinish(rearm = false)
         cancelNextLapRearm()
         cancelFinishFinalize()
         runCatching { locationManager.removeUpdates(this) }
@@ -839,6 +919,7 @@ class RaceTimingService : Service(), LocationListener {
     }
 
     override fun onDestroy() {
+        if (pendingFinishGate != null) finalizePendingFinish(rearm = false)
         cancelNextLapRearm()
         cancelFinishFinalize()
         runCatching { locationManager.removeUpdates(this) }

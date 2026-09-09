@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -68,7 +69,7 @@ object RaceLiveLapDisplayInstaller {
         installHistoryButton(activity, root, courseId, eventCode)
 
         val sessionRuns = sessionRuns(store.completed(), eventCode, courseId, session.startedAtMs)
-        val usable = sessionRuns.filter { it.status != "INVALID" }
+        val usable = sessionRuns.filter { RaceFairTiming.usable(it) }
         val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
         val best = usable.minByOrNull { it.elapsedMs }
@@ -112,7 +113,7 @@ object RaceLiveLapDisplayInstaller {
         if (eventCode == "PRACTICE") {
             val localBest = store.completed()
                 .asSequence()
-                .filter { it.courseId == courseId && it.status != "INVALID" }
+                .filter { it.courseId == courseId && RaceFairTiming.usable(it) }
                 .minByOrNull { it.elapsedMs }
             value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return
@@ -216,7 +217,7 @@ object RaceLiveLapDisplayInstaller {
             .toList()
 
     private fun currentElapsed(s: RaceDataStore.Snapshot): Long? = when {
-        s.state == "RUNNING" && s.startedAtMs > 0L -> (System.currentTimeMillis() - s.startedAtMs).coerceAtLeast(0L)
+        s.state == "RUNNING" && s.startedAtMs > 0L -> if (s.startedElapsedNs > 0L) ((SystemClock.elapsedRealtimeNanos() - s.startedElapsedNs) / 1_000_000L).coerceAtLeast(0L) else s.elapsedMs
         s.state == "FINISHED" -> s.elapsedMs
         s.state == "ARMED" || s.state == "WATCHING" -> 0L
         else -> null

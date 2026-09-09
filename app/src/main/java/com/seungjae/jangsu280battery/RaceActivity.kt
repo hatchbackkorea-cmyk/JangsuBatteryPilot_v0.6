@@ -706,7 +706,7 @@ class RaceActivity : Activity() {
             "WATCHING" -> "AUTO · 코스 START 탐색"
             "ARMED" -> "ARMED · START GATE"
             "RUNNING" -> "RUNNING · ${s.currentSector.ifBlank { "NEXT CP" }}"
-            "FINISHED" -> "FINISH · ${s.validation}"
+            "FINISHED" -> if (s.serverStatus.contains("랩타임 확인중")) "FINISH · 랩타임 확인중" else "FINISH · 기록 저장"
             else -> "READY"
         }
         val identity = s.courseName.ifBlank { s.eventName.ifBlank { s.eventCode.ifBlank { "TimeGate" } } }

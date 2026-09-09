@@ -22,9 +22,10 @@ class RaceDataStore(context: Context) {
         val gpsAccuracyM: Double = 0.0, val maxSpeedKph: Double = 0.0, val maxGpsAccuracyM: Double = 0.0, val maxOffRouteM: Double = 0.0,
         val jumpCount: Int = 0, val validation: String = "REVIEW", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
         val leaderName: String = "", val leaderElapsedMs: Long? = null, val leaderDeltaMs: Long? = null, val estimatedRank: Int? = null,
-        val rankedCount: Int = 0, val participantCount: Int = 0
+        val rankedCount: Int = 0, val participantCount: Int = 0, val startedElapsedNs: Long = 0L
     ) {
         fun toJson() = JSONObject().apply {
+            put("started_elapsed_ns", startedElapsedNs)
             put("state", state); put("event_code", eventCode); put("event_name", eventName); put("course_id", courseId); put("course_name", courseName)
             put("run_id", runId); put("run_number", runNumber); put("started_at_ms", startedAtMs); put("last_gate_at_ms", lastGateAtMs)
             put("elapsed_ms", elapsedMs); put("route_m", routeM); put("total_m", totalM); deltaMs?.let { put("delta_ms", it) }
@@ -49,7 +50,7 @@ class RaceDataStore(context: Context) {
                     o.optString("leader_name", ""), if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,
                     if (o.has("leader_delta_ms") && !o.isNull("leader_delta_ms")) o.optLong("leader_delta_ms") else null,
                     if (o.has("estimated_rank") && !o.isNull("estimated_rank")) o.optInt("estimated_rank") else null,
-                    o.optInt("ranked_count", 0), o.optInt("participant_count", 0)
+                    o.optInt("ranked_count", 0), o.optInt("participant_count", 0), o.optLong("started_elapsed_ns", 0L)
                 )
             }
         }
@@ -94,6 +95,7 @@ class RaceDataStore(context: Context) {
     fun appendRaw(runId: String, location: Location, routeM: Double, offRouteM: Double) {
         if (runId.isBlank()) return
         val o = JSONObject().apply {
+            put("elapsed_ns", location.elapsedRealtimeNanos)
             put("t", location.time); put("lat", location.latitude); put("lon", location.longitude)
             if (location.hasAltitude()) put("alt", location.altitude); if (location.hasSpeed()) put("speed_mps", location.speed.toDouble()); if (location.hasAccuracy()) put("accuracy_m", location.accuracy.toDouble())
             put("route_m", routeM); put("off_route_m", offRouteM); put("provider", location.provider ?: "")
