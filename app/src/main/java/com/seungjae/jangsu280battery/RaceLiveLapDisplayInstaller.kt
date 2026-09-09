@@ -90,6 +90,15 @@ object RaceLiveLapDisplayInstaller {
         setBlock(bestBlock, bestLapNo, best?.elapsedMs)
         setBlock(previousBlock, previousLapNo, previous?.elapsedMs)
 
+        val heldId = if (snapshot.state == "ARMED") RaceFairTiming.justFinalized(activity) else null
+        val heldIndex = if (heldId == null) -1 else sessionRuns.indexOfFirst { it.runId == heldId }
+        if (heldIndex >= 0) {
+            val held = sessionRuns[heldIndex]
+            setBlock(currentBlock, heldIndex + 1, held.elapsedMs)
+            val before = sessionRuns.getOrNull(heldIndex - 1)
+            setBlock(previousBlock, if (before == null) null else heldIndex, before?.elapsedMs)
+            return
+        }
         val verifying = snapshot.state == "FINISHED" && snapshot.serverStatus.contains("랩타임 확인중")
         if (verifying) {
             setBlockText(currentBlock, currentLapNo, "확인중")

@@ -81,7 +81,7 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
         }
         refreshCandidates(force = true)
         val existing = store.snapshot()
-        val timingActive = existing.state == "ARMED" || existing.state == "RUNNING"
+        val timingActive = existing.state == "ARMED" || existing.state == "RUNNING" || RaceFairTiming.readPending(this) != null
         if (!timingActive) {
             store.clearActiveConfig()
             store.writeSnapshot(
@@ -101,7 +101,7 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         val runtime = store.snapshot()
-        if (runtime.state == "ARMED" || runtime.state == "RUNNING") {
+        if (runtime.state == "ARMED" || runtime.state == "RUNNING" || RaceFairTiming.readPending(this) != null) {
             val label = if (runtime.state == "RUNNING") "${runtime.courseName.ifBlank { "코스" }} · 랩 계측 중" else "${runtime.courseName.ifBlank { "코스" }} · START 게이트 대기"
             updateWatchNotification(label)
             return

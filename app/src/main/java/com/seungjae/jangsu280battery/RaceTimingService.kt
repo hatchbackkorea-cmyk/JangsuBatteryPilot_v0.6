@@ -101,8 +101,6 @@ class RaceTimingService : Service(), LocationListener {
     private var timingRecovered = false
     private var lastFix: Location? = null
     private val finishTail = mutableListOf<Location>()
-    private var finishDisplay: RaceDataStore.Snapshot? = null
-    private var finishDisplayUntil = 0L
     private fun timingNow(): Long = (clockOffsetMs ?: (System.currentTimeMillis()-SystemClock.elapsedRealtime()))+SystemClock.elapsedRealtime()
     private fun stableLocation(raw: Location): Location {
         if (clockOffsetMs == null) clockOffsetMs = raw.time-raw.elapsedRealtimeNanos/1_000_000L
@@ -168,7 +166,7 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun arm(input: RaceEventConfig, cid: String, nextLap: Boolean = false) {
         if (pendingFinishGate != null) finalizePendingFinish(rearm = false)
-        if (!nextLap) { clockOffsetMs=null; finishDisplay=null }
+        if (!nextLap) clockOffsetMs=null
         startAudit=null; timingRecovered=false; finishTail.clear()
         cancelNextLapRearm()
         cancelFinishFinalize()
@@ -466,7 +464,7 @@ class RaceTimingService : Service(), LocationListener {
         if (cfg.eventCode != "PRACTICE") {
             store.enqueue("START",cfg.eventCode,JSONObject().apply {
                 put("event_code",cfg.eventCode);put("run_id",runId);put("run_number",runNumber)
-                put("started_at_ms",startAt);put("timestamp_ms",startAt);put("elapsed_ms",0)
+                put("started_at_ms",preliminaryStartAt.takeIf { it > 0L } ?: startAt);put("timestamp_ms",startAt);put("elapsed_ms",0)
                 put("state","RUNNING");put("route_m",startGate.routeM);put("fair_policy",runCatching{JSONObject(cfg.fairPolicyJson)}.getOrDefault(JSONObject()))
             },client.baseUrl())
         }
@@ -606,7 +604,7 @@ class RaceTimingService : Service(), LocationListener {
                 put("event_code", cfg.eventCode)
                 put("run_id", runId)
                 put("run_number", runNumber)
-                put("started_at_ms", startAt)
+                put("started_at_ms", preliminaryStartAt.takeIf { it > 0L } ?: startAt)
                 put("sector_index", idx)
                 put("sector_name", result.name)
                 put("sector_ms", result.sectorMs)
@@ -766,8 +764,7 @@ class RaceTimingService : Service(), LocationListener {
         updateNotification("FINISH ${formatRaceTime(elapsed)} · 기록 저장")
         if (rearm) {
             val tail = finishTail.map { Location(it) }
-            finishDisplay = store.snapshot()
-            finishDisplayUntil = SystemClock.elapsedRealtime()+NEXT_LAP_REARM_DELAY_MS
+            RaceFairTiming.markFinalized(this, runId)
             arm(cfg, finishedCourseId, nextLap = true)
             prev=null;previousRouteM=null;lastFix=null;matcher=RaceRouteMatcher(loaded);timingRefiner.reset()
             val startGate=cfg.gates.first()
@@ -795,7 +792,7 @@ class RaceTimingService : Service(), LocationListener {
             put("run_id", runId)
             put("run_number", runNumber)
             put("state", state)
-            put("started_at_ms", startAt)
+            put("started_at_ms", preliminaryStartAt.takeIf { it > 0L } ?: startAt)
             put("profile_id", profile.profileId)
             put("name", profile.name)
             put("nickname", profile.nickname)
@@ -833,9 +830,6 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun writeSnapshot(routeM: Double, accuracy: Double, delta: Long?, serverStatus: String? = null) {
         val cfg = config
-        if (state == "ARMED" && finishDisplay != null && SystemClock.elapsedRealtime()<finishDisplayUntil) {
-            store.writeSnapshot(finishDisplay!!);return
-        }
         val previous = store.snapshot()
         val elapsed = if (state == "RUNNING" && startAt > 0L) {
             (timingNow() - startAt).coerceAtLeast(0L)
