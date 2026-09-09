@@ -154,7 +154,18 @@ object RaceGateMath {
         val routeX = sin(rad); val routeY = cos(rad)
         val moveX = p2.first - p1.first; val moveY = p2.second - p1.second
         if (moveX * routeX + moveY * routeY <= 0.0) return null
-        val half = gate.widthM / 2.0
+
+        // FINISH is a physical line but GNSS lateral error can easily be wider than a 20 m gate.
+        // Keep the administrator's configured width as the base, then add only the current GPS
+        // uncertainty to FINISH. START and sector gates remain strict. This prevents the field case
+        // where route progress reaches the course end and freezes there while FINISH never fires.
+        val finishAccuracyPad = if (gate.type.equals("FINISH", ignoreCase = true)) {
+            val prevAcc = if (prev.hasAccuracy()) prev.accuracy.toDouble() else 0.0
+            val curAcc = if (cur.hasAccuracy()) cur.accuracy.toDouble() else 0.0
+            max(prevAcc, curAcc).coerceIn(0.0, 15.0)
+        } else 0.0
+        val half = gate.widthM / 2.0 + finishAccuracyPad
+
         val perpX = cos(rad); val perpY = -sin(rad)
         val aX = -perpX * half; val aY = -perpY * half
         val bX = perpX * half; val bY = perpY * half
