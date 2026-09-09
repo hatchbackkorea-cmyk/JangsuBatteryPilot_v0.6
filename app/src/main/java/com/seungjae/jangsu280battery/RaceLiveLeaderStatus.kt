@@ -8,11 +8,13 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Lightweight event-leader/rank refresh used only while the phone live timing HUD is visible. */
+/** Lightweight event course-leader refresh used while the phone live timing HUD is visible. */
 object RaceLiveLeaderStatus {
     data class Status(
         val eventCode: String,
+        val leaderBib: String,
         val leaderName: String,
+        val leaderNickname: String,
         val leaderElapsedMs: Long?,
         val leaderDeltaMs: Long?,
         val estimatedRank: Int?,
@@ -34,8 +36,7 @@ object RaceLiveLeaderStatus {
     fun refreshIfDue(context: Context, snapshot: RaceDataStore.Snapshot) {
         val event = snapshot.eventCode.trim().uppercase()
         if (event.isBlank() || event == "PRACTICE") return
-        if (snapshot.state !in setOf("RUNNING", "FINISHED")) return
-        if (snapshot.startedAtMs <= 0L) return
+        if (snapshot.state !in setOf("ARMED", "RUNNING", "FINISHED")) return
 
         val now = System.currentTimeMillis()
         if (now - (lastFetch[event] ?: 0L) < 1_000L) return
@@ -51,12 +52,14 @@ object RaceLiveLeaderStatus {
                 if (!base.startsWith("http://") && !base.startsWith("https://")) return@Thread
                 val joined = RaceDataStore(app).joined(event, base) ?: return@Thread
                 if (joined.token.isBlank()) return@Thread
-                val elapsed = if (snapshot.state == "RUNNING") {
-                    (System.currentTimeMillis() - snapshot.startedAtMs).coerceAtLeast(0L)
-                } else snapshot.elapsedMs.coerceAtLeast(0L)
+                val elapsed = when (snapshot.state) {
+                    "RUNNING" -> if (snapshot.startedAtMs > 0L) (System.currentTimeMillis() - snapshot.startedAtMs).coerceAtLeast(0L) else 0L
+                    "FINISHED" -> snapshot.elapsedMs.coerceAtLeast(0L)
+                    else -> 0L
+                }
                 val code = URLEncoder.encode(event, "UTF-8")
                 val url = "$base/api/race/events/$code/my-live-status" +
-                    "?route_m=${snapshot.routeM}&elapsed_ms=$elapsed&started_at_ms=${snapshot.startedAtMs}"
+                    "?route_m=${snapshot.routeM}&elapsed_ms=$elapsed&started_at_ms=${snapshot.startedAtMs.coerceAtLeast(0L)}"
                 val conn = URL(url).openConnection() as HttpURLConnection
                 try {
                     conn.requestMethod = "GET"
@@ -68,22 +71,49 @@ object RaceLiveLeaderStatus {
                     val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                     val o = JSONObject(text)
                     if (!o.optBoolean("accepted", true)) return@Thread
-                    fun nullableLong(key: String): Long? = if (o.has(key) && !o.isNull(key)) o.optLong(key) else null
-                    fun nullableInt(key: String): Int? = if (o.has(key) && !o.isNull(key)) o.optInt(key) else null
+                    val leader = o.optJSONObject("leader")
+
+                    fun nullableLong(obj: JSONObject?, vararg keys: String): Long? {
+                        if (obj == null) return null
+                        for (key in keys) if (obj.has(key) && !obj.isNull(key)) return obj.optLong(key)
+                        return null
+                    }
+                    fun nullableInt(obj: JSONObject?, vararg keys: String): Int? {
+                        if (obj == null) return null
+                        for (key in keys) if (obj.has(key) && !obj.isNull(key)) return obj.optInt(key)
+                        return null
+                    }
+                    fun textValue(vararg keys: String): String {
+                        for (key in keys) {
+                            val direct = o.optString(key, "").trim()
+                            if (direct.isNotBlank()) return direct
+                        }
+                        if (leader != null) {
+                            for (key in keys) {
+                                val nestedKey = key.removePrefix("leader_")
+                                val nested = leader.optString(nestedKey, "").trim()
+                                if (nested.isNotBlank()) return nested
+                            }
+                        }
+                        return ""
+                    }
+
                     val status = Status(
                         eventCode = event,
-                        leaderName = o.optString("leader_name", ""),
-                        leaderElapsedMs = nullableLong("leader_elapsed_ms"),
-                        leaderDeltaMs = nullableLong("leader_delta_ms"),
-                        estimatedRank = nullableInt("estimated_rank"),
+                        leaderBib = textValue("leader_bib", "leader_bib_number", "leader_number"),
+                        leaderName = textValue("leader_name"),
+                        leaderNickname = textValue("leader_nickname", "leader_nick"),
+                        leaderElapsedMs = nullableLong(o, "leader_elapsed_ms", "leader_best_ms", "best_elapsed_ms")
+                            ?: nullableLong(leader, "elapsed_ms", "best_ms", "best_elapsed_ms"),
+                        leaderDeltaMs = nullableLong(o, "leader_delta_ms"),
+                        estimatedRank = nullableInt(o, "estimated_rank"),
                         rankedCount = o.optInt("ranked_count", 0),
                         participantCount = o.optInt("participant_count", 0),
                         updatedAtMs = System.currentTimeMillis()
                     )
                     cache[event] = status
-                    // Keep the durable snapshot informed as well. RaceTimingService may overwrite
-                    // these optional presentation fields on a later GPS tick, so the HUD treats the
-                    // in-memory cache above as the primary source.
+                    // Keep the durable snapshot informed as well. Identity details stay in the
+                    // in-memory status because the durable schema predates bib/nickname support.
                     RaceDataStore(app).updateLiveLeaderboard(
                         status.leaderName,
                         status.leaderElapsedMs,
@@ -96,7 +126,7 @@ object RaceLiveLeaderStatus {
                     conn.disconnect()
                 }
             } catch (_: Exception) {
-                // Leader/rank display is additive. Timing must never depend on this request.
+                // Course-best display is additive. Timing must never depend on this request.
             } finally {
                 gate.set(false)
             }
