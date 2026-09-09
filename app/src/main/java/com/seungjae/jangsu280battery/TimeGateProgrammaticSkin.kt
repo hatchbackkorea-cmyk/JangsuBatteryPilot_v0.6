@@ -47,9 +47,16 @@ object TimeGateProgrammaticSkin {
 
     private fun apply(activity: Activity) {
         val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-        if (activity is RaceActivity && containsText(content, "DELTA")) return
+        // The live DELTA panel was repurposed to "코스 최고 기록" in v0.34.53, so using only the
+        // literal word DELTA as the live-screen guard became unsafe. Detect the three stable timing
+        // blocks instead. This keeps the blue/black timing canvas out of the light-theme converter
+        // even after the DELTA label changes again.
+        if (activity is RaceActivity && isRaceLiveTimingCanvas(content)) return
         styleTree(content)
     }
+
+    private fun isRaceLiveTimingCanvas(view: View): Boolean =
+        containsText(view, "BEST") && containsText(view, "PREVIOUS") && containsText(view, "CURRENT")
 
     private fun styleTree(view: View) {
         var lightContainer = false
