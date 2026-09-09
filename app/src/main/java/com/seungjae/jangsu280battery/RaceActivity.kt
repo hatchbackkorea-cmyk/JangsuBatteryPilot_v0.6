@@ -76,7 +76,7 @@ class RaceActivity : Activity() {
         qrTargetEventCode = deepEvent
         currentEventCode = deepEvent.ifBlank { store.lastJoined()?.config?.eventCode.orEmpty() }
         val snap = store.snapshot()
-        if (snap.state in setOf("WATCHING", "ARMED", "RUNNING")) showLive()
+        if (snap.state in setOf("WATCHING", "ARMED", "RUNNING", "FINISHED")) showLive()
         else if (deepEvent.isNotBlank()) showEvents(qrOnly = true)
         else showHome()
         Thread { runCatching { client.flushPending() } }.start()
@@ -182,7 +182,7 @@ class RaceActivity : Activity() {
             }
             setOnClickListener {
                 val s = store.snapshot()
-                if (s.state in setOf("WATCHING", "ARMED", "RUNNING")) showLive() else startRace()
+                if (s.state in setOf("WATCHING", "ARMED", "RUNNING", "FINISHED")) showLive() else startRace()
             }
         }
         body.addView(startButton, LinearLayout.LayoutParams(dp(216), dp(216)))
@@ -697,10 +697,10 @@ class RaceActivity : Activity() {
         val valid = historical.filter { it.status == "VALID" }
         val best = (valid.ifEmpty { historical }).minByOrNull { it.elapsedMs }
         val previous = historical.filter { it.status != "INVALID" }.maxByOrNull { it.finishedAtMs }
-        val elapsed = if (s.state == "RUNNING" && s.startedAtMs > 0L) (System.currentTimeMillis() - s.startedAtMs).coerceAtLeast(0L) else s.elapsedMs
-        bestTime?.text = best?.elapsedMs?.let(::formatBigTime) ?: "—"
-        previousTime?.text = previous?.elapsedMs?.let(::formatBigTime) ?: "—"
-        currentTime?.text = if (s.state == "WATCHING" || s.state == "ARMED") "0.0" else formatBigTime(elapsed)
+
+        // BEST / PREVIOUS / CURRENT are owned by RaceLiveLapDisplayInstaller. The base activity used
+        // to write the same three TextViews every 100 ms while the installer also wrote them every
+        // 100 ms, which made the just-finished lap visibly blink between two different values.
 
         val stateLabel = when (s.state) {
             "WATCHING" -> "AUTO · 코스 START 탐색"
