@@ -10,7 +10,9 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -41,6 +43,11 @@ class RaceTimingService : Service(), LocationListener {
         private const val START_RECOVERY_MAX_ACCURACY_M = 35.0
         private const val START_RECOVERY_MIN_SPEED_MPS = 1.0
         private const val START_RECOVERY_MIN_PROGRESS_M = 1.0
+
+        // Keep FINISH visible long enough to be readable, then automatically prepare the next lap.
+        // Timing is paused during this short display window so the finished run cannot collect extra
+        // GPS samples after the physical FINISH line.
+        private const val NEXT_LAP_REARM_DELAY_MS = 1_500L
     }
 
     private lateinit var locationManager: LocationManager
@@ -48,6 +55,8 @@ class RaceTimingService : Service(), LocationListener {
     private lateinit var client: RaceServerClient
     private lateinit var fusion: RaceSensorFusion
     private var wakeLock: PowerManager.WakeLock? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var nextLapRunnable: Runnable? = null
     private var config: RaceEventConfig? = null
     private var course: CourseData? = null
     private var courseId = ""
@@ -109,6 +118,11 @@ class RaceTimingService : Service(), LocationListener {
         wakeLock?.let { if (it.isHeld) runCatching { it.release() } }
     }
 
+    private fun cancelNextLapRearm() {
+        nextLapRunnable?.let(mainHandler::removeCallbacks)
+        nextLapRunnable = null
+    }
+
     private fun previousLapReference(cid: String): List<RaceReferencePoint> {
         if (cid.isBlank()) return emptyList()
         return store.completed()
@@ -120,7 +134,8 @@ class RaceTimingService : Service(), LocationListener {
             ?: emptyList()
     }
 
-    private fun arm(input: RaceEventConfig, cid: String) {
+    private fun arm(input: RaceEventConfig, cid: String, nextLap: Boolean = false) {
+        cancelNextLapRearm()
         val loaded = runCatching { CourseRepository(this).loadCourse(cid) }
             .getOrElse { writeError("코스를 열 수 없습니다: ${it.message}"); return }
         val normalizedBase = RaceGateMath.normalize(input, loaded)
@@ -160,14 +175,23 @@ class RaceTimingService : Service(), LocationListener {
         store.saveActiveConfig(normalized, cid, normalized.reference)
         fusion.start()
         seedPreviousGps(normalized.gates.first())
+        val waitStatus = when {
+            nextLap && normalized.eventCode == "PRACTICE" -> "다음 LAP · START 자동대기 · 화면 꺼져도 계측"
+            nextLap -> "다음 LAP · START 대기 · GPS+GNSS+IMU 센서융합"
+            normalized.eventCode == "PRACTICE" -> "연습 · START 자동대기 · 화면 꺼져도 계측"
+            else -> "START 대기 · GPS+GNSS+IMU 센서융합"
+        }
         writeSnapshot(
             previousRouteM ?: 0.0,
             prev?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0,
             null,
-            if (normalized.eventCode == "PRACTICE") "연습 · START 자동대기 · 화면 꺼져도 계측" else "START 대기 · GPS+GNSS+IMU 센서융합"
+            waitStatus
         )
         acquireTimingWakeLock()
-        startForeground(NOTIFICATION_ID, notification("START 게이트 대기 · 화면 꺼져도 자동 계측"))
+        startForeground(
+            NOTIFICATION_ID,
+            notification(if (nextLap) "다음 LAP · START 게이트 대기" else "START 게이트 대기 · 화면 꺼져도 자동 계측")
+        )
         requestGps()
         Thread { runCatching { client.flushPending() } }.start()
     }
@@ -355,6 +379,12 @@ class RaceTimingService : Service(), LocationListener {
         liveDeltaMs = referenceDeltaAt(startGate.routeM, 0L)
         referenceSamples.clear()
         referenceSamples += RaceReferencePoint(startGate.routeM, 0L)
+        writeSnapshot(
+            startGate.routeM,
+            prev?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0,
+            liveDeltaMs,
+            if (recoveredStart) "START 복구 · 계측 중" else "계측 중"
+        )
         updateNotification(if (recoveredStart) "RUNNING · START 복구 · ${cfg.name}" else "RUNNING · ${cfg.name}")
     }
 
@@ -484,6 +514,7 @@ class RaceTimingService : Service(), LocationListener {
     private fun finishRun(gate: RaceGate, crossAt: Long, routeM: Double) {
         val cfg = config ?: return
         val loaded = course ?: return
+        val finishedCourseId = courseId
         val finalIdx = sectors.size + 1
         val elapsed = (crossAt - startAt).coerceAtLeast(0L)
         sectors += RaceSectorResult(finalIdx, gate.name.ifBlank { "FINISH" }, (crossAt - lastGateAt).coerceAtLeast(0L), elapsed)
@@ -495,7 +526,7 @@ class RaceTimingService : Service(), LocationListener {
             runNumber,
             cfg.eventCode,
             cfg.name,
-            courseId,
+            finishedCourseId,
             loaded.name,
             startAt,
             crossAt,
@@ -528,22 +559,31 @@ class RaceTimingService : Service(), LocationListener {
             store.enqueue("FINISH", cfg.eventCode, payload, client.baseUrl())
             Thread { runCatching { client.flushPending() } }.start()
         }
+
         state = "FINISHED"
-        writeSnapshot(
-            cfg.distanceM,
-            maxAccuracyM,
-            liveDeltaMs,
-            if (cfg.eventCode == "PRACTICE") "✓ 자동 랩 계측 · 휴대폰 저장 완료"
-            else if (recoveredStart) "✓ START 복구 계측 · 휴대폰 저장 완료 · 서버 동기화 중"
-            else "✓ 센서융합 계측 · 휴대폰 저장 완료 · 서버 분류/동기화 중"
-        )
-        store.clearActiveConfig()
+        val finishStatus = if (cfg.eventCode == "PRACTICE") {
+            "✓ 자동 랩 저장 완료 · 다음 LAP 자동 준비 중"
+        } else if (recoveredStart) {
+            "✓ START 복구 계측 · 저장 완료 · 서버 동기화 · 다음 LAP 자동 준비 중"
+        } else {
+            "✓ 센서융합 계측 · 저장 완료 · 서버 동기화 · 다음 LAP 자동 준비 중"
+        }
+        writeSnapshot(cfg.distanceM, maxAccuracyM, liveDeltaMs, finishStatus)
+
+        // Freeze the completed lap cleanly while FINISH is on screen. Do not stop the service or
+        // clear the active configuration: this timing session is continuous and must automatically
+        // arm the next lap without another START-button press.
         runCatching { locationManager.removeUpdates(this) }
         fusion.stop()
         releaseTimingWakeLock()
-        updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation")
-        stopForeground(false)
-        stopSelf()
+        updateNotification("FINISH ${formatRaceTime(elapsed)} · $validation · 다음 LAP 준비")
+
+        val task = Runnable {
+            if (state != "FINISHED") return@Runnable
+            arm(cfg, finishedCourseId, nextLap = true)
+        }
+        nextLapRunnable = task
+        mainHandler.postDelayed(task, NEXT_LAP_REARM_DELAY_MS)
     }
 
     private fun sendLiveIfDue(location: Location, routeM: Double, delta: Long?) {
@@ -624,12 +664,14 @@ class RaceTimingService : Service(), LocationListener {
     }
 
     private fun writeError(message: String) {
+        cancelNextLapRearm()
         fusion.stop()
         releaseTimingWakeLock()
         store.writeSnapshot(store.snapshot().copy(state = "STOPPED", serverStatus = message))
     }
 
     private fun stopRace() {
+        cancelNextLapRearm()
         runCatching { locationManager.removeUpdates(this) }
         fusion.stop()
         releaseTimingWakeLock()
@@ -665,6 +707,7 @@ class RaceTimingService : Service(), LocationListener {
     }
 
     override fun onDestroy() {
+        cancelNextLapRearm()
         runCatching { locationManager.removeUpdates(this) }
         fusion.stop()
         releaseTimingWakeLock()
