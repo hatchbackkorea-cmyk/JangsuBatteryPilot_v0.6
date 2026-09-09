@@ -16,6 +16,7 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.abs
@@ -78,6 +79,8 @@ class RaceTimingService : Service(), LocationListener {
     private var maxOffRouteM = 0.0
     private var jumpCount = 0
     private var weakCrossingCount = 0
+    private var routeRecoveryCount = 0
+    private var skippedIntermediateGate = false
     private var rejectedCrossingCandidates = 0
     private var lastFusionConfidence = 0.0
     private var lastLiveSendAt = 0L
@@ -168,6 +171,8 @@ class RaceTimingService : Service(), LocationListener {
         maxOffRouteM = 0.0
         jumpCount = 0
         weakCrossingCount = 0
+        routeRecoveryCount = 0
+        skippedIntermediateGate = false
         rejectedCrossingCandidates = 0
         lastFusionConfidence = 0.0
         lastLiveSendAt = 0L
@@ -239,6 +244,8 @@ class RaceTimingService : Service(), LocationListener {
         previousRouteM = snap.routeM
         liveDeltaMs = snap.deltaMs
         weakCrossingCount = 0
+        routeRecoveryCount = 0
+        skippedIntermediateGate = false
         rejectedCrossingCandidates = 0
         lastFusionConfidence = 0.0
         recoveredStart = false
@@ -320,7 +327,10 @@ class RaceTimingService : Service(), LocationListener {
                 }
                 if (cross != null) {
                     if (routeRecovered) {
-                        weakCrossingCount++
+                        // This is still a normal ordered gate crossing: route progress bracketed the
+                        // exact gate and spatial/bearing guards passed. Count it for diagnostics but
+                        // do not demote an otherwise clean lap to REVIEW.
+                        routeRecoveryCount++
                         lastFusionConfidence = max(lastFusionConfidence, 0.55)
                     }
                     if (gate.type == "FINISH" || nextGateIndex == cfg.gates.lastIndex) finishRun(gate, cross, m.routeM)
@@ -330,8 +340,9 @@ class RaceTimingService : Service(), LocationListener {
 
             // FINISH must never be blocked by a missed intermediate CP. The normal ordered gate
             // sequence remains primary, but once course progress reaches the end we also test the
-            // real FINISH gate directly. This fixes the field case where routeM reached 1244/1244m
-            // and the timer kept RUNNING because nextGateIndex was still an earlier CP.
+            // real FINISH gate directly. A finish reached through this branch means at least one
+            // intermediate configured gate was skipped, so the run remains REVIEW even if the
+            // final FINISH crossing itself is spatially credible.
             if (state == "RUNNING" && p != null) {
                 val finishIndex = cfg.gates.indexOfLast { it.type.equals("FINISH", ignoreCase = true) }
                     .let { if (it >= 0) it else cfg.gates.lastIndex }
@@ -346,10 +357,11 @@ class RaceTimingService : Service(), LocationListener {
                         routeRecovered = finishCross != null
                     }
                     if (finishCross != null) {
-                        if (routeRecovered || nextGateIndex < finishIndex) {
-                            weakCrossingCount++
+                        if (routeRecovered) {
+                            routeRecoveryCount++
                             lastFusionConfidence = max(lastFusionConfidence, 0.55)
                         }
+                        skippedIntermediateGate = true
                         finishRun(finishGate, finishCross, m.routeM)
                     }
                 }
@@ -521,6 +533,7 @@ class RaceTimingService : Service(), LocationListener {
         liveDeltaMs = referenceDeltaAt(gate.routeM, elapsed)
         referenceSamples += RaceReferencePoint(cfg.distanceM.coerceAtLeast(routeM), elapsed)
         val validation = validationStatus()
+        val reasons = validationReasons()
         val summary = RaceRunSummary(
             runId,
             runNumber,
@@ -549,8 +562,12 @@ class RaceTimingService : Service(), LocationListener {
                 put("sensor_fusion", true)
                 put("fusion_confidence", lastFusionConfidence)
                 put("fusion_weak_crossings", weakCrossingCount)
+                put("route_recovery_crossings", routeRecoveryCount)
                 put("fusion_rejected_candidates", rejectedCrossingCandidates)
                 put("start_recovered", recoveredStart)
+                put("skipped_intermediate_gate", skippedIntermediateGate)
+                put("validation_reason", reasons.joinToString(","))
+                put("validation_reasons", JSONArray().apply { reasons.forEach { put(it) } })
                 put("gnss_satellites_used", sensor.satellitesUsed)
                 put("gnss_cn0_dbhz", sensor.averageCn0DbHz)
                 put("gnss_constellations", sensor.constellationCount)
@@ -620,9 +637,18 @@ class RaceTimingService : Service(), LocationListener {
         Thread { runCatching { client.sendLive(cfg.eventCode, joined.token, payload) } }.start()
     }
 
+    private fun validationReasons(): List<String> = buildList {
+        if (jumpCount > 0) add("GPS_JUMP")
+        if (maxOffRouteM > 120.0) add("OFF_ROUTE_SEVERE") else if (maxOffRouteM > 60.0) add("OFF_ROUTE")
+        if (maxAccuracyM > 100.0) add("GPS_ACCURACY_SEVERE") else if (maxAccuracyM > 50.0) add("GPS_ACCURACY")
+        if (recoveredStart) add("START_RECOVERED")
+        if (weakCrossingCount > 0) add("FUSION_WEAK")
+        if (skippedIntermediateGate) add("CP_SKIPPED")
+    }
+
     private fun validationStatus(): String = when {
         jumpCount > 0 || maxOffRouteM > 120.0 || maxAccuracyM > 100.0 -> "INVALID"
-        recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 -> "REVIEW"
+        recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 || skippedIntermediateGate -> "REVIEW"
         else -> "VALID"
     }
 
