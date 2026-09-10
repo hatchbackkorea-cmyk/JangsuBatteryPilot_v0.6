@@ -68,12 +68,29 @@ object RaceLiveLapDisplayInstaller {
 
         installHistoryButton(activity, root, courseId, eventCode)
 
-        val sessionRuns = sessionRuns(store.completed(), eventCode, courseId, session.startedAtMs)
-        val usable = sessionRuns.filter { RaceFairTiming.usable(it) }
+        val completedForCourse = store.completed()
+            .asSequence()
+            .filter { it.eventCode.equals(eventCode, ignoreCase = true) }
+            .filter { it.courseId == courseId }
+            .filter { it.elapsedMs > 0L }
+            .sortedBy { it.finishedAtMs }
+            .toList()
+        val sessionRuns = sessionRuns(completedForCourse, eventCode, courseId, session.startedAtMs)
         val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
-        val best = usable.minByOrNull { it.elapsedMs }
-        val bestLapNo = best?.let { target -> sessionRuns.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
+        // BEST is a rider-facing measured-lap display, not an official ranking verdict.
+        // Keep INVALID laps out, but allow VALID/REVIEW/legacy completed laps so restored
+        // phone history still shows the rider's real personal best. Server fair-ranking rules
+        // remain unchanged and continue to decide official eligibility separately.
+        val best = completedForCourse
+            .asSequence()
+            .filter { !it.status.equals("INVALID", ignoreCase = true) }
+            .minByOrNull { it.elapsedMs }
+        val bestLapNo = best?.let { target ->
+            completedForCourse.indexOfFirst { it.runId == target.runId }
+                .takeIf { it >= 0 }
+                ?.plus(1)
+        }
 
         val previous = when {
             currentFinishedIndex > 0 -> sessionRuns[currentFinishedIndex - 1]
@@ -122,7 +139,8 @@ object RaceLiveLapDisplayInstaller {
         if (eventCode == "PRACTICE") {
             val localBest = store.completed()
                 .asSequence()
-                .filter { it.courseId == courseId && RaceFairTiming.usable(it) }
+                .filter { it.courseId == courseId && it.elapsedMs > 0L }
+                .filter { !it.status.equals("INVALID", ignoreCase = true) }
                 .minByOrNull { it.elapsedMs }
             value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return
@@ -130,8 +148,10 @@ object RaceLiveLapDisplayInstaller {
 
         RaceLiveLeaderStatus.refreshIfDue(activity, snapshot)
         val live = RaceLiveLeaderStatus.cached(eventCode)
-        val leaderMs = live?.leaderElapsedMs ?: snapshot.leaderElapsedMs
-        val leaderName = live?.leaderName?.takeIf { it.isNotBlank() } ?: snapshot.leaderName
+        val leaderMs = live?.displayLeaderElapsedMs ?: live?.leaderElapsedMs ?: snapshot.leaderElapsedMs
+        val leaderName = live?.displayLeaderName?.takeIf { it.isNotBlank() }
+            ?: live?.leaderName?.takeIf { it.isNotBlank() }
+            ?: snapshot.leaderName
         val leaderBib = live?.leaderBib.orEmpty().trim()
         val leaderNickname = live?.leaderNickname.orEmpty().trim()
 
