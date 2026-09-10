@@ -75,19 +75,17 @@ object RaceLiveLapDisplayInstaller {
             .filter { it.elapsedMs > 0L }
             .sortedBy { it.finishedAtMs }
             .toList()
-        val sessionRuns = sessionRuns(completedForCourse, eventCode, courseId, session.startedAtMs)
+        val validCompletedForCourse = completedForCourse
+            .filter { !it.status.equals("INVALID", ignoreCase = true) }
+        val sessionRuns = sessionRuns(validCompletedForCourse, eventCode, courseId, session.startedAtMs)
         val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
-        // BEST is a rider-facing measured-lap display, not an official ranking verdict.
-        // Keep INVALID laps out, but allow VALID/REVIEW/legacy completed laps so restored
-        // phone history still shows the rider's real personal best. Server fair-ranking rules
-        // remain unchanged and continue to decide official eligibility separately.
-        val best = completedForCourse
-            .asSequence()
-            .filter { !it.status.equals("INVALID", ignoreCase = true) }
-            .minByOrNull { it.elapsedMs }
+        // BEST and PREVIOUS are rider-facing measured-lap displays. INVALID laps never belong in
+        // either comparison; VALID/REVIEW/legacy completed laps remain usable so restored phone
+        // history still behaves naturally while official server ranking keeps its own rules.
+        val best = validCompletedForCourse.minByOrNull { it.elapsedMs }
         val bestLapNo = best?.let { target ->
-            completedForCourse.indexOfFirst { it.runId == target.runId }
+            validCompletedForCourse.indexOfFirst { it.runId == target.runId }
                 .takeIf { it >= 0 }
                 ?.plus(1)
         }
@@ -136,12 +134,14 @@ object RaceLiveLapDisplayInstaller {
         panel.visibility = View.VISIBLE
         val value = panel.findViewWithTag<TextView>(TAG_COURSE_BEST_VALUE) ?: return
 
+        val localBest = store.completed()
+            .asSequence()
+            .filter { it.courseId == courseId && it.elapsedMs > 0L }
+            .filter { !it.status.equals("INVALID", ignoreCase = true) }
+            .filter { eventCode == "PRACTICE" || it.eventCode.equals(eventCode, ignoreCase = true) }
+            .minByOrNull { it.elapsedMs }
+
         if (eventCode == "PRACTICE") {
-            val localBest = store.completed()
-                .asSequence()
-                .filter { it.courseId == courseId && it.elapsedMs > 0L }
-                .filter { !it.status.equals("INVALID", ignoreCase = true) }
-                .minByOrNull { it.elapsedMs }
             value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return
         }
@@ -154,6 +154,22 @@ object RaceLiveLapDisplayInstaller {
             ?: snapshot.leaderName
         val leaderBib = live?.leaderBib.orEmpty().trim()
         val leaderNickname = live?.leaderNickname.orEmpty().trim()
+
+        // A course-best panel must never show a time slower than a known valid lap on this phone.
+        // The server remains authoritative for official ranking, but the participant HUD merges the
+        // freshest server leader with this device's valid local history and displays the faster one.
+        val localMs = localBest?.elapsedMs
+        if (localMs != null && (leaderMs == null || localMs <= leaderMs)) {
+            val profile = RaceProfileStore.profile(activity)
+            val identity = buildList {
+                if (profile.bib.isNotBlank()) add(profile.bib.trim())
+                if (profile.name.isNotBlank()) add(profile.name.trim())
+                if (profile.nickname.isNotBlank() && !profile.nickname.equals(profile.name.trim(), ignoreCase = true)) add(profile.nickname.trim())
+                add(formatTime(localMs))
+            }
+            value.text = identity.joinToString("   ")
+            return
+        }
 
         if (leaderMs == null) {
             value.text = "기록 대기 중"
