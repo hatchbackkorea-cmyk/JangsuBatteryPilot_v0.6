@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply TimeGate REVIEW removal and home copy
+      - name: Apply TimeGate no-review policy and home copy
         shell: bash
         run: |
           python3 - <<'PY'
@@ -39,7 +39,6 @@ jobs:
               ('menu(c, 660f, red, Color.WHITE, "기록측정", "지금 시작하세요", Icon.PLAY)',
                'menu(c, 660f, red, Color.WHITE, "LAP TIMER", "어제보다 오늘이 더 빠르게!", Icon.PLAY)'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceTimingService.kt', [
               ('recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 || skippedIntermediateGate -> "REVIEW"',
                'recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 || skippedIntermediateGate -> "INVALID"'),
@@ -47,38 +46,31 @@ jobs:
                'it.courseId == cid && it.status == "VALID" && it.reference.size >= 2'),
               ('" · 계측 검토"', '" · 계측 기준 미달"'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceDataStore.kt', [
               ('val jumpCount: Int = 0, val validation: String = "REVIEW",',
                'val jumpCount: Int = 0, val validation: String = "INVALID",'),
               ('o.optString("validation", "REVIEW")', 'o.optString("validation", "INVALID")'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceProtocol.kt', [
               ('o.optLong("elapsed_ms"), o.optString("status", "REVIEW"),',
                'o.optLong("elapsed_ms"), o.optString("status", "INVALID"),'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceFairTiming.kt', [
               ('put("quality",if(m==null)"UNKNOWN" else if(reasons.isEmpty())"ACCEPTED" else "REVIEW")',
                'put("quality",if(m==null)"UNKNOWN" else if(reasons.isEmpty())"ACCEPTED" else "REJECTED")'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceActivity.kt', [
               ('it.courseId == courseId && it.status != "INVALID" && it.reference.size >= 2',
                'it.courseId == courseId && it.status == "VALID" && it.reference.size >= 2'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceAutoLapDiscoveryService.kt', [
               ('val history = runs.filter { it.courseId == meta.id && it.status != "INVALID" }',
                'val history = runs.filter { it.courseId == meta.id && it.status == "VALID" }'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceLiveLapDisplayInstaller.kt', [
               ('.filter { it.status.uppercase() !in setOf("INVALID", "DNF") }',
                '.filter { it.status.equals("VALID", ignoreCase = true) }'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceLapHistoryActivity.kt', [
               ('val usable = laps.filter { it.status.uppercase() !in setOf("INVALID", "DNF") }',
                'val usable = laps.filter { it.status.equals("VALID", ignoreCase = true) }'),
@@ -89,7 +81,6 @@ jobs:
               ('DNF/INVALID 구간은 비교에서 제외합니다.',
                '기존 REVIEW/DNF/INVALID 구간은 비교에서 제외합니다.'),
           ])
-
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceLocalRecovery.kt', [
               ('restores local-only laps as\n * REVIEW records so measured times are preserved without fabricating certification.',
                'restores local-only laps as\n * INVALID records so measured times are preserved without fabricating certification.'),
@@ -112,6 +103,7 @@ jobs:
           checks = {
               'app/src/main/java/com/seungjae/jangsu280battery/TimeGateHomeView.kt': ['"LAP TIMER"', '"어제보다 오늘이 더 빠르게!"'],
               'app/src/main/java/com/seungjae/jangsu280battery/RaceTimingService.kt': ['-> "INVALID"', 'it.status == "VALID"'],
+              'app/src/main/java/com/seungjae/jangsu280battery/RaceLapHistoryActivity.kt': ['it.status.equals("VALID", ignoreCase = true)'],
           }
           for path, needles in checks.items():
               text = Path(path).read_text(encoding='utf-8')
@@ -121,12 +113,11 @@ jobs:
 
           forbidden = [
               ('app/src/main/java/com/seungjae/jangsu280battery/RaceTimingService.kt', '-> "REVIEW"'),
-              ('app/src/main/java/com/seungjae/jangsu280battery/RaceActivity.kt', 'status != "INVALID"'),
               ('app/src/main/java/com/seungjae/jangsu280battery/RaceLiveLapDisplayInstaller.kt', '!in setOf("INVALID", "DNF")'),
           ]
           for path, needle in forbidden:
               if needle in Path(path).read_text(encoding='utf-8'):
-                  raise SystemExit(f'Forbidden legacy semantics remain: {path}: {needle}')
+                  raise SystemExit(f'Forbidden legacy timing semantics remain: {path}: {needle}')
           print('Target Android version:', target)
           PY
       - name: Build and test Android
