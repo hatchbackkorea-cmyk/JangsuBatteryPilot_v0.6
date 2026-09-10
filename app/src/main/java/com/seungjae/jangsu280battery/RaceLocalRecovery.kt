@@ -1,8 +1,10 @@
 package com.seungjae.jangsu280battery
 
 import android.content.Context
+import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /**
  * One-time recovery helper for the legacy case where several cloned phones shared one
@@ -20,6 +22,57 @@ object RaceLocalRecovery {
         val runs: List<RaceRunSummary>
     )
 
+    data class LocalForensics(
+        val currentEventCompleted: Int,
+        val allCompleted: Int,
+        val rawFiles: Int,
+        val rawNonEmptyFiles: Int,
+        val otherEventCompleted: Int,
+        val eventBreakdown: Map<String, Int>
+    )
+
+    fun scanAll(context: Context): LocalForensics {
+        val store = RaceDataStore(context)
+        val joinedCode = store.lastJoined()?.config?.eventCode?.trim()?.uppercase().orEmpty()
+        val completed = store.completed()
+            .filter { it.runId.isNotBlank() && it.elapsedMs > 0L }
+        val current = if (joinedCode.isBlank()) 0 else completed.count {
+            it.eventCode.trim().uppercase() == joinedCode
+        }
+        val breakdown = completed
+            .groupingBy { it.eventCode.trim().uppercase().ifBlank { "PRACTICE" } }
+            .eachCount()
+            .toSortedMap()
+
+        val rawDir = File(context.applicationContext.filesDir, "race/raw")
+        val raw = rawDir.listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".jsonl", ignoreCase = true) }
+            .orEmpty()
+
+        return LocalForensics(
+            currentEventCompleted = current,
+            allCompleted = completed.size,
+            rawFiles = raw.size,
+            rawNonEmptyFiles = raw.count { it.length() > 0L },
+            otherEventCompleted = (completed.size - current).coerceAtLeast(0),
+            eventBreakdown = breakdown
+        )
+    }
+
+    private fun showForensicsIfNeeded(context: Context, currentRuns: List<RaceRunSummary>) {
+        if (currentRuns.isNotEmpty()) return
+        val scan = scanAll(context)
+        val events = scan.eventBreakdown.entries
+            .joinToString(" · ") { "${it.key} ${it.value}랩" }
+            .takeIf { it.isNotBlank() }
+            ?: "완료랩 이벤트 없음"
+        Toast.makeText(
+            context.applicationContext,
+            "전체 로컬 검사 · 완료랩 ${scan.allCompleted} · RAW ${scan.rawNonEmptyFiles}/${scan.rawFiles} · $events",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
     fun preview(context: Context): Preview? {
         val store = RaceDataStore(context)
         val joined = store.lastJoined() ?: return null
@@ -27,6 +80,7 @@ object RaceLocalRecovery {
         val runs = store.completed()
             .filter { it.eventCode.trim().uppercase() == code && it.runId.isNotBlank() && it.elapsedMs > 0L }
             .sortedWith(compareBy<RaceRunSummary> { it.startedAtMs }.thenBy { it.runNumber })
+        showForensicsIfNeeded(context, runs)
         return Preview(code, joined.config.name, RaceProfileStore.profile(context), runs)
     }
 
