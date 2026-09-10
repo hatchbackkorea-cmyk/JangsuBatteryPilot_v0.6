@@ -110,6 +110,12 @@ class RaceServerClient(context: Context) {
         return request("PUT", "/api/race/events/$code/participant-profile", body, token)
     }
 
+    fun recoverLocalRuns(eventCode: String, token: String, payload: JSONObject): JSONObject {
+        require(eventCode.isNotBlank() && token.isNotBlank()) { "대회 참가 정보가 없습니다." }
+        val code = URLEncoder.encode(eventCode.trim().uppercase(), "UTF-8")
+        return request("POST", "/api/race/events/$code/recover-local-runs", payload, token)
+    }
+
     fun downloadCourse(eventCode: String): File {
         val cleanEventCode = eventCode.trim().uppercase()
         val code = URLEncoder.encode(cleanEventCode, "UTF-8")
