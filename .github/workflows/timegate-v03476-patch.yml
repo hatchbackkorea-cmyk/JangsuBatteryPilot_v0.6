@@ -70,6 +70,8 @@ jobs:
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceLiveLapDisplayInstaller.kt', [
               ('.filter { it.status.uppercase() !in setOf("INVALID", "DNF") }',
                '.filter { it.status.equals("VALID", ignoreCase = true) }'),
+              ('if (held.status.uppercase() !in setOf("INVALID", "DNF")) {',
+               'if (held.status.equals("VALID", ignoreCase = true)) {'),
           ])
           edit('app/src/main/java/com/seungjae/jangsu280battery/RaceLapHistoryActivity.kt', [
               ('val usable = laps.filter { it.status.uppercase() !in setOf("INVALID", "DNF") }',
