@@ -75,6 +75,7 @@ object RaceLiveLapDisplayInstaller {
 
         // BEST/PREVIOUS are scoped to the exact room + exact event-downloaded course.
         // A visually identical GPX from PRACTICE or another room can never enter this set.
+        // DNF remains visible in history, but is never a comparison record.
         val completedForRoom = store.completed()
             .asSequence()
             .filter { it.eventCode.equals(eventCode, ignoreCase = true) }
@@ -83,12 +84,12 @@ object RaceLiveLapDisplayInstaller {
             .sortedBy { it.finishedAtMs }
             .toList()
         val validCompletedForRoom = completedForRoom
-            .filter { !it.status.equals("INVALID", ignoreCase = true) }
+            .filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
         val sessionRuns = sessionRuns(validCompletedForRoom, eventCode, courseId, session.startedAtMs)
         val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
         // BEST and PREVIOUS are rider-facing records from this room only. Official ranking remains
-        // server-authoritative; INVALID laps never participate in either comparison.
+        // server-authoritative; INVALID/DNF laps never participate in either comparison.
         val best = validCompletedForRoom.minByOrNull { it.elapsedMs }
         val bestLapNo = best?.let { target ->
             validCompletedForRoom.indexOfFirst { it.runId == target.runId }
@@ -147,7 +148,7 @@ object RaceLiveLapDisplayInstaller {
                 .asSequence()
                 .filter { it.eventCode.equals("PRACTICE", ignoreCase = true) }
                 .filter { it.courseId == courseId && it.elapsedMs > 0L }
-                .filter { !it.status.equals("INVALID", ignoreCase = true) }
+                .filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
                 .minByOrNull { it.elapsedMs }
             value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return
