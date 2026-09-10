@@ -139,8 +139,15 @@ data class RaceRunSummary(
     }
 }
 
+/**
+ * Canonical TimeGate visible-record precision.
+ * Raw milliseconds are preserved for timing evidence and TG공정성 verification; every rider/admin/monitor
+ * time shown to people is rounded to the nearest 0.1 second (50 ms rounds upward).
+ */
+fun roundRaceTimeMs(ms: Long): Long = ((ms.coerceAtLeast(0L) + 50L) / 100L) * 100L
+
 fun formatRaceTime(ms: Long): String {
-    val rounded = ((ms.coerceAtLeast(0L) + 50L) / 100L) * 100L
+    val rounded = roundRaceTimeMs(ms)
     val minutes = rounded / 60_000L
     val seconds = (rounded % 60_000L) / 1_000L
     val tenth = (rounded % 1_000L) / 100L
