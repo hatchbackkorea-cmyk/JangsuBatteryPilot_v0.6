@@ -274,13 +274,7 @@ object RaceLiveLapDisplayInstaller {
         block.time.text = value
     }
 
-    private fun formatTime(ms: Long): String {
-        val safe = ms.coerceAtLeast(0L)
-        val minute = safe / 60_000
-        val seconds = (safe % 60_000) / 1000
-        val tenth = (safe % 1000) / 100
-        return if (minute > 0) "%d:%02d.%d".format(minute, seconds, tenth) else "%d.%d".format(seconds, tenth)
-    }
+    private fun formatTime(ms: Long): String = formatRaceTime(ms)
 
     private fun findText(root: View, text: String): TextView? {
         if (root is TextView && root.text?.toString() == text) return root
