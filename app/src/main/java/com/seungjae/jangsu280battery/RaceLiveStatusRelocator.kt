@@ -14,6 +14,7 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.WeakHashMap
@@ -55,6 +56,7 @@ private object RaceLiveStatusRelocatorCallbacks : Application.ActivityLifecycleC
 object RaceLiveStatusRelocator {
     private const val TAG_STATUS = "timegate_live_footer_state_v03474"
     private const val TAG_FOOTER_ROW = "timegate_live_footer_row_v03473"
+    private const val TAG_HISTORY = "timegate_lap_history_v03444"
     private const val STATUS_WIDTH_DP = 152
     private const val STATUS_TEXT_SP = 10f
 
@@ -82,8 +84,8 @@ object RaceLiveStatusRelocator {
         val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
         val snapshot = RaceDataStore(activity).snapshot()
 
-        // Remove the ARMED/RUNNING/FINISH identity line from the grey top bar entirely.
         hideTopStateText(root)
+        tidyTopBar(activity, root)
 
         // RaceRuntimeLiveUiInstaller owns the GPS/DNF row. Wait until it has wrapped the footer,
         // then add the moved state text as the first item in that same bottom row.
@@ -105,6 +107,37 @@ object RaceLiveStatusRelocator {
         status.visibility = View.VISIBLE
         status.setTextColor(Color.WHITE)
         status.textSize = STATUS_TEXT_SP
+    }
+
+    /** Top bar = back arrow on the left, lap history on the far right. No LIVE/state text. */
+    private fun tidyTopBar(activity: RaceActivity, root: ViewGroup) {
+        val history = root.findViewWithTag<Button>(TAG_HISTORY) ?: return
+        val row = history.parent as? LinearLayout ?: return
+        val back = findButton(row) {
+            val t = it.text?.toString()?.trim().orEmpty()
+            t.contains("Live", ignoreCase = true) || t == "‹"
+        } ?: return
+
+        back.text = "‹"
+        back.textSize = 26f
+        back.layoutParams = LinearLayout.LayoutParams(dp(activity, 56), dp(activity, 56))
+
+        // The weighted liveHeader remains only as an invisible spacer so 랩 기록 stays right-aligned.
+        for (i in 0 until row.childCount) {
+            val child = row.getChildAt(i)
+            if (child is TextView && child !is Button) child.visibility = View.INVISIBLE
+        }
+
+        if (row.indexOfChild(history) != row.childCount - 1) {
+            row.removeView(history)
+            row.addView(history, LinearLayout.LayoutParams(dp(activity, 86), dp(activity, 42)).apply {
+                marginEnd = dp(activity, 6)
+            })
+        } else {
+            history.layoutParams = LinearLayout.LayoutParams(dp(activity, 86), dp(activity, 42)).apply {
+                marginEnd = dp(activity, 6)
+            }
+        }
     }
 
     private fun footerState(s: RaceDataStore.Snapshot): String {
@@ -134,6 +167,14 @@ object RaceLiveStatusRelocator {
         if (root is ViewGroup) {
             for (i in 0 until root.childCount) hideTopStateText(root.getChildAt(i))
         }
+    }
+
+    private fun findButton(root: View, predicate: (Button) -> Boolean): Button? {
+        if (root is Button && predicate(root)) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) findButton(root.getChildAt(i), predicate)?.let { return it }
+        }
+        return null
     }
 
     private fun dp(activity: Activity, value: Int): Int =
