@@ -10,7 +10,7 @@ import org.json.JSONObject
  *
  * Recovery never edits/deletes the phone-local files. The server matches by run_id, moves
  * matching server records to this device-scoped participant, and restores local-only laps as
- * REVIEW records so measured times are preserved without fabricating certification.
+ * INVALID records so measured times are preserved without fabricating certification.
  */
 object RaceLocalRecovery {
     data class Preview(

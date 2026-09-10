@@ -139,7 +139,7 @@ class TimeGateHomeView(context: Context) : FrameLayout(context) {
             drawHero(c)
             drawRoute(c)
 
-            menu(c, 660f, red, Color.WHITE, "기록측정", "지금 시작하세요", Icon.PLAY)
+            menu(c, 660f, red, Color.WHITE, "LAP TIMER", "어제보다 오늘이 더 빠르게!", Icon.PLAY)
             menu(c, 772f, blue, Color.WHITE, "관전하기", "실시간 기록을 확인하세요", Icon.MONITOR)
             menu(c, 884f, black, Color.WHITE, "맵만들기", "GPX파일 불러오기 및 제작하기", Icon.MAP)
             menu(c, 996f, red, Color.WHITE, "그란폰도", "ROAD · 페이스 코치", Icon.BIKE)

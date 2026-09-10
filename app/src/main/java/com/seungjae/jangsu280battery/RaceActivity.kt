@@ -483,7 +483,7 @@ class RaceActivity : Activity() {
     private fun previousRunForCourse(courseId: String): RaceRunSummary? {
         if (courseId.isBlank()) return null
         return store.completed()
-            .filter { it.courseId == courseId && it.status != "INVALID" && it.reference.size >= 2 }
+            .filter { it.courseId == courseId && it.status == "VALID" && it.reference.size >= 2 }
             .maxByOrNull { it.finishedAtMs }
     }
 

@@ -75,7 +75,7 @@ object RaceLiveLapDisplayInstaller {
             .sortedBy { it.finishedAtMs }
             .toList()
         val comparisonRuns = completedForRoom
-            .filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
+            .filter { it.status.equals("VALID", ignoreCase = true) }
 
         val currentCompletedIndex = completedForRoom.indexOfFirst { it.runId == snapshot.runId }
         val best = comparisonRuns.minByOrNull { it.elapsedMs }
@@ -109,7 +109,7 @@ object RaceLiveLapDisplayInstaller {
         val heldIndex = if (heldId == null) -1 else completedForRoom.indexOfFirst { it.runId == heldId }
         if (heldIndex >= 0) {
             val held = completedForRoom[heldIndex]
-            if (held.status.uppercase() !in setOf("INVALID", "DNF")) {
+            if (held.status.equals("VALID", ignoreCase = true)) {
                 setBlock(currentBlock, heldIndex + 1, held.elapsedMs)
                 val before = comparisonRuns.lastOrNull { it.finishedAtMs < held.finishedAtMs }
                 val beforeLap = before?.let { b -> completedForRoom.indexOfFirst { it.runId == b.runId } + 1 }?.takeIf { it > 0 }
@@ -152,7 +152,7 @@ object RaceLiveLapDisplayInstaller {
                 .asSequence()
                 .filter { it.eventCode.equals("PRACTICE", ignoreCase = true) }
                 .filter { it.courseId == courseId && it.elapsedMs > 0L }
-                .filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
+                .filter { it.status.equals("VALID", ignoreCase = true) }
                 .minByOrNull { it.elapsedMs }
             value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return

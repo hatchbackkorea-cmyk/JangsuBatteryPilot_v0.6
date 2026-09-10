@@ -159,7 +159,7 @@ class RaceAutoLapDiscoveryService : Service(), LocationListener {
                 val base = RaceGateMath.practiceConfig(meta.id, course)
                 val start = base.gates.firstOrNull { it.type == "START" } ?: return@runCatching null
                 if (base.gates.none { it.type == "FINISH" }) return@runCatching null
-                val history = runs.filter { it.courseId == meta.id && it.status != "INVALID" }
+                val history = runs.filter { it.courseId == meta.id && it.status == "VALID" }
                 val valid = history.filter { it.status == "VALID" }
                 val best = (valid.ifEmpty { history }).minByOrNull { it.elapsedMs }
                 val reference = best?.reference?.takeIf { it.size >= 2 } ?: emptyList()

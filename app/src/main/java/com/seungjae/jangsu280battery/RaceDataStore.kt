@@ -20,7 +20,7 @@ class RaceDataStore(context: Context) {
         val runId: String = "", val runNumber: Int = 0, val startedAtMs: Long = 0L, val lastGateAtMs: Long = 0L, val elapsedMs: Long = 0L,
         val routeM: Double = 0.0, val totalM: Double = 0.0, val deltaMs: Long? = null, val nextGateIndex: Int = 0, val currentSector: String = "",
         val gpsAccuracyM: Double = 0.0, val maxSpeedKph: Double = 0.0, val maxGpsAccuracyM: Double = 0.0, val maxOffRouteM: Double = 0.0,
-        val jumpCount: Int = 0, val validation: String = "REVIEW", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
+        val jumpCount: Int = 0, val validation: String = "INVALID", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
         val leaderName: String = "", val leaderElapsedMs: Long? = null, val leaderDeltaMs: Long? = null, val estimatedRank: Int? = null,
         val rankedCount: Int = 0, val participantCount: Int = 0, val startedElapsedNs: Long = 0L
     ) {
@@ -44,7 +44,7 @@ class RaceDataStore(context: Context) {
                     o.optString("run_id"), o.optInt("run_number", 0), o.optLong("started_at_ms"), o.optLong("last_gate_at_ms"), o.optLong("elapsed_ms"),
                     o.optDouble("route_m", 0.0), o.optDouble("total_m", 0.0), if (o.has("delta_ms") && !o.isNull("delta_ms")) o.optLong("delta_ms") else null,
                     o.optInt("next_gate_index", 0), o.optString("current_sector"), o.optDouble("gps_accuracy_m", 0.0), o.optDouble("max_speed_kph", 0.0),
-                    o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0), o.optInt("jump_count", 0), o.optString("validation", "REVIEW"),
+                    o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0), o.optInt("jump_count", 0), o.optString("validation", "INVALID"),
                     (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(RaceSectorResult::fromJson) },
                     if (o.has("finish_rank") && !o.isNull("finish_rank")) o.optInt("finish_rank") else null, o.optString("server_status", ""),
                     o.optString("leader_name", ""), if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,

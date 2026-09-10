@@ -26,7 +26,7 @@ object RaceFairTiming {
             put("rule_version",RULE);put("algorithm",GateTimingMath.ALGORITHM)
             put("policy",runCatching{JSONObject(config.fairPolicyJson)}.getOrDefault(JSONObject()))
             put("margin_kind","OPERATIONAL_ESTIMATE_NOT_CALIBRATED");put("margin_ms",m?:JSONObject.NULL)
-            put("quality",if(m==null)"UNKNOWN" else if(reasons.isEmpty())"ACCEPTED" else "REVIEW")
+            put("quality",if(m==null)"UNKNOWN" else if(reasons.isEmpty())"ACCEPTED" else "REJECTED")
             put("reasons",JSONArray(reasons.distinct()));put("start",start?:JSONObject.NULL);put("finish",finish?:JSONObject.NULL)
             put("original_started_at_ms",originalStart);put("original_finished_at_ms",originalFinish)
             put("original_elapsed_ms",(originalFinish-originalStart).coerceAtLeast(0L));put("app_version",BuildConfig.VERSION_NAME)

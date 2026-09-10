@@ -157,7 +157,7 @@ class RaceTimingService : Service(), LocationListener {
         if (cid.isBlank()) return emptyList()
         return store.completed()
             .asSequence()
-            .filter { it.courseId == cid && it.status != "INVALID" && it.reference.size >= 2 }
+            .filter { it.courseId == cid && it.status == "VALID" && it.reference.size >= 2 }
             .maxByOrNull { it.finishedAtMs }
             ?.reference
             ?.sortedBy { it.routeM }
@@ -749,7 +749,7 @@ class RaceTimingService : Service(), LocationListener {
             append(" · 정밀보정 ")
             if (finishRefinementMs == 0L && startRefinementMs == 0L) append("유지")
             else append("적용")
-            append(if (timingAudit.optString("quality") == "ACCEPTED") " · 계측기준 충족(시범)" else " · 계측 검토")
+            append(if (timingAudit.optString("quality") == "ACCEPTED") " · 계측기준 충족(시범)" else " · 계측 기준 미달")
             if (timingUncertaintyMs == null) append(" · 여유폭 판단 불가")
             else append(" · 판정여유폭 ±").append(timingUncertaintyMs).append("ms(잠정)")
             if (cfg.eventCode != "PRACTICE") append(" · 서버 동기화")
@@ -824,7 +824,7 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun validationStatus(): String = when {
         jumpCount > 0 || maxOffRouteM > 120.0 || maxAccuracyM > 100.0 -> "INVALID"
-        recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 || skippedIntermediateGate -> "REVIEW"
+        recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 || skippedIntermediateGate -> "INVALID"
         else -> "VALID"
     }
 

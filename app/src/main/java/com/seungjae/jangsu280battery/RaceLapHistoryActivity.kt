@@ -126,7 +126,7 @@ class RaceLapHistoryActivity : Activity() {
             return
         }
 
-        val usable = laps.filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
+        val usable = laps.filter { it.status.equals("VALID", ignoreCase = true) }
         val schemaRun = usable.maxWithOrNull(compareBy<RaceRunSummary> { it.sectors.size }.thenBy { it.finishedAtMs })
             ?: laps.maxByOrNull { it.finishedAtMs }
         val segmentCount = schemaRun?.sectors?.size ?: 0
@@ -155,7 +155,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("랩별 전체 기록"))
         body.addView(TextView(this).apply {
-            text = "DNF/INVALID는 기록표에는 남지만 BEST/OPTIMAL 계산에서는 제외합니다."
+            text = "기존 REVIEW/DNF/INVALID는 기록표에는 남지만 BEST/OPTIMAL 계산에서는 제외합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(6))
@@ -164,7 +164,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("CP 구간 상세"))
         body.addView(TextView(this).apply {
-            text = "각 CP 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다. DNF/INVALID 구간은 비교에서 제외합니다."
+            text = "각 CP 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다. 기존 REVIEW/DNF/INVALID 구간은 비교에서 제외합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(7))
@@ -187,7 +187,7 @@ class RaceLapHistoryActivity : Activity() {
         table.addView(header)
 
         laps.forEachIndexed { lapIndex, run ->
-            val excluded = run.status.uppercase() in setOf("INVALID", "DNF")
+            val excluded = !run.status.equals("VALID", ignoreCase = true)
             val row = TableRow(this).apply { setBackgroundColor(Color.WHITE) }
             val isBest = actualBest?.runId == run.runId
             row.addView(cell("${lapIndex + 1}${if (isBest) " ★" else ""}", true, if (isBest) BLUE else if (excluded) Color.GRAY else TEXT, dp(62)))
@@ -254,7 +254,7 @@ class RaceLapHistoryActivity : Activity() {
         }
 
         laps.forEachIndexed { index, run ->
-            val excluded = run.status.uppercase() in setOf("INVALID", "DNF")
+            val excluded = !run.status.equals("VALID", ignoreCase = true)
             val isBest = actualBest?.runId == run.runId
             val color = when {
                 excluded -> Color.GRAY
