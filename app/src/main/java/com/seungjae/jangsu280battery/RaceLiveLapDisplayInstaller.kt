@@ -17,6 +17,11 @@ import java.util.WeakHashMap
 /**
  * Owns BEST/PREVIOUS/CURRENT and repurposes the old DELTA area as a simple course-best panel.
  * Full lap history belongs on RaceLapHistoryActivity.
+ *
+ * Room isolation rule:
+ * - PRACTICE uses this phone's local course history.
+ * - A joined event uses only records with the same eventCode + downloaded event courseId.
+ * - The event course-best panel is server-authoritative and never merges unrelated local history.
  */
 object RaceLiveLapDisplayInstaller {
     private const val TAG_HISTORY = "timegate_lap_history_v03444"
@@ -68,24 +73,25 @@ object RaceLiveLapDisplayInstaller {
 
         installHistoryButton(activity, root, courseId, eventCode)
 
-        val completedForCourse = store.completed()
+        // BEST/PREVIOUS are scoped to the exact room + exact event-downloaded course.
+        // A visually identical GPX from PRACTICE or another room can never enter this set.
+        val completedForRoom = store.completed()
             .asSequence()
             .filter { it.eventCode.equals(eventCode, ignoreCase = true) }
             .filter { it.courseId == courseId }
             .filter { it.elapsedMs > 0L }
             .sortedBy { it.finishedAtMs }
             .toList()
-        val validCompletedForCourse = completedForCourse
+        val validCompletedForRoom = completedForRoom
             .filter { !it.status.equals("INVALID", ignoreCase = true) }
-        val sessionRuns = sessionRuns(validCompletedForCourse, eventCode, courseId, session.startedAtMs)
+        val sessionRuns = sessionRuns(validCompletedForRoom, eventCode, courseId, session.startedAtMs)
         val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
-        // BEST and PREVIOUS are rider-facing measured-lap displays. INVALID laps never belong in
-        // either comparison; VALID/REVIEW/legacy completed laps remain usable so restored phone
-        // history still behaves naturally while official server ranking keeps its own rules.
-        val best = validCompletedForCourse.minByOrNull { it.elapsedMs }
+        // BEST and PREVIOUS are rider-facing records from this room only. Official ranking remains
+        // server-authoritative; INVALID laps never participate in either comparison.
+        val best = validCompletedForRoom.minByOrNull { it.elapsedMs }
         val bestLapNo = best?.let { target ->
-            validCompletedForCourse.indexOfFirst { it.runId == target.runId }
+            validCompletedForRoom.indexOfFirst { it.runId == target.runId }
                 .takeIf { it >= 0 }
                 ?.plus(1)
         }
@@ -132,44 +138,30 @@ object RaceLiveLapDisplayInstaller {
     ) {
         val panel = ensureCourseBestPanel(activity, root) ?: return
         panel.visibility = View.VISIBLE
+        val label = panel.findViewWithTag<TextView>(TAG_COURSE_BEST_LABEL)
         val value = panel.findViewWithTag<TextView>(TAG_COURSE_BEST_VALUE) ?: return
 
-        val localBest = store.completed()
-            .asSequence()
-            .filter { it.courseId == courseId && it.elapsedMs > 0L }
-            .filter { !it.status.equals("INVALID", ignoreCase = true) }
-            .filter { eventCode == "PRACTICE" || it.eventCode.equals(eventCode, ignoreCase = true) }
-            .minByOrNull { it.elapsedMs }
-
         if (eventCode == "PRACTICE") {
+            label?.text = "코스 최고 기록"
+            val localBest = store.completed()
+                .asSequence()
+                .filter { it.eventCode.equals("PRACTICE", ignoreCase = true) }
+                .filter { it.courseId == courseId && it.elapsedMs > 0L }
+                .filter { !it.status.equals("INVALID", ignoreCase = true) }
+                .minByOrNull { it.elapsedMs }
             value.text = localBest?.let { "내 기록  ${formatTime(it.elapsedMs)}" } ?: "기록 대기 중"
             return
         }
 
+        // Joined-event HUD is strictly server-authoritative. Never merge a phone-local best here,
+        // even when the local GPX geometry is identical or the rider has a faster practice record.
+        label?.text = "경기방 최고 기록"
         RaceLiveLeaderStatus.refreshIfDue(activity, snapshot)
         val live = RaceLiveLeaderStatus.cached(eventCode)
-        val leaderMs = live?.displayLeaderElapsedMs ?: live?.leaderElapsedMs ?: snapshot.leaderElapsedMs
-        val leaderName = live?.displayLeaderName?.takeIf { it.isNotBlank() }
-            ?: live?.leaderName?.takeIf { it.isNotBlank() }
-            ?: snapshot.leaderName
+        val leaderMs = live?.leaderElapsedMs ?: snapshot.leaderElapsedMs
+        val leaderName = live?.leaderName?.takeIf { it.isNotBlank() } ?: snapshot.leaderName
         val leaderBib = live?.leaderBib.orEmpty().trim()
         val leaderNickname = live?.leaderNickname.orEmpty().trim()
-
-        // A course-best panel must never show a time slower than a known valid lap on this phone.
-        // The server remains authoritative for official ranking, but the participant HUD merges the
-        // freshest server leader with this device's valid local history and displays the faster one.
-        val localMs = localBest?.elapsedMs
-        if (localMs != null && (leaderMs == null || localMs <= leaderMs)) {
-            val profile = RaceProfileStore.profile(activity)
-            val identity = buildList {
-                if (profile.bib.isNotBlank()) add(profile.bib.trim())
-                if (profile.name.isNotBlank()) add(profile.name.trim())
-                if (profile.nickname.isNotBlank() && !profile.nickname.equals(profile.name.trim(), ignoreCase = true)) add(profile.nickname.trim())
-                add(formatTime(localMs))
-            }
-            value.text = identity.joinToString("   ")
-            return
-        }
 
         if (leaderMs == null) {
             value.text = "기록 대기 중"
@@ -194,7 +186,10 @@ object RaceLiveLapDisplayInstaller {
             return existing.parent as? LinearLayout
         }
 
-        val oldLabel = findText(root, "DELTA · PREVIOUS") ?: findText(root, "코스 최고 기록") ?: return null
+        val oldLabel = findText(root, "DELTA · PREVIOUS")
+            ?: findText(root, "코스 최고 기록")
+            ?: findText(root, "경기방 최고 기록")
+            ?: return null
         val panel = oldLabel.parent as? LinearLayout ?: return null
         panel.removeAllViews()
         panel.orientation = LinearLayout.VERTICAL
