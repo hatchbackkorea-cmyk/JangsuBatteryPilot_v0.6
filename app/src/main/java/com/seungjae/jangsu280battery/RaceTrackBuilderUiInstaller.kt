@@ -75,6 +75,21 @@ object RaceTrackBuilderUiInstaller {
             }
         }
 
+        val body = start.parent as? LinearLayout ?: return
+
+        // RaceDebugUiInstaller draws the green GPX status banner as a fixed overlay just below the
+        // top bar. Reserve real vertical space before START so the overlay never visually collides
+        // with the red circle, regardless of filename length or font scale.
+        (start.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+            val reservedTop = dp(activity, 62f)
+            val reservedBottom = dp(activity, 10f)
+            if (lp.topMargin != reservedTop || lp.bottomMargin != reservedBottom) {
+                lp.topMargin = reservedTop
+                lp.bottomMargin = reservedBottom
+                start.layoutParams = lp
+            }
+        }
+
         // Locate the original RaceActivity buttons. They keep the real click behavior, but are
         // hidden from the home screen once the dedicated action panel is created.
         val registration = decor.findViewWithTag<Button>(REGISTER_TAG) ?: findButton(decor) { b ->
@@ -97,10 +112,10 @@ object RaceTrackBuilderUiInstaller {
             join.visibility = View.GONE
         }
 
-        // Create a dedicated menu panel immediately below START. This avoids inherited row-height
-        // constraints and prevents Korean labels from being clipped on smaller phones/font scales.
-        val body = start.parent as? LinearLayout ?: return
-        if (decor.findViewWithTag<View>(ACTION_BOX_TAG) == null) {
+        // Create a dedicated menu panel below START. Keep explicit margins so the red START circle,
+        // the panel shell, and the two inner buttons never touch or overlap visually.
+        val existingPanel = decor.findViewWithTag<View>(ACTION_BOX_TAG)
+        if (existingPanel == null) {
             val panel = LinearLayout(activity).apply {
                 tag = ACTION_BOX_TAG
                 orientation = LinearLayout.VERTICAL
@@ -121,15 +136,25 @@ object RaceTrackBuilderUiInstaller {
             panel.addView(actionButton(activity, "방참여/변경") {
                 join.performClick()
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 62f)).apply {
-                topMargin = dp(activity, 8f)
+                topMargin = dp(activity, 10f)
             })
 
             val startIndex = body.indexOfChild(start)
             val insertIndex = if (startIndex >= 0) startIndex + 1 else body.childCount
             body.addView(panel, insertIndex, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(activity, 16f)
-                bottomMargin = dp(activity, 4f)
+                topMargin = dp(activity, 18f)
+                bottomMargin = dp(activity, 10f)
             })
+        } else {
+            (existingPanel.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                val top = dp(activity, 18f)
+                val bottom = dp(activity, 10f)
+                if (lp.topMargin != top || lp.bottomMargin != bottom) {
+                    lp.topMargin = top
+                    lp.bottomMargin = bottom
+                    existingPanel.layoutParams = lp
+                }
+            }
         }
 
         // Course creation already exists under Map creation. Keep only that single entry point.
