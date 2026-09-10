@@ -1,10 +1,7 @@
 package com.seungjae.jangsu280battery
 
 import android.app.Activity
-import android.content.Intent
-import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -15,14 +12,16 @@ import android.widget.TextView
 import java.util.WeakHashMap
 
 /**
- * RaceChrono-like RACE home polish + TRACKS entry.
+ * RaceChrono-like RACE home polish.
  *
  * The RACE activity rebuilds its content view when moving between registration/event/live/home.
  * A single global-layout hook therefore re-applies the home presentation whenever the home view
  * comes back, without touching timing state.
  */
 object RaceTrackBuilderUiInstaller {
-    private const val TAG = "race_tracks_builder_button_v0348"
+    private const val TRACKS_TAG = "race_tracks_builder_button_v0348"
+    private const val REGISTER_TAG = "race_home_register_change"
+    private const val JOIN_TAG = "race_home_room_join_change"
     private val hooks = WeakHashMap<RaceActivity, ViewTreeObserver.OnGlobalLayoutListener>()
 
     fun install(activity: RaceActivity) {
@@ -50,20 +49,11 @@ object RaceTrackBuilderUiInstaller {
             gravity = Gravity.CENTER
         }
 
-        // The old summary above START duplicated both event and rider information.
-        // Capture the currently displayed event first, then remove that duplicate summary entirely.
+        // The old summary above START duplicated event/rider information, so keep START as the
+        // first strong action on the screen and remove the legacy summary + spacer.
         val oldSummary = findTextView(decor) { tv ->
             val t = tv.text?.toString().orEmpty()
             t.startsWith("✓ 참가완료 ·") || t.startsWith("자동 랩 준비 ·")
-        }
-        var currentEventName = ""
-        var currentEventCode = ""
-        oldSummary?.text?.toString()?.lineSequence()?.firstOrNull()?.let { first ->
-            if (first.startsWith("✓ 참가완료 ·")) {
-                val parts = first.removePrefix("✓ 참가완료 ·").split("·").map { it.trim() }
-                currentEventName = parts.getOrNull(0).orEmpty()
-                currentEventCode = parts.getOrNull(1).orEmpty()
-            }
         }
         oldSummary?.let { tv ->
             val parent = tv.parent as? ViewGroup
@@ -82,82 +72,49 @@ object RaceTrackBuilderUiInstaller {
             }
         }
 
-        val profile = RaceProfileStore.profile(activity)
-        val fallbackJoined = runCatching { RaceDataStore(activity).lastJoined() }.getOrNull()
-        if (currentEventName.isBlank()) currentEventName = fallbackJoined?.config?.name.orEmpty()
-        if (currentEventCode.isBlank()) currentEventCode = fallbackJoined?.config?.eventCode.orEmpty()
-
-        // Put the saved rider identity directly inside the 선수등록 card; no repeated field labels.
-        val registration = findButton(decor) { b ->
+        // Stable home actions: START first, then two full-width rows below it.
+        val registration = decor.findViewWithTag<Button>(REGISTER_TAG) ?: findButton(decor) { b ->
             b.text?.toString()?.replace(" ", "")?.contains("선수등록") == true
         }
-        registration?.apply {
-            text = if (profile.isReady) {
-                "✓ 선수등록\n${profile.bib} · ${profile.name} · ${profile.nickname}"
-            } else {
-                "선수등록\n등록 필요"
-            }
-            textSize = 15f
-            isAllCaps = false
-            gravity = Gravity.CENTER
-            setTypeface(typeface, Typeface.BOLD)
-            setLineSpacing(dp(activity, 2f).toFloat(), 1.04f)
-            setPadding(dp(activity, 7f), dp(activity, 7f), dp(activity, 7f), dp(activity, 7f))
-            layoutParams?.let { lp ->
-                if (lp.height != dp(activity, 84f)) {
-                    lp.height = dp(activity, 84f)
-                    layoutParams = lp
-                }
-            }
-        }
-
-        // After joining, the event card itself becomes the single source for room name + event code.
-        val join = findButton(decor) { b ->
+        val join = decor.findViewWithTag<Button>(JOIN_TAG) ?: findButton(decor) { b ->
             b.text?.toString()?.replace(" ", "")?.contains("대회참가") == true
         }
-        join?.apply {
-            text = if (currentEventName.isNotBlank() || currentEventCode.isNotBlank()) {
-                "✓ 대회참가완료\n${listOf(currentEventName, currentEventCode).filter { it.isNotBlank() }.joinToString(" · ")}"
-            } else {
-                "대회참가\n참가할 대회를 선택하세요"
-            }
-            textSize = 15f
+
+        registration?.apply {
+            tag = REGISTER_TAG
+            text = "등록/변경"
+            textSize = 17f
             isAllCaps = false
             gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
-            setLineSpacing(dp(activity, 2f).toFloat(), 1.04f)
-            setPadding(dp(activity, 7f), dp(activity, 7f), dp(activity, 7f), dp(activity, 7f))
-            layoutParams?.let { lp ->
-                if (lp.height != dp(activity, 84f)) {
-                    lp.height = dp(activity, 84f)
-                    layoutParams = lp
-                }
+            setPadding(dp(activity, 8f), dp(activity, 6f), dp(activity, 8f), dp(activity, 6f))
+        }
+
+        join?.apply {
+            tag = JOIN_TAG
+            text = "방참여/변경"
+            textSize = 17f
+            isAllCaps = false
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(activity, 8f), dp(activity, 6f), dp(activity, 8f), dp(activity, 6f))
+        }
+
+        val row = (registration?.parent as? LinearLayout) ?: (join?.parent as? LinearLayout)
+        if (row != null && registration != null && join != null && registration.parent === row && join.parent === row) {
+            row.orientation = LinearLayout.VERTICAL
+            row.gravity = Gravity.CENTER
+            registration.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 60f))
+            join.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 60f)).apply {
+                topMargin = dp(activity, 8f)
             }
         }
 
-        // TRACKS button on the RACE home.
-        if (decor.findViewWithTag<View>(TAG) != null) return
-        val homeJoin = join ?: return
-        val row = homeJoin.parent as? LinearLayout ?: return
-        val body = row.parent as? LinearLayout ?: return
-        val index = body.indexOfChild(row)
-        val b = Button(activity).apply {
-            tag = TAG
-            text = "🗺 코스 만들기 · TRACKS"
-            textSize = 16f
-            isAllCaps = false
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(activity, 8f).toFloat()
-                setColor(Color.rgb(28, 40, 55))
-                setStroke(dp(activity, 1f), Color.rgb(65, 92, 122))
-            }
-            setOnClickListener { activity.startActivity(Intent(activity, RaceTrackBuilderActivity::class.java)) }
+        // TRACKS already exists in the Map creation flow. Never duplicate the same course-builder
+        // screen below START on the RACE home.
+        decor.findViewWithTag<View>(TRACKS_TAG)?.let { stale ->
+            (stale.parent as? ViewGroup)?.removeView(stale) ?: run { stale.visibility = View.GONE }
         }
-        body.addView(b, index + 1, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 58f)).apply { topMargin = dp(activity, 8f) })
     }
 
     private fun findButton(v: View, predicate: (Button) -> Boolean): Button? {
