@@ -19,9 +19,10 @@ import java.util.WeakHashMap
  * Full lap history belongs on RaceLapHistoryActivity.
  *
  * Room isolation rule:
- * - PRACTICE uses this phone's local course history.
- * - A joined event uses only records with the same eventCode + downloaded event courseId.
- * - The event course-best panel is server-authoritative and never merges unrelated local history.
+ * - PRACTICE uses this phone's exact local courseId.
+ * - A joined event uses eventCode as the durable room boundary. Re-downloading the same server GPX
+ *   may create a different local courseId, so local ids must never split one server room's history.
+ * - The event course-best panel is server-authoritative and never merges unrelated room history.
  */
 object RaceLiveLapDisplayInstaller {
     private const val TAG_HISTORY = "timegate_lap_history_v03444"
@@ -59,68 +60,64 @@ object RaceLiveLapDisplayInstaller {
 
         updateCourseBestPanel(activity, root, store, snapshot, eventCode, courseId)
 
-        val sessionStore = RaceLapSessionStore(activity)
-        if (snapshot.state == "RUNNING" && snapshot.startedAtMs > 0L) {
-            sessionStore.beginOrResume(eventCode, courseId, snapshot.startedAtMs)
-        } else if (snapshot.state == "FINISHED" && snapshot.startedAtMs > 0L) {
-            sessionStore.beginOrResume(eventCode, courseId, snapshot.startedAtMs)
-        }
-        val session = sessionStore.matching(eventCode, courseId) ?: return
-
         val bestBlock = findBlock(root, "BEST") ?: return
         val previousBlock = findBlock(root, "PREVIOUS") ?: return
         val currentBlock = findBlock(root, "CURRENT") ?: return
 
         installHistoryButton(activity, root, courseId, eventCode)
 
-        // BEST/PREVIOUS are scoped to the exact room + exact event-downloaded course.
-        // A visually identical GPX from PRACTICE or another room can never enter this set.
-        // DNF remains visible in history, but is never a comparison record.
+        // App process/session restarts must not hide records already created in the same server room.
+        // A server-room record is identified by eventCode; local PRACTICE still uses exact courseId.
         val completedForRoom = store.completed()
             .asSequence()
-            .filter { it.eventCode.equals(eventCode, ignoreCase = true) }
-            .filter { it.courseId == courseId }
+            .filter { sameRoom(it, eventCode, courseId) }
             .filter { it.elapsedMs > 0L }
             .sortedBy { it.finishedAtMs }
             .toList()
-        val validCompletedForRoom = completedForRoom
+        val comparisonRuns = completedForRoom
             .filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
-        val sessionRuns = sessionRuns(validCompletedForRoom, eventCode, courseId, session.startedAtMs)
-        val currentFinishedIndex = sessionRuns.indexOfFirst { it.runId == snapshot.runId }
 
-        // BEST and PREVIOUS are rider-facing records from this room only. Official ranking remains
-        // server-authoritative; INVALID/DNF laps never participate in either comparison.
-        val best = validCompletedForRoom.minByOrNull { it.elapsedMs }
+        val currentCompletedIndex = completedForRoom.indexOfFirst { it.runId == snapshot.runId }
+        val best = comparisonRuns.minByOrNull { it.elapsedMs }
         val bestLapNo = best?.let { target ->
-            validCompletedForRoom.indexOfFirst { it.runId == target.runId }
+            completedForRoom.indexOfFirst { it.runId == target.runId }
                 .takeIf { it >= 0 }
                 ?.plus(1)
         }
 
-        val previous = when {
-            currentFinishedIndex > 0 -> sessionRuns[currentFinishedIndex - 1]
-            currentFinishedIndex == 0 -> null
-            else -> sessionRuns.lastOrNull()
+        val previous = comparisonRuns.lastOrNull { run ->
+            when {
+                snapshot.startedAtMs > 0L -> run.finishedAtMs <= snapshot.startedAtMs && run.runId != snapshot.runId
+                else -> run.runId != snapshot.runId
+            }
+        } ?: comparisonRuns.lastOrNull { it.runId != snapshot.runId }
+        val previousLapNo = previous?.let { target ->
+            completedForRoom.indexOfFirst { it.runId == target.runId }
+                .takeIf { it >= 0 }
+                ?.plus(1)
         }
-        val previousLapNo = previous?.let { target -> sessionRuns.indexOfFirst { it.runId == target.runId } + 1 }?.takeIf { it > 0 }
 
         val currentLapNo = when {
-            currentFinishedIndex >= 0 -> currentFinishedIndex + 1
-            else -> sessionRuns.size + 1
+            currentCompletedIndex >= 0 -> currentCompletedIndex + 1
+            else -> completedForRoom.size + 1
         }.coerceAtLeast(1)
 
         setBlock(bestBlock, bestLapNo, best?.elapsedMs)
         setBlock(previousBlock, previousLapNo, previous?.elapsedMs)
 
         val heldId = if (snapshot.state == "ARMED") RaceFairTiming.justFinalized(activity) else null
-        val heldIndex = if (heldId == null) -1 else sessionRuns.indexOfFirst { it.runId == heldId }
+        val heldIndex = if (heldId == null) -1 else completedForRoom.indexOfFirst { it.runId == heldId }
         if (heldIndex >= 0) {
-            val held = sessionRuns[heldIndex]
-            setBlock(currentBlock, heldIndex + 1, held.elapsedMs)
-            val before = sessionRuns.getOrNull(heldIndex - 1)
-            setBlock(previousBlock, if (before == null) null else heldIndex, before?.elapsedMs)
-            return
+            val held = completedForRoom[heldIndex]
+            if (held.status.uppercase() !in setOf("INVALID", "DNF")) {
+                setBlock(currentBlock, heldIndex + 1, held.elapsedMs)
+                val before = comparisonRuns.lastOrNull { it.finishedAtMs < held.finishedAtMs }
+                val beforeLap = before?.let { b -> completedForRoom.indexOfFirst { it.runId == b.runId } + 1 }?.takeIf { it > 0 }
+                setBlock(previousBlock, beforeLap, before?.elapsedMs)
+                return
+            }
         }
+
         val verifying = snapshot.state == "FINISHED" && snapshot.serverStatus.contains("랩타임 확인중")
         if (verifying) {
             setBlockText(currentBlock, currentLapNo, "확인중")
@@ -128,6 +125,13 @@ object RaceLiveLapDisplayInstaller {
             setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
         }
     }
+
+    private fun sameRoom(run: RaceRunSummary, eventCode: String, courseId: String): Boolean =
+        if (eventCode == "PRACTICE") {
+            run.eventCode.equals("PRACTICE", ignoreCase = true) && run.courseId == courseId
+        } else {
+            run.eventCode.equals(eventCode, ignoreCase = true)
+        }
 
     private fun updateCourseBestPanel(
         activity: RaceActivity,
@@ -154,8 +158,7 @@ object RaceLiveLapDisplayInstaller {
             return
         }
 
-        // Joined-event HUD is strictly server-authoritative. Never merge a phone-local best here,
-        // even when the local GPX geometry is identical or the rider has a faster practice record.
+        // Joined-event HUD is strictly server-authoritative. Never merge a phone-local best here.
         label?.text = "경기방 최고 기록"
         RaceLiveLeaderStatus.refreshIfDue(activity, snapshot)
         val live = RaceLiveLeaderStatus.cached(eventCode)
@@ -227,7 +230,10 @@ object RaceLiveLapDisplayInstaller {
             setOnClickListener { openHistory(activity, courseId, eventCode) }
             return
         }
-        val back = findButton(root) { it.text?.toString()?.contains("Live", ignoreCase = true) == true } ?: return
+        val back = findButton(root) {
+            val t = it.text?.toString()?.trim().orEmpty()
+            t.contains("Live", ignoreCase = true) || t == "‹"
+        } ?: return
         val row = back.parent as? LinearLayout ?: return
         val button = Button(activity).apply {
             tag = TAG_HISTORY
@@ -239,7 +245,8 @@ object RaceLiveLapDisplayInstaller {
             setBackgroundColor(Color.rgb(70, 70, 70))
             setOnClickListener { openHistory(activity, courseId, eventCode) }
         }
-        row.addView(button, 1.coerceAtMost(row.childCount), LinearLayout.LayoutParams(dp(activity, 78), dp(activity, 42)).apply { marginEnd = dp(activity, 6) })
+        // Add after the weighted header so the control naturally sits at the far right.
+        row.addView(button, row.childCount, LinearLayout.LayoutParams(dp(activity, 86), dp(activity, 42)).apply { marginEnd = dp(activity, 6) })
     }
 
     private fun openHistory(activity: RaceActivity, courseId: String, eventCode: String) {
@@ -248,14 +255,6 @@ object RaceLiveLapDisplayInstaller {
             putExtra(RaceLapHistoryActivity.EXTRA_EVENT_CODE, eventCode)
         })
     }
-
-    private fun sessionRuns(all: List<RaceRunSummary>, eventCode: String, courseId: String, sessionStartMs: Long): List<RaceRunSummary> =
-        all.asSequence()
-            .filter { it.eventCode.equals(eventCode, ignoreCase = true) }
-            .filter { it.courseId == courseId }
-            .filter { it.finishedAtMs >= sessionStartMs }
-            .sortedBy { it.finishedAtMs }
-            .toList()
 
     private fun currentElapsed(s: RaceDataStore.Snapshot): Long? = when {
         s.state == "RUNNING" && s.startedAtMs > 0L -> if (s.startedElapsedNs > 0L) ((SystemClock.elapsedRealtimeNanos() - s.startedElapsedNs) / 1_000_000L).coerceAtLeast(0L) else s.elapsedMs
