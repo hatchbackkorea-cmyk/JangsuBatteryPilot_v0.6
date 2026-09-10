@@ -82,11 +82,15 @@ class RaceDataStore(context: Context) {
     }
 
     fun saveActiveConfig(config: RaceEventConfig, courseId: String, reference: List<RaceReferencePoint>) {
+        // If active_config was cleared by room-exit or a fresh app process, this is an explicit
+        // re-entry. Start a NEW local screen session. Server attempts are intentionally not reset:
+        // the same profileId reconnects to the existing participant/history on join.
+        val explicitReentry = !prefs.contains("active_config")
+        if (explicitReentry) {
+            app.getSharedPreferences("race_lap_session_v1", Context.MODE_PRIVATE).edit().clear().apply()
+        }
         val o = config.copy(reference = reference).toJson().apply { put("local_course_id", courseId) }
         prefs.edit().putString("active_config", o.toString()).apply()
-        // The lap session is intentionally persistent. Leaving and re-entering the same race room
-        // must not reset lap numbering/history, so activating timing for the same event+course/day
-        // resumes the existing session instead of starting from lap 1 again.
         RaceLapSessionStore(app).beginOrResume(config.eventCode, courseId)
     }
     fun activeConfig(): Pair<RaceEventConfig, String>? = runCatching { val o = JSONObject(prefs.getString("active_config", "")); RaceEventConfig.fromJson(o) to o.optString("local_course_id") }.getOrNull()
