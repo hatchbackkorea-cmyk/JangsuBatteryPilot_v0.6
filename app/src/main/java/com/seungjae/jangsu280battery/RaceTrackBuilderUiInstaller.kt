@@ -50,24 +50,95 @@ object RaceTrackBuilderUiInstaller {
             gravity = Gravity.CENTER
         }
 
-        // Keep the existing event/status first line. Make the rider identity explicit and larger.
-        findTextView(decor) { it.text?.toString()?.startsWith("✓ 참가완료 ·") == true }?.let { tv ->
-            val first = tv.text.toString().lineSequence().firstOrNull().orEmpty()
-            val p = RaceProfileStore.profile(activity)
-            val second = "배번 ${p.bib}  ·  아이디 ${p.name}  ·  닉네임 ${p.nickname}"
-            val desired = "$first\n$second"
-            if (tv.text.toString() != desired) tv.text = desired
-            tv.textSize = 22f
-            tv.gravity = Gravity.CENTER
-            tv.setLineSpacing(dp(activity, 3f).toFloat(), 1.08f)
-            tv.setTypeface(tv.typeface, Typeface.BOLD)
-            tv.setPadding(dp(activity, 10f), dp(activity, 12f), dp(activity, 10f), dp(activity, 12f))
+        // The old summary above START duplicated both event and rider information.
+        // Capture the currently displayed event first, then remove that duplicate summary entirely.
+        val oldSummary = findTextView(decor) { tv ->
+            val t = tv.text?.toString().orEmpty()
+            t.startsWith("✓ 참가완료 ·") || t.startsWith("자동 랩 준비 ·")
+        }
+        var currentEventName = ""
+        var currentEventCode = ""
+        oldSummary?.text?.toString()?.lineSequence()?.firstOrNull()?.let { first ->
+            if (first.startsWith("✓ 참가완료 ·")) {
+                val parts = first.removePrefix("✓ 참가완료 ·").split("·").map { it.trim() }
+                currentEventName = parts.getOrNull(0).orEmpty()
+                currentEventCode = parts.getOrNull(1).orEmpty()
+            }
+        }
+        oldSummary?.let { tv ->
+            val parent = tv.parent as? ViewGroup
+            if (parent != null) {
+                val index = parent.indexOfChild(tv)
+                parent.removeView(tv)
+                // showHome() places a 24dp spacer directly after the legacy summary.
+                if (index in 0 until parent.childCount) {
+                    val next = parent.getChildAt(index)
+                    if (next !is TextView && next !is Button && next.layoutParams?.height == dp(activity, 24f)) {
+                        parent.removeView(next)
+                    }
+                }
+            } else {
+                tv.visibility = View.GONE
+            }
+        }
+
+        val profile = RaceProfileStore.profile(activity)
+        val fallbackJoined = runCatching { RaceDataStore(activity).lastJoined() }.getOrNull()
+        if (currentEventName.isBlank()) currentEventName = fallbackJoined?.config?.name.orEmpty()
+        if (currentEventCode.isBlank()) currentEventCode = fallbackJoined?.config?.eventCode.orEmpty()
+
+        // Put the saved rider identity directly inside the 선수등록 card; no repeated field labels.
+        val registration = findButton(decor) { b ->
+            b.text?.toString()?.replace(" ", "")?.contains("선수등록") == true
+        }
+        registration?.apply {
+            text = if (profile.isReady) {
+                "✓ 선수등록\n${profile.bib} · ${profile.name} · ${profile.nickname}"
+            } else {
+                "선수등록\n등록 필요"
+            }
+            textSize = 15f
+            isAllCaps = false
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+            setLineSpacing(dp(activity, 2f).toFloat(), 1.04f)
+            setPadding(dp(activity, 7f), dp(activity, 7f), dp(activity, 7f), dp(activity, 7f))
+            layoutParams?.let { lp ->
+                if (lp.height != dp(activity, 84f)) {
+                    lp.height = dp(activity, 84f)
+                    layoutParams = lp
+                }
+            }
+        }
+
+        // After joining, the event card itself becomes the single source for room name + event code.
+        val join = findButton(decor) { b ->
+            b.text?.toString()?.replace(" ", "")?.contains("대회참가") == true
+        }
+        join?.apply {
+            text = if (currentEventName.isNotBlank() || currentEventCode.isNotBlank()) {
+                "✓ 대회참가완료\n${listOf(currentEventName, currentEventCode).filter { it.isNotBlank() }.joinToString(" · ")}"
+            } else {
+                "대회참가\n참가할 대회를 선택하세요"
+            }
+            textSize = 15f
+            isAllCaps = false
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+            setLineSpacing(dp(activity, 2f).toFloat(), 1.04f)
+            setPadding(dp(activity, 7f), dp(activity, 7f), dp(activity, 7f), dp(activity, 7f))
+            layoutParams?.let { lp ->
+                if (lp.height != dp(activity, 84f)) {
+                    lp.height = dp(activity, 84f)
+                    layoutParams = lp
+                }
+            }
         }
 
         // TRACKS button on the RACE home.
         if (decor.findViewWithTag<View>(TAG) != null) return
-        val join = findButton(decor) { it.text?.toString()?.contains("대회 참가") == true } ?: return
-        val row = join.parent as? LinearLayout ?: return
+        val homeJoin = join ?: return
+        val row = homeJoin.parent as? LinearLayout ?: return
         val body = row.parent as? LinearLayout ?: return
         val index = body.indexOfChild(row)
         val b = Button(activity).apply {
