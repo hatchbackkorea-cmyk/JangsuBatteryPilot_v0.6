@@ -1,0 +1,95 @@
+name: TimeGate v0.34.77 strict VALID best patch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/timegate-v03477-best-valid-only.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply strict VALID-only BEST policy
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('app/src/main/java/com/seungjae/jangsu280battery/RaceActivity.kt')
+          s = p.read_text(encoding='utf-8')
+          original = s
+
+          replacements = [
+              ('val best = (valid.ifEmpty { historical }).minByOrNull { it.elapsedMs }',
+               'val best = valid.minByOrNull { it.elapsedMs }'),
+              ('val previous = historical.filter { it.status != "INVALID" }.maxByOrNull { it.finishedAtMs }',
+               'val previous = historical.filter { it.status == "VALID" }.maxByOrNull { it.finishedAtMs }'),
+          ]
+          for old, new in replacements:
+              if old in s:
+                  s = s.replace(old, new)
+              elif new not in s:
+                  raise SystemExit(f'Expected pattern missing: {old}')
+
+          if s != original:
+              p.write_text(s, encoding='utf-8')
+
+          home = Path('app/src/main/java/com/seungjae/jangsu280battery/TimeGateHomeView.kt').read_text(encoding='utf-8')
+          assert '"LAP TIMER"' in home
+          assert '"어제보다 오늘이 더 빠르게!"' in home
+
+          timing = Path('app/src/main/java/com/seungjae/jangsu280battery/RaceTimingService.kt').read_text(encoding='utf-8')
+          assert '-> "REVIEW"' not in timing
+          assert 'it.status == "VALID"' in timing
+
+          live = Path('app/src/main/java/com/seungjae/jangsu280battery/RaceLiveLapDisplayInstaller.kt').read_text(encoding='utf-8')
+          assert '.filter { it.status.equals("VALID", ignoreCase = true) }' in live
+          assert 'if (held.status.equals("VALID", ignoreCase = true)) {' in live
+
+          history = Path('app/src/main/java/com/seungjae/jangsu280battery/RaceLapHistoryActivity.kt').read_text(encoding='utf-8')
+          assert 'it.status.equals("VALID", ignoreCase = true)' in history
+
+          current_activity = p.read_text(encoding='utf-8')
+          assert 'val best = valid.minByOrNull { it.elapsedMs }' in current_activity
+          assert 'val previous = historical.filter { it.status == "VALID" }' in current_activity
+          assert 'valid.ifEmpty { historical }' not in current_activity
+
+          version_path = Path('VERSION.txt')
+          current = version_path.read_text(encoding='utf-8').strip()
+          m = re.match(r'^(\d+)\.(\d+)\.(\d+)', current)
+          if not m:
+              raise SystemExit(f'Bad VERSION.txt: {current}')
+          major, minor, patch = map(int, m.groups())
+          if (major, minor, patch) == (0, 34, 76):
+              target = '0.34.77'
+          elif (major, minor, patch) > (0, 34, 76):
+              target = f'{major}.{minor}.{patch + 1}'
+          else:
+              raise SystemExit(f'Unexpected older app version: {current}')
+          version_path.write_text(target + '\n', encoding='utf-8')
+          print('Target Android version:', target)
+          PY
+
+      - name: Build and test Android
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon
+
+      - name: Commit patch and remove staging workflow
+        shell: bash
+        run: |
+          git config user.name 'TimeGate Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/timegate-v03477-best-valid-only.yml
+          git add VERSION.txt app/src/main/java/com/seungjae/jangsu280battery/RaceActivity.kt
+          git commit -m 'Release TimeGate v0.34.77 strict VALID-only best policy'
+          git push origin HEAD:main
