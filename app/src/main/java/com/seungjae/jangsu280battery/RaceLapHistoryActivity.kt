@@ -16,7 +16,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Persistent event-session lap history with Chrono-style summary and detailed CP table. */
+/** Durable room/course lap history. App restarts never hide prior laps from the same room. */
 class RaceLapHistoryActivity : Activity() {
     companion object {
         const val EXTRA_COURSE_ID = "timegate_lap_history_course_id"
@@ -25,7 +25,6 @@ class RaceLapHistoryActivity : Activity() {
 
     private lateinit var store: RaceDataStore
     private lateinit var repo: CourseRepository
-    private lateinit var sessionStore: RaceLapSessionStore
     private var courseId = ""
     private var eventCode = "PRACTICE"
 
@@ -33,7 +32,6 @@ class RaceLapHistoryActivity : Activity() {
         super.onCreate(savedInstanceState)
         store = RaceDataStore(this)
         repo = CourseRepository(this)
-        sessionStore = RaceLapSessionStore(this)
         val active = store.activeConfig()
         courseId = intent.getStringExtra(EXTRA_COURSE_ID).orEmpty().ifBlank {
             store.snapshot().courseId.ifBlank { active?.second.orEmpty() }
@@ -81,10 +79,24 @@ class RaceLapHistoryActivity : Activity() {
         scroll.addView(body)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val session = sessionStore.matching(eventCode, courseId)
-        val courseName = repo.listCourses().firstOrNull { it.id == courseId }?.name
-            ?: store.completed().lastOrNull { it.courseId == courseId }?.courseName
-            ?: "현재 코스"
+        val allRuns = store.completed()
+        val laps = allRuns
+            .asSequence()
+            .filter { sameScope(it) }
+            .filter { it.elapsedMs > 0L }
+            .sortedBy { it.finishedAtMs }
+            .toList()
+
+        val courseName = if (eventCode == "PRACTICE") {
+            repo.listCourses().firstOrNull { it.id == courseId }?.name
+                ?: laps.lastOrNull()?.courseName
+                ?: "현재 코스"
+        } else {
+            laps.lastOrNull()?.courseName
+                ?: repo.listCourses().firstOrNull { it.id == courseId }?.name
+                ?: "현재 경기코스"
+        }
+
         body.addView(TextView(this).apply {
             text = courseName
             textSize = 20f
@@ -92,31 +104,29 @@ class RaceLapHistoryActivity : Activity() {
             setTextColor(TEXT)
         })
         body.addView(TextView(this).apply {
-            text = if (eventCode == "PRACTICE") "연습 세션" else "경기 $eventCode"
+            text = if (eventCode == "PRACTICE") "연습 코스 기록" else "경기방 $eventCode"
             textSize = 13f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(BLUE)
             setPadding(0, dp(3), 0, dp(3))
         })
         body.addView(TextView(this).apply {
-            text = "같은 경기방을 나갔다 다시 들어와도 당일 세션의 랩은 계속 이어집니다. OPTIMAL LAP은 각 CP 구간의 최고 기록을 조합한 이론상 최상 랩입니다."
+            text = if (eventCode == "PRACTICE") {
+                "이 코스에서 저장된 랩 기록입니다. OPTIMAL LAP은 각 CP 구간의 최고 기록을 조합한 이론상 최상 랩입니다."
+            } else {
+                "앱을 종료하거나 방에서 나갔다 다시 참가해도 같은 경기방의 기존 개인 랩 기록은 계속 표시됩니다. 방 재입장은 새 앱 세션이지만 기록은 이 경기방에 누적됩니다."
+            }
             textSize = 12f
             setTextColor(SECONDARY)
             setPadding(0, dp(3), 0, dp(12))
         })
 
-        if (session == null) {
-            body.addView(emptyMessage("현재 경기의 랩 세션이 없습니다."))
-            return
-        }
-
-        val laps = sessionRuns(store.completed(), eventCode, courseId, session.startedAtMs)
         if (laps.isEmpty()) {
-            body.addView(emptyMessage("이 세션에서 완료된 랩 기록이 없습니다."))
+            body.addView(emptyMessage(if (eventCode == "PRACTICE") "이 코스에 저장된 랩 기록이 없습니다." else "이 경기방에 저장된 랩 기록이 없습니다."))
             return
         }
 
-        val usable = laps.filter { it.status != "INVALID" }
+        val usable = laps.filter { it.status.uppercase() !in setOf("INVALID", "DNF") }
         val schemaRun = usable.maxWithOrNull(compareBy<RaceRunSummary> { it.sectors.size }.thenBy { it.finishedAtMs })
             ?: laps.maxByOrNull { it.finishedAtMs }
         val segmentCount = schemaRun?.sectors?.size ?: 0
@@ -145,7 +155,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("랩별 전체 기록"))
         body.addView(TextView(this).apply {
-            text = "DELTA는 OPTIMAL LAP 대비 전체 코스 차이입니다."
+            text = "DNF/INVALID는 기록표에는 남지만 BEST/OPTIMAL 계산에서는 제외합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(6))
@@ -154,7 +164,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("CP 구간 상세"))
         body.addView(TextView(this).apply {
-            text = "각 CP 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다. INVALID 랩은 표에는 남지만 BEST/OPTIMAL 계산에서는 제외합니다."
+            text = "각 CP 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다. DNF/INVALID 구간은 비교에서 제외합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(7))
@@ -177,14 +187,14 @@ class RaceLapHistoryActivity : Activity() {
         table.addView(header)
 
         laps.forEachIndexed { lapIndex, run ->
-            val invalid = run.status == "INVALID"
+            val excluded = run.status.uppercase() in setOf("INVALID", "DNF")
             val row = TableRow(this).apply { setBackgroundColor(Color.WHITE) }
             val isBest = actualBest?.runId == run.runId
-            row.addView(cell("${lapIndex + 1}${if (isBest) " ★" else ""}", true, if (isBest) BLUE else TEXT, dp(62)))
+            row.addView(cell("${lapIndex + 1}${if (isBest) " ★" else ""}", true, if (isBest) BLUE else if (excluded) Color.GRAY else TEXT, dp(62)))
             for (i in 0 until segmentCount) {
                 val value = run.sectors.getOrNull(i)?.sectorMs?.takeIf { it > 0L }
                 val color = when {
-                    invalid -> Color.GRAY
+                    excluded -> Color.GRAY
                     value == null -> Color.GRAY
                     minBySegment[i] == Long.MAX_VALUE || maxBySegment[i] == Long.MIN_VALUE -> TEXT
                     minBySegment[i] == maxBySegment[i] -> TEXT
@@ -195,13 +205,13 @@ class RaceLapHistoryActivity : Activity() {
                 row.addView(cell(value?.let(::formatTime) ?: "—", false, color, dp(118)))
             }
             val finishColor = when {
-                invalid -> Color.GRAY
+                excluded -> Color.GRAY
                 actualBest?.runId == run.runId -> BLUE
                 actualWorst != null && actualWorst.runId == run.runId && actualWorst.runId != actualBest?.runId -> RED
                 else -> TEXT
             }
             row.addView(cell(formatTime(run.elapsedMs), true, finishColor, dp(108)))
-            row.addView(cell(run.status, false, if (invalid) RED else SECONDARY, dp(84)))
+            row.addView(cell(run.status, false, if (excluded) RED else SECONDARY, dp(84)))
             table.addView(row)
         }
 
@@ -214,6 +224,13 @@ class RaceLapHistoryActivity : Activity() {
             table.addView(row)
         }
     }
+
+    private fun sameScope(run: RaceRunSummary): Boolean =
+        if (eventCode == "PRACTICE") {
+            run.eventCode.equals("PRACTICE", ignoreCase = true) && run.courseId == courseId
+        } else {
+            run.eventCode.equals(eventCode, ignoreCase = true)
+        }
 
     private fun buildLapOverview(laps: List<RaceRunSummary>, actualBest: RaceRunSummary?, theoretical: Long?): View {
         val horizontal = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = true }
@@ -237,22 +254,22 @@ class RaceLapHistoryActivity : Activity() {
         }
 
         laps.forEachIndexed { index, run ->
-            val invalid = run.status == "INVALID"
+            val excluded = run.status.uppercase() in setOf("INVALID", "DNF")
             val isBest = actualBest?.runId == run.runId
             val color = when {
-                invalid -> Color.GRAY
+                excluded -> Color.GRAY
                 isBest -> BLUE
                 else -> TEXT
             }
-            val deltaText = theoretical?.let { base ->
+            val deltaText = if (excluded) "—" else theoretical?.let { base ->
                 val d = run.elapsedMs - base
                 if (d >= 0L) "+${formatTime(d)}" else "−${formatTime(-d)}"
             } ?: "—"
             val row = TableRow(this)
             row.addView(cell("${index + 1}${if (isBest) " ★" else ""}", true, color, dp(64)))
             row.addView(cell(formatTime(run.elapsedMs), true, color, dp(112)))
-            row.addView(cell(deltaText, false, if (invalid) Color.GRAY else if (isBest) BLUE else SECONDARY, dp(96)))
-            row.addView(cell(formatClock(run.startedAtMs), false, if (invalid) Color.GRAY else SECONDARY, dp(104)))
+            row.addView(cell(deltaText, false, if (excluded) Color.GRAY else if (isBest) BLUE else SECONDARY, dp(96)))
+            row.addView(cell(formatClock(run.startedAtMs), false, if (excluded) Color.GRAY else SECONDARY, dp(104)))
             table.addView(row)
         }
         return horizontal
@@ -319,19 +336,10 @@ class RaceLapHistoryActivity : Activity() {
         }
     }
 
-    private fun sessionRuns(all: List<RaceRunSummary>, targetEventCode: String, targetCourseId: String, sessionStartMs: Long): List<RaceRunSummary> =
-        all.asSequence()
-            .filter { it.eventCode.equals(targetEventCode, ignoreCase = true) }
-            .filter { it.courseId == targetCourseId }
-            .filter { it.finishedAtMs >= sessionStartMs }
-            .sortedBy { it.finishedAtMs }
-            .toList()
-
     private fun formatTime(ms: Long): String = formatRaceTime(ms)
-
     private fun formatClock(ms: Long): String = if (ms <= 0L) "—" else SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(ms))
-
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
     private val TEXT = Color.rgb(8, 10, 13)
     private val SECONDARY = Color.rgb(94, 105, 120)
     private val BLUE = Color.rgb(12, 91, 235)
