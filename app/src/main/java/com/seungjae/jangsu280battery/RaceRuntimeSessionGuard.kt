@@ -8,6 +8,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -16,7 +17,7 @@ import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -26,16 +27,15 @@ import java.util.WeakHashMap
 /**
  * Process-start room/session policy for TimeGate.
  *
- * The participant identity (RaceProfileStore.profileId) and downloaded GPX files remain durable,
- * but a room selection/token is intentionally session-scoped. After the app process starts again,
- * the rider must enter the room again. The server then reconnects that profileId to the existing
- * participant and previous attempts.
+ * Participant identity and completed records stay durable, but room selection is session-scoped.
+ * After a fresh app process starts, the rider must explicitly enter a room again. Rejoining with
+ * the same profileId lets the server reconnect the rider to the existing participant/history.
  */
 class RaceRuntimeSessionGuardProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val ctx = context?.applicationContext ?: return true
         clearLocalRoomSelection(ctx)
-        (ctx as? Application)?.registerActivityLifecycleCallbacks(RaceDnfLifecycleCallbacks)
+        (ctx as? Application)?.registerActivityLifecycleCallbacks(RaceRuntimeUiCallbacks)
         return true
     }
 
@@ -45,6 +45,8 @@ class RaceRuntimeSessionGuardProvider : ContentProvider() {
         prefs.all.keys.filter { it.startsWith("joined_") }.forEach(edit::remove)
         edit.remove("last_event_code").remove("active_config").apply()
 
+        // Local screen-session numbering starts fresh after an app restart. Server-side attempts
+        // remain attached to profileId and are recovered when the rider explicitly rejoins.
         context.getSharedPreferences("race_lap_session_v1", Context.MODE_PRIVATE)
             .edit().clear().apply()
 
@@ -63,13 +65,13 @@ class RaceRuntimeSessionGuardProvider : ContentProvider() {
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 }
 
-private object RaceDnfLifecycleCallbacks : Application.ActivityLifecycleCallbacks {
+private object RaceRuntimeUiCallbacks : Application.ActivityLifecycleCallbacks {
     override fun onActivityResumed(activity: Activity) {
-        if (activity is RaceActivity) RaceDnfUiInstaller.install(activity)
+        if (activity is RaceActivity) RaceRuntimeLiveUiInstaller.install(activity)
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        if (activity is RaceActivity) RaceDnfUiInstaller.uninstall(activity)
+        if (activity is RaceActivity) RaceRuntimeLiveUiInstaller.uninstall(activity)
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
@@ -79,9 +81,17 @@ private object RaceDnfLifecycleCallbacks : Application.ActivityLifecycleCallback
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 }
 
-/** Adds a DNF control to the blue live timing screen only while a lap is RUNNING. */
-object RaceDnfUiInstaller {
-    private const val TAG = "timegate_dnf_button_v03473"
+/**
+ * Live-screen cleanup requested for the field UI:
+ * - hide the old coloured GPX banner and replace it with plain "fileName · 다운로드 완료" text;
+ * - force the grey header's ARMED/RUNNING/FINISH identity text to white;
+ * - put DNF inside the bottom GPS/status strip as a text action, only while RUNNING.
+ */
+object RaceRuntimeLiveUiInstaller {
+    private const val TAG_PLAIN_GPX = "timegate_plain_gpx_status_v03473"
+    private const val TAG_FOOTER_ROW = "timegate_live_footer_row_v03473"
+    private const val TAG_DNF = "timegate_dnf_text_v03473"
+
     private data class State(val handler: Handler, val runnable: Runnable)
     private val states = WeakHashMap<RaceActivity, State>()
 
@@ -92,7 +102,7 @@ object RaceDnfUiInstaller {
         runner = Runnable {
             if (activity.isFinishing || activity.isDestroyed) return@Runnable
             update(activity)
-            handler.postDelayed(runner, 250L)
+            handler.postDelayed(runner, 100L)
         }
         states[activity] = State(handler, runner)
         handler.post(runner)
@@ -103,33 +113,119 @@ object RaceDnfUiInstaller {
     }
 
     private fun update(activity: RaceActivity) {
-        val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+        val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
         val snapshot = RaceDataStore(activity).snapshot()
-        val currentLabel = findText(root, "CURRENT")
-        val existing = root.findViewWithTag<Button>(TAG)
 
-        if (currentLabel == null) {
+        forceLiveHeaderWhite(content)
+        updatePlainGpxStatus(activity, content)
+        installFooterDnf(activity, content, snapshot)
+    }
+
+    private fun forceLiveHeaderWhite(root: View) {
+        walkText(root) { tv ->
+            val t = tv.text?.toString().orEmpty()
+            if (
+                t.startsWith("ARMED ·") ||
+                t.startsWith("RUNNING ·") ||
+                t.startsWith("FINISH ·") ||
+                t.startsWith("READY ·")
+            ) {
+                tv.setTextColor(Color.WHITE)
+            }
+        }
+    }
+
+    private fun updatePlainGpxStatus(activity: RaceActivity, content: ViewGroup) {
+        // Hide the legacy coloured overlay. Its own refresher never forces visibility back on.
+        walkText(content) { tv ->
+            val t = tv.text?.toString().orEmpty()
+            if (
+                t.startsWith("✓ GPX 다운로드 완료") ||
+                t.startsWith("GPX 확인 중") ||
+                t.startsWith("GPX 다운로드 중") ||
+                t.startsWith("⚠ GPX 다운로드 실패") ||
+                t.startsWith("대회 미참가") ||
+                t.startsWith("대회 참가됨")
+            ) {
+                tv.visibility = View.GONE
+            }
+        }
+
+        val info = RaceGpxDownloadStatus.read(activity)
+        val joined = RaceDataStore(activity).lastJoined()
+        val showCompleted = joined != null &&
+            info.eventCode.equals(joined.config.eventCode, ignoreCase = true) &&
+            info.state in setOf("DOWNLOADED", "COMPLETED")
+
+        val existing = content.findViewWithTag<TextView>(TAG_PLAIN_GPX)
+        if (!showCompleted) {
             existing?.visibility = View.GONE
             return
         }
 
-        val topBack = findButton(root) { it.text?.toString()?.contains("Live", ignoreCase = true) == true }
-        val top = topBack?.parent as? LinearLayout ?: return
-        val button = existing ?: Button(activity).apply {
-            tag = TAG
-            text = "DNF"
-            isAllCaps = false
-            textSize = 14f
+        val fileName = info.serverFileName.trim().ifBlank { "GPX 파일" }
+        val view = existing ?: TextView(activity).apply {
+            tag = TAG_PLAIN_GPX
             gravity = Gravity.CENTER
-            setOnClickListener { confirmDnf(activity) }
-        }.also { b ->
-            val index = (top.childCount - 1).coerceAtLeast(1)
-            top.addView(b, index, LinearLayout.LayoutParams(dp(activity, 72), dp(activity, 42)).apply {
-                marginEnd = dp(activity, 6)
-            })
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 8), dp(activity, 3))
+            background = null
+            elevation = dp(activity, 8).toFloat()
+        }.also { tv ->
+            val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 28)).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                marginStart = dp(activity, 10)
+                marginEnd = dp(activity, 10)
+                topMargin = dp(activity, 58)
+            }
+            content.addView(tv, lp)
         }
-        button.visibility = if (snapshot.state == "RUNNING") View.VISIBLE else View.GONE
-        button.isEnabled = snapshot.state == "RUNNING"
+        view.text = "$fileName · 다운로드 완료"
+        view.visibility = View.VISIBLE
+        view.bringToFront()
+    }
+
+    private fun installFooterDnf(activity: RaceActivity, content: ViewGroup, snapshot: RaceDataStore.Snapshot) {
+        val footer = findFooter(content) ?: return
+        var row = footer.parent as? LinearLayout
+
+        if (row?.tag != TAG_FOOTER_ROW) {
+            val parent = footer.parent as? LinearLayout ?: return
+            val index = parent.indexOfChild(footer)
+            if (index < 0) return
+            parent.removeView(footer)
+
+            row = LinearLayout(activity).apply {
+                tag = TAG_FOOTER_ROW
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(Color.rgb(28, 28, 28))
+            }
+            footer.setBackgroundColor(Color.TRANSPARENT)
+            footer.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            footer.setTextColor(Color.LTGRAY)
+            footer.setPadding(dp(activity, 8), 0, dp(activity, 4), 0)
+            row.addView(footer, LinearLayout.LayoutParams(0, dp(activity, 38), 1f))
+            parent.addView(row, index, LinearLayout.LayoutParams(-1, dp(activity, 38)))
+        }
+
+        val targetRow = row ?: return
+        val dnf = targetRow.findViewWithTag<TextView>(TAG_DNF) ?: TextView(activity).apply {
+            tag = TAG_DNF
+            text = "DNF"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(activity, 8), 0, dp(activity, 10), 0)
+            setOnClickListener { confirmDnf(activity) }
+        }.also { tv ->
+            targetRow.addView(tv, LinearLayout.LayoutParams(dp(activity, 62), dp(activity, 38)))
+        }
+
+        val running = snapshot.state == "RUNNING"
+        dnf.visibility = if (running) View.VISIBLE else View.GONE
+        dnf.isEnabled = running
     }
 
     private fun confirmDnf(activity: RaceActivity) {
@@ -137,30 +233,31 @@ object RaceDnfUiInstaller {
         if (snapshot.state != "RUNNING") return
         AlertDialog.Builder(activity)
             .setTitle("현재 랩을 DNF 처리할까요?")
-            .setMessage("현재 랩 타이머가 즉시 멈추고 DNF로 저장됩니다. 이후 START 게이트 대기 상태로 돌아가며, 다시 START 지점을 통과하면 새 랩이 0부터 시작됩니다.")
+            .setMessage("현재 랩 타이머를 즉시 멈추고 DNF로 저장합니다. 이후 START 게이트 대기로 돌아가며, 다시 START 지점을 통과하면 새 랩이 0부터 시작됩니다.")
             .setNegativeButton("계속 주행", null)
             .setPositiveButton("DNF 처리") { _, _ -> RaceDnfController.finishAsDnf(activity) }
             .show()
     }
 
-    private fun findText(root: View, text: String): TextView? {
-        if (root is TextView && root.text?.toString() == text) return root
-        if (root is ViewGroup) for (i in 0 until root.childCount) findText(root.getChildAt(i), text)?.let { return it }
+    private fun findFooter(root: View): TextView? {
+        if (root is TextView && root.text?.toString()?.startsWith("GPS ±") == true) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) findFooter(root.getChildAt(i))?.let { return it }
+        }
         return null
     }
 
-    private fun findButton(root: View, predicate: (Button) -> Boolean): Button? {
-        if (root is Button && predicate(root)) return root
-        if (root is ViewGroup) for (i in 0 until root.childCount) findButton(root.getChildAt(i), predicate)?.let { return it }
-        return null
+    private fun walkText(root: View, block: (TextView) -> Unit) {
+        if (root is TextView) block(root)
+        if (root is ViewGroup) for (i in 0 until root.childCount) walkText(root.getChildAt(i), block)
     }
 
     private fun dp(activity: Activity, value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
 }
 
 /**
- * Manual DNF terminates only the current lap. It never clears the room participation for this
- * process. A fresh ARMED run is created immediately so the next START crossing starts a new lap.
+ * Manual DNF terminates only the current lap. DNF is durable history but never a BEST/PREVIOUS/
+ * leaderboard record. The service is re-armed so the next START crossing begins a fresh lap.
  */
 object RaceDnfController {
     fun finishAsDnf(activity: RaceActivity) {
@@ -235,7 +332,7 @@ object RaceDnfController {
                 putExtra(RaceTimingService.EXTRA_CONFIG, cfg.toJson().toString())
                 putExtra(RaceTimingService.EXTRA_COURSE_ID, courseId)
             })
-            Toast.makeText(activity, "DNF 처리 완료 · 다음 START 게이트를 통과하면 새 랩이 시작됩니다.", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, "DNF 처리 완료 · 다음 START 통과 시 새 랩 시작", Toast.LENGTH_LONG).show()
         }, 350L)
     }
 }
