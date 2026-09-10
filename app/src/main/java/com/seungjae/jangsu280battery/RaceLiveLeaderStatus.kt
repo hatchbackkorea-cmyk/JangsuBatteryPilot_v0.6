@@ -16,6 +16,8 @@ object RaceLiveLeaderStatus {
         val leaderName: String,
         val leaderNickname: String,
         val leaderElapsedMs: Long?,
+        val displayLeaderName: String,
+        val displayLeaderElapsedMs: Long?,
         val leaderDeltaMs: Long?,
         val estimatedRank: Int?,
         val rankedCount: Int,
@@ -98,13 +100,20 @@ object RaceLiveLeaderStatus {
                         return ""
                     }
 
+                    val fairLeaderName = textValue("leader_name")
+                    val fairLeaderElapsed = nullableLong(o, "leader_elapsed_ms", "leader_best_ms", "best_elapsed_ms")
+                        ?: nullableLong(leader, "elapsed_ms", "best_ms", "best_elapsed_ms")
+                    val displayLeaderName = textValue("display_leader_name").ifBlank { fairLeaderName }
+                    val displayLeaderElapsed = nullableLong(o, "display_leader_elapsed_ms") ?: fairLeaderElapsed
+
                     val status = Status(
                         eventCode = event,
                         leaderBib = textValue("leader_bib", "leader_bib_number", "leader_number"),
-                        leaderName = textValue("leader_name"),
+                        leaderName = fairLeaderName,
                         leaderNickname = textValue("leader_nickname", "leader_nick"),
-                        leaderElapsedMs = nullableLong(o, "leader_elapsed_ms", "leader_best_ms", "best_elapsed_ms")
-                            ?: nullableLong(leader, "elapsed_ms", "best_ms", "best_elapsed_ms"),
+                        leaderElapsedMs = fairLeaderElapsed,
+                        displayLeaderName = displayLeaderName,
+                        displayLeaderElapsedMs = displayLeaderElapsed,
                         leaderDeltaMs = nullableLong(o, "leader_delta_ms"),
                         estimatedRank = nullableInt(o, "estimated_rank"),
                         rankedCount = o.optInt("ranked_count", 0),
@@ -112,8 +121,8 @@ object RaceLiveLeaderStatus {
                         updatedAtMs = System.currentTimeMillis()
                     )
                     cache[event] = status
-                    // Keep the durable snapshot informed as well. Identity details stay in the
-                    // in-memory status because the durable schema predates bib/nickname support.
+                    // Official rank state stays tied to the fair leader. The display-only fallback
+                    // is used solely by the course-best panel when legacy/recovered laps exist.
                     RaceDataStore(app).updateLiveLeaderboard(
                         status.leaderName,
                         status.leaderElapsedMs,
