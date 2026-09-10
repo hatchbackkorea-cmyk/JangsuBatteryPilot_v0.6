@@ -695,8 +695,8 @@ class RaceActivity : Activity() {
         val courseId = s.courseId.ifBlank { store.activeConfig()?.second.orEmpty() }
         val historical = if (courseId.isBlank()) emptyList() else store.completed().filter { it.courseId == courseId && it.runId != currentRunId }
         val valid = historical.filter { it.status == "VALID" }
-        val best = (valid.ifEmpty { historical }).minByOrNull { it.elapsedMs }
-        val previous = historical.filter { it.status != "INVALID" }.maxByOrNull { it.finishedAtMs }
+        val best = valid.minByOrNull { it.elapsedMs }
+        val previous = historical.filter { it.status == "VALID" }.maxByOrNull { it.finishedAtMs }
 
         // BEST / PREVIOUS / CURRENT are owned by RaceLiveLapDisplayInstaller. The base activity used
         // to write the same three TextViews every 100 ms while the installer also wrote them every
