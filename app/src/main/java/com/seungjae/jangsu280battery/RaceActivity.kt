@@ -719,11 +719,11 @@ class RaceActivity : Activity() {
             deltaTime?.setTextColor(Color.WHITE)
         } else when {
             d < 0L -> {
-                deltaTime?.text = "+%.1f".format(abs(d) / 1000.0)
+                deltaTime?.text = "+%.1f".format(roundRaceTimeMs(abs(d)) / 1000.0)
                 deltaTime?.setTextColor(Color.rgb(70, 150, 255))
             }
             d > 0L -> {
-                deltaTime?.text = "−%.1f".format(abs(d) / 1000.0)
+                deltaTime?.text = "−%.1f".format(roundRaceTimeMs(abs(d)) / 1000.0)
                 deltaTime?.setTextColor(Color.rgb(255, 55, 70))
             }
             else -> {
@@ -792,13 +792,7 @@ class RaceActivity : Activity() {
 
     private fun inputLp() = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
 
-    private fun formatBigTime(ms: Long): String {
-        val safe = ms.coerceAtLeast(0L)
-        val minute = safe / 60_000
-        val seconds = (safe % 60_000) / 1000
-        val tenth = (safe % 1000) / 100
-        return if (minute > 0) "%d:%02d.%d".format(minute, seconds, tenth) else "%d.%d".format(seconds, tenth)
-    }
+    private fun formatBigTime(ms: Long): String = formatRaceTime(ms)
 
     private fun hideKeyboard() {
         val token = currentFocus?.windowToken ?: return
