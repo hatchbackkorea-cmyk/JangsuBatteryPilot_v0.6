@@ -273,6 +273,9 @@ object RaceDebugUiInstaller {
             }, LinearLayout.LayoutParams(-1, dp(activity, 48)).apply { topMargin = dp(activity, 7) })
         }
 
+        action("이 폰 주행기록 복구 전송") {
+            confirmLocalRecovery(activity) { report.text = buildReport(activity) }
+        }
         action("GPX 강제 다운로드") {
             forceDownload(activity) { report.text = buildReport(activity) }
         }
@@ -294,6 +297,71 @@ object RaceDebugUiInstaller {
             .setView(scroll)
             .setNegativeButton("닫기", null)
             .show()
+    }
+
+    private fun confirmLocalRecovery(activity: RaceActivity, after: () -> Unit) {
+        if (RaceDataStore(activity).snapshot().state == "RUNNING") {
+            Toast.makeText(activity, "주행 중에는 복구 전송하지 않습니다. FINISH 후 실행하세요.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val preview = RaceLocalRecovery.preview(activity)
+        if (preview == null) {
+            Toast.makeText(activity, "대회 참가 정보가 없습니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (preview.runs.isEmpty()) {
+            Toast.makeText(activity, "이 휴대폰에 복구할 완료 랩이 없습니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val p = preview.profile
+        val message = buildString {
+            append("이 휴대폰에 저장된 랩을 아래 선수에게 연결합니다.\n\n")
+            append("배번 · ").append(p.bib).append('\n')
+            append("이름 · ").append(p.name).append('\n')
+            append("닉네임 · ").append(p.nickname).append('\n')
+            append("대회 · ").append(preview.eventName).append(" · ").append(preview.eventCode).append('\n')
+            append("로컬 완료 랩 · ").append(preview.runs.size).append("개\n\n")
+            append("랩타임과 시각은 바꾸지 않고 선수 소속만 분리합니다. 서버에 없던 로컬 랩은 REVIEW로 복원합니다. 휴대폰 원본은 삭제하지 않습니다.")
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("이 폰 기록 복구")
+            .setMessage(message)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("복구 전송") { _, _ -> runLocalRecovery(activity, after) }
+            .show()
+    }
+
+    private fun runLocalRecovery(activity: RaceActivity, after: () -> Unit) {
+        Toast.makeText(activity, "이 휴대폰의 로컬 랩을 서버와 대조합니다.", Toast.LENGTH_SHORT).show()
+        Thread {
+            val result = runCatching { RaceLocalRecovery.recover(activity, buildReport(activity)) }
+            activity.runOnUiThread {
+                result.onSuccess { o ->
+                    val message = buildString {
+                        append("복구 완료\n\n")
+                        append("서버 기록 분리 · ").append(o.optInt("reassigned", 0)).append("랩\n")
+                        append("서버에 없던 기록 복원 · ").append(o.optInt("inserted_review", 0)).append("랩\n")
+                        append("이미 정상 연결 · ").append(o.optInt("already_owned", 0)).append("랩\n")
+                        append("이 선수 총 기록 · ").append(o.optInt("target_total_runs", 0)).append("랩\n")
+                        append("기존 합쳐진 선수에 남은 기록 · ").append(o.optInt("source_remaining_runs", 0)).append("랩\n")
+                        if (o.optInt("skipped", 0) > 0) append("확인 필요 · ").append(o.optInt("skipped", 0)).append("랩\n")
+                        append("\n휴대폰의 원본 로컬 기록은 그대로 보존됩니다.")
+                    }
+                    AlertDialog.Builder(activity)
+                        .setTitle("TimeGate 기록 복구 완료")
+                        .setMessage(message)
+                        .setPositiveButton("확인", null)
+                        .show()
+                }.onFailure {
+                    AlertDialog.Builder(activity)
+                        .setTitle("기록 복구 실패")
+                        .setMessage(it.message ?: "서버 연결 또는 참가 정보를 확인하세요.")
+                        .setPositiveButton("확인", null)
+                        .show()
+                }
+                after()
+            }
+        }.start()
     }
 
     private fun forceDownload(activity: RaceActivity, after: () -> Unit) {
@@ -369,6 +437,7 @@ object RaceDebugUiInstaller {
         val active = store.activeConfig()
         val info = RaceGpxDownloadStatus.read(activity)
         val registry = RaceEventCourseRegistry.latest(activity)
+        val recovery = RaceLocalRecovery.preview(activity)
         val repo = CourseRepository(activity)
         val courseId = joined?.localCourseId.orEmpty().ifBlank { info.localCourseId.ifBlank { snap.courseId.ifBlank { active?.second.orEmpty() } } }
         val meta = repo.listCourses().firstOrNull { it.id == courseId }
@@ -396,6 +465,22 @@ object RaceDebugUiInstaller {
             append("계측 상태 · ").append(snap.state).append(" · runId=").append(snap.runId.ifBlank { "-" }).append('\n')
             append("코스 진행 · ").append(snap.routeM.toInt()).append('/').append(snap.totalM.toInt()).append("m\n")
             append("active config · ").append(active?.first?.eventCode ?: "-").append(" · courseId=").append(active?.second ?: "-").append('\n')
+
+            append("\n[선수/복구]\n")
+            if (recovery != null) {
+                append("device profile · ").append(recovery.profile.profileId).append('\n')
+                append("배번 · ").append(recovery.profile.bib).append(" · 이름 · ").append(recovery.profile.name).append(" · 닉네임 · ").append(recovery.profile.nickname).append('\n')
+                append("현재 이벤트 로컬 완료랩 · ").append(recovery.runs.size).append("개\n")
+                recovery.runs.take(30).forEach { run ->
+                    append("L").append(run.runNumber)
+                        .append(" · ").append(formatRaceTime(run.elapsedMs))
+                        .append(" · ").append(run.status)
+                        .append(" · ").append(run.runId)
+                        .append('\n')
+                }
+            } else {
+                append("복구 대상 · 없음\n")
+            }
 
             append("\n[계측/게이트]\n")
             append("다음 게이트 · index=").append(snap.nextGateIndex).append('/').append(gates.lastIndex.coerceAtLeast(0))
