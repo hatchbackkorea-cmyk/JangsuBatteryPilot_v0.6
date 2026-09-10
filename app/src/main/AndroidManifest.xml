@@ -49,6 +49,7 @@
         <activity android:name=".SramBleActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <provider android:name=".RaceRuntimeSessionGuardProvider" android:authorities="${applicationId}.race-runtime-session" android:exported="false" android:initOrder="100" />
+        <provider android:name=".RaceLiveStatusRelocatorProvider" android:authorities="${applicationId}.race-live-status-relocator" android:exported="false" android:initOrder="90" />
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" /></provider>
 
