@@ -40,7 +40,7 @@ class RaceBroadcastActivity : Activity() {
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), 0, dp(12), 0)
+            setPadding(dp(6), 0, dp(6), 0)
             setBackgroundColor(Color.rgb(18, 25, 36))
         }
         top.addView(Button(this).apply {
@@ -50,7 +50,7 @@ class RaceBroadcastActivity : Activity() {
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { finish() }
-        }, LinearLayout.LayoutParams(dp(132), dp(48)))
+        }, LinearLayout.LayoutParams(dp(126), dp(48)))
         top.addView(TextView(this).apply {
             text = "실시간 중계 · $eventCode"
             textSize = 16f
@@ -58,6 +58,14 @@ class RaceBroadcastActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER_VERTICAL
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        top.addView(Button(this).apply {
+            text = "디버그"
+            isAllCaps = false
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { showAiDebug(eventCode) }
+        }, LinearLayout.LayoutParams(dp(82), dp(48)))
         root.addView(top)
 
         val web = WebView(this).apply {
@@ -87,6 +95,73 @@ class RaceBroadcastActivity : Activity() {
 
         val encoded = URLEncoder.encode(eventCode, "UTF-8")
         web.loadUrl("$baseUrl/race-live/$encoded?participant=1")
+    }
+
+    private fun showAiDebug(eventCode: String) {
+        val encoded = URLEncoder.encode(eventCode, "UTF-8")
+        val js = """
+            (async function(){
+              var old=document.getElementById('tg-ai-debug');
+              if(old){old.remove();return;}
+              var box=document.createElement('div');
+              box.id='tg-ai-debug';
+              box.style.cssText='position:fixed;z-index:2147483647;left:10px;right:10px;top:10px;bottom:10px;background:#07101af2;color:#eef6ff;border:1px solid #3e6ea8;border-radius:12px;padding:12px;font:13px/1.45 monospace;overflow:auto;text-align:left;box-shadow:0 10px 40px #000c';
+              box.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px"><b style="font:900 16px system-ui">TimeGate AI 중계 디버그</b><button id="tgDbgClose" style="padding:6px 10px">닫기</button></div><div id="tgDbgOut">조회 중...</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button id="tgDbgPlay" style="padding:8px 10px">🔊 최신 음성 재생 테스트</button><button id="tgDbgReload" style="padding:8px 10px">↻ 다시 조회</button></div><div id="tgDbgPlayState" style="margin-top:8px;color:#9fc5ff"></div>';
+              document.body.appendChild(box);
+              document.getElementById('tgDbgClose').onclick=function(){box.remove();};
+              async function read(){
+                var lines=[];
+                lines.push('event = $encoded');
+                lines.push('page = '+location.href);
+                lines.push('AI player loaded = '+(typeof window.__raceAiEnqueue==='function'));
+                lines.push('visibility = '+document.visibilityState);
+                lines.push('userAgent = '+navigator.userAgent);
+                try{
+                  var r=await fetch('/api/race/ai-commentary/$encoded/feed?after=0',{cache:'no-store'});
+                  var x=await r.json();
+                  window.__tgAiDebugFeed=x;
+                  lines.push('');
+                  lines.push('[AI FEED] HTTP '+r.status);
+                  lines.push('enabled = '+x.enabled+' / ready = '+x.ready+' / pending = '+x.pending);
+                  lines.push('last_error = '+(x.last_error||'-'));
+                  var items=Array.isArray(x.items)?x.items:[];
+                  lines.push('items = '+items.length);
+                  items.slice(-8).forEach(function(v){
+                    lines.push('#'+(v.id||'?')+' '+(v.event_type||'?')+' role='+(v.role||'?')+' source='+(v.source||'?')+' exp='+(v.expires_at_ms||'-')+' audio='+(v.audio_url||'-'));
+                  });
+                }catch(e){lines.push('AI feed ERROR = '+e);}
+                try{
+                  var sr=await fetch('/api/race/session-announcer/$encoded/feed?after=0',{cache:'no-store'});
+                  var sx=await sr.json();
+                  lines.push('');
+                  lines.push('[ANNOUNCER] HTTP '+sr.status+' / items = '+((sx.items||[]).length));
+                }catch(e){lines.push('ANNOUNCER ERROR = '+e);}
+                try{
+                  var lr=await fetch('/api/race/live/$encoded',{cache:'no-store'});
+                  var lx=await lr.json();
+                  lines.push('');
+                  lines.push('[LIVE] HTTP '+lr.status+' / phase = '+(lx.phase||lx.event?.phase||'-')+' / active = '+((lx.active||[]).length));
+                }catch(e){lines.push('LIVE ERROR = '+e);}
+                document.getElementById('tgDbgOut').textContent=lines.join('\n');
+              }
+              document.getElementById('tgDbgReload').onclick=read;
+              document.getElementById('tgDbgPlay').onclick=async function(){
+                var s=document.getElementById('tgDbgPlayState');
+                var x=window.__tgAiDebugFeed||{};
+                var items=Array.isArray(x.items)?x.items:[];
+                var item=items.length?items[items.length-1]:null;
+                if(!item||!item.audio_url){s.textContent='재생할 AI 음성 항목이 없습니다.';return;}
+                try{
+                  var a=new Audio(item.audio_url+'?debug='+Date.now());
+                  a.volume=1;
+                  await a.play();
+                  s.textContent='재생 성공 · '+(item.event_type||'')+' #'+(item.id||'');
+                }catch(e){s.textContent='재생 실패 · '+(e&&e.name?e.name:'Error')+' · '+(e&&e.message?e.message:String(e));}
+              };
+              await read();
+            })();
+        """.trimIndent()
+        webView?.evaluateJavascript(js, null)
     }
 
     override fun onDestroy() {
