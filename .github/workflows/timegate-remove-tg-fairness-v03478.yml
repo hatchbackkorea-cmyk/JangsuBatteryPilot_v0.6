@@ -1,0 +1,194 @@
+name: TimeGate remove TG fairness v0.34.78
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/timegate-remove-tg-fairness-v03478.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Remove TG fairness policy while preserving timing accuracy
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          pkg = root / 'app/src/main/java/com/seungjae/jangsu280battery'
+
+          def read(path): return Path(path).read_text(encoding='utf-8')
+          def write(path, text): Path(path).write_text(text, encoding='utf-8')
+          def replace(path, old, new, required=True):
+              p=Path(path); s=read(p)
+              if old not in s:
+                  if required and new not in s: raise SystemExit(f'missing pattern in {path}: {old[:120]!r}')
+                  return
+              write(p, s.replace(old,new))
+
+          # Neutral persistence/recovery only. No fairness rule, ranking policy or acceptance margin lives here.
+          write(pkg/'RaceTimingPendingStore.kt', '''package com.seungjae.jangsu280battery
+
+import android.content.Context
+import android.util.AtomicFile
+import org.json.JSONObject
+import java.io.File
+
+object RaceTimingPendingStore {
+    private fun pending(context: Context) = AtomicFile(
+        File(context.filesDir, "race/pending_finish.json").also { it.parentFile?.mkdirs() }
+    )
+    fun save(context: Context, data: JSONObject) {
+        val file = pending(context); val stream = file.startWrite()
+        try { stream.write(data.toString().toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
+        catch (e: Exception) { file.failWrite(stream); throw e }
+    }
+    fun read(context: Context): JSONObject? = runCatching {
+        JSONObject(String(pending(context).readFully(), Charsets.UTF_8))
+    }.getOrNull()
+    fun clear(context: Context) = pending(context).delete()
+    fun markFinalized(context: Context, runId: String) {
+        context.getSharedPreferences("race_lap_display", Context.MODE_PRIVATE).edit()
+            .putString("run", runId).putLong("at", android.os.SystemClock.elapsedRealtime()).apply()
+    }
+    fun justFinalized(context: Context): String? {
+        val p=context.getSharedPreferences("race_lap_display",Context.MODE_PRIVATE)
+        val age=android.os.SystemClock.elapsedRealtime()-p.getLong("at",0L)
+        return if (age in 0L..1500L) p.getString("run",null) else null
+    }
+}
+''')
+
+          # Measurement evidence is diagnostic only. It never changes rank/attempt eligibility.
+          write(pkg/'RaceTimingEvidence.kt', '''package com.seungjae.jangsu280battery
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+object RaceTimingEvidence {
+    fun audit(
+        start: JSONObject?, finish: JSONObject?, originalStart: Long, originalFinish: Long,
+        runReasons: List<String>
+    ): JSONObject = JSONObject().apply {
+        put("algorithm", GateTimingMath.ALGORITHM)
+        put("evidence_version", "TG-TIMING-EVIDENCE-1")
+        put("start", start ?: JSONObject.NULL)
+        put("finish", finish ?: JSONObject.NULL)
+        put("validation_reasons", JSONArray(runReasons.distinct()))
+        put("original_started_at_ms", originalStart)
+        put("original_finished_at_ms", originalFinish)
+        put("original_elapsed_ms", (originalFinish-originalStart).coerceAtLeast(0L))
+        put("app_version", BuildConfig.VERSION_NAME)
+    }
+}
+''')
+
+          timing = pkg/'RaceTimingService.kt'
+          s=read(timing)
+          s=s.replace('RaceFairTiming.readPending(this)', 'RaceTimingPendingStore.read(this)')
+          s=s.replace('RaceFairTiming.savePending(this,', 'RaceTimingPendingStore.save(this,')
+          s=s.replace('RaceFairTiming.clearPending(this)', 'RaceTimingPendingStore.clear(this)')
+          s=s.replace('RaceFairTiming.markFinalized(this, runId)', 'RaceTimingPendingStore.markFinalized(this, runId)')
+          s=s.replace('val timingAudit = RaceFairTiming.audit(cfg, startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, reasons)',
+                      'val timingAudit = RaceTimingEvidence.audit(startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, reasons)')
+          s=s.replace('                put("state","RUNNING");put("route_m",startGate.routeM);put("fair_policy",runCatching{JSONObject(cfg.fairPolicyJson)}.getOrDefault(JSONObject()))',
+                      '                put("state","RUNNING");put("route_m",startGate.routeM)')
+          old='''            append(if (timingAudit.optString("quality") == "ACCEPTED") " · 계측기준 충족(시범)" else " · 계측 기준 미달")
+            if (timingUncertaintyMs == null) append(" · 여유폭 판단 불가")
+            else append(" · 판정여유폭 ±").append(timingUncertaintyMs).append("ms(잠정)")'''
+          new='''            append(if (validation == "VALID") " · 계측 기준 충족" else " · 계측 기준 미달")
+            if (timingUncertaintyMs != null) append(" · 추정 불확실성 ±").append(timingUncertaintyMs).append("ms")'''
+          if old not in s: raise SystemExit('finish TG fairness status block not found')
+          s=s.replace(old,new)
+          if 'RaceFairTiming' in s or 'fair_policy' in s or 'fairPolicyJson' in s:
+              raise SystemExit('TG fairness reference remains in RaceTimingService.kt')
+          write(timing,s)
+
+          for name in ['RaceAutoLapDiscoveryService.kt','RaceLiveLapDisplayInstaller.kt']:
+              p=pkg/name; x=read(p).replace('RaceFairTiming.readPending(this)', 'RaceTimingPendingStore.read(this)')
+              x=x.replace('RaceFairTiming.justFinalized(activity)', 'RaceTimingPendingStore.justFinalized(activity)')
+              write(p,x)
+
+          protocol=pkg/'RaceProtocol.kt'; s=read(protocol)
+          s=s.replace(',\n    val leaderElapsedMs: Long? = null,\n    val fairPolicyJson: String = ""\n)', ',\n    val leaderElapsedMs: Long? = null\n)')
+          s=s.replace('        if (fairPolicyJson.isNotBlank()) put("fair_policy", JSONObject(fairPolicyJson))\n','')
+          s=s.replace(',\n                fairPolicyJson = o.optJSONObject("fair_policy")?.toString().orEmpty()\n            )', '\n            )')
+          s=s.replace('Raw milliseconds are preserved for timing evidence and TG공정성 verification; every rider/admin/monitor',
+                      'Raw milliseconds are preserved for timing evidence; every rider/admin/monitor')
+          if 'fairPolicyJson' in s or 'fair_policy' in s or 'TG공정성' in s: raise SystemExit('fairness protocol field remains')
+          write(protocol,s)
+
+          # Remove policy implementation/docs, but keep gate math/refiner/sensor fusion and their tests.
+          for rel in [
+              'app/src/main/java/com/seungjae/jangsu280battery/RaceFairTiming.kt',
+              'docs/TG-FAIR-1.md',
+          ]:
+              Path(rel).unlink(missing_ok=True)
+          oldwf=Path('.github/workflows/fair-timing-tests.yml')
+          if oldwf.exists():
+              oldwf.rename('.github/workflows/timing-accuracy-tests.yml')
+              q=Path('.github/workflows/timing-accuracy-tests.yml')
+              t=read(q).replace('Fair timing regression tests','Timing accuracy regression tests')
+              t=t.replace("'.github/workflows/fair-timing-tests.yml'", "'.github/workflows/timing-accuracy-tests.yml'")
+              t=t.replace('fair-timing-unit-tests','timing-accuracy-unit-tests')
+              write(q,t)
+
+          # Home copy is authoritative even if it was already applied.
+          home=pkg/'TimeGateHomeView.kt'; h=read(home)
+          h=h.replace('"기록측정"', '"LAP TIMER"').replace('"정확한 기록을 측정하세요"','"어제보다 오늘이 더 빠르게!"')
+          if '"LAP TIMER", "어제보다 오늘이 더 빠르게!"' not in h:
+              raise SystemExit('home LAP TIMER copy not present')
+          write(home,h)
+
+          # One patch forward, never backwards.
+          vp=Path('VERSION.txt'); cur=vp.read_text().strip(); m=re.match(r'^(\d+)\.(\d+)\.(\d+)$',cur)
+          if not m: raise SystemExit(f'bad VERSION: {cur}')
+          a,b,c=map(int,m.groups())
+          if (a,b,c) < (0,34,77): raise SystemExit(f'refuse downgrade/old base: {cur}')
+          target=f'{a}.{b}.{c+1}'
+          vp.write_text(target+'\n')
+          print('ANDROID_TARGET_VERSION='+target)
+          PY
+
+          # There must be no active TG fairness policy symbols after the patch.
+          if grep -RInE 'RaceFairTiming|fairPolicyJson|fair_policy|TG-FAIR|TG공정성' app/src/main/java docs 2>/dev/null; then
+            echo 'TG fairness reference remains in Android source/docs' >&2
+            exit 1
+          fi
+          test -f app/src/main/java/com/seungjae/jangsu280battery/GateTimingMath.kt
+          test -f app/src/main/java/com/seungjae/jangsu280battery/RaceTimingRefiner.kt
+          test -f app/src/main/java/com/seungjae/jangsu280battery/RaceSensorFusion.kt
+      - name: Android unit tests and APK build
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+        run: |
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace \
+            -PkakaoNativeAppKey="$KAKAO_NATIVE_APP_KEY" \
+            -PupdateRepo="${GITHUB_REPOSITORY}"
+      - name: Commit Android patch
+        shell: bash
+        run: |
+          git config user.name 'TimeGate Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm -f .github/workflows/timegate-remove-tg-fairness-v03478.yml
+          git add -A
+          git commit -m 'Release TimeGate v0.34.78 remove TG fairness policy'
+          git push origin HEAD:main
