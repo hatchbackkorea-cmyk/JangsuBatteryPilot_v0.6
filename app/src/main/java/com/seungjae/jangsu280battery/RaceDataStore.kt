@@ -58,7 +58,13 @@ class RaceDataStore(context: Context) {
         }
     }
 
-    @Synchronized fun writeSnapshot(s: Snapshot) { prefs.edit().putString("snapshot", s.toJson().toString()).apply() }
+    @Synchronized
+    fun writeSnapshot(s: Snapshot) {
+        val previous = snapshot()
+        prefs.edit().putString("snapshot", s.toJson().toString()).apply()
+        RaceImmediateTerminalNotifier.onSnapshot(app, this, previous, s)
+    }
+
     fun snapshot(): Snapshot = runCatching { Snapshot.fromJson(JSONObject(prefs.getString("snapshot", "{}"))) }.getOrDefault(Snapshot())
 
     @Synchronized
