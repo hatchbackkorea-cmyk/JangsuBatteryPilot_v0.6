@@ -81,11 +81,11 @@ class RaceBroadcastActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    // QR codes are useful on the venue monitor but only obscure information on a participant phone.
                     view?.evaluateJavascript(
                         "document.querySelectorAll('.qrBox').forEach(function(e){e.style.display='none'});void(0);",
                         null
                     )
+                    ensureAiPlayer(view)
                 }
             }
         }
@@ -95,6 +95,43 @@ class RaceBroadcastActivity : Activity() {
 
         val encoded = URLEncoder.encode(eventCode, "UTF-8")
         web.loadUrl("$baseUrl/race-live/$encoded?participant=1")
+    }
+
+    /**
+     * The server normally injects race_ai_commentary.js into the live page. Some field
+     * deployments can still serve the plain race_live.html route, so the participant WebView
+     * guarantees that the audio player exists. Without this player the commentary feed is not
+     * polled at all, which also means START/CP/FINISH TTS is never scheduled.
+     */
+    private fun ensureAiPlayer(view: WebView?) {
+        val js = """
+            (function bootTimeGateAi(){
+              try{
+                if(typeof window.__raceAiEnqueue==='function'){
+                  window.__tgAiPlayerBoot='already-loaded';
+                  return;
+                }
+                var old=document.getElementById('tg-ai-player-script');
+                if(old){
+                  window.__tgAiPlayerBoot='loading';
+                  return;
+                }
+                var s=document.createElement('script');
+                s.id='tg-ai-player-script';
+                s.src='/static/race_ai_commentary.js?app=0.34.84&ts='+Date.now();
+                s.async=false;
+                s.onload=function(){window.__tgAiPlayerBoot=(typeof window.__raceAiEnqueue==='function')?'loaded':'loaded-no-player';};
+                s.onerror=function(){
+                  window.__tgAiPlayerBoot='load-error';
+                  try{s.remove();}catch(e){}
+                  setTimeout(bootTimeGateAi,1200);
+                };
+                (document.head||document.documentElement).appendChild(s);
+                window.__tgAiPlayerBoot='injected';
+              }catch(e){window.__tgAiPlayerBoot='exception:'+String(e);}
+            })();
+        """.trimIndent()
+        view?.evaluateJavascript(js, null)
     }
 
     private fun showAiDebug(eventCode: String) {
@@ -114,6 +151,8 @@ class RaceBroadcastActivity : Activity() {
                 lines.push('event = $encoded');
                 lines.push('page = '+location.href);
                 lines.push('AI player loaded = '+(typeof window.__raceAiEnqueue==='function'));
+                lines.push('AI player boot = '+(window.__tgAiPlayerBoot||'-'));
+                lines.push('AI script tag = '+!!document.querySelector('script[src*="race_ai_commentary.js"]'));
                 lines.push('visibility = '+document.visibilityState);
                 lines.push('userAgent = '+navigator.userAgent);
                 try{
