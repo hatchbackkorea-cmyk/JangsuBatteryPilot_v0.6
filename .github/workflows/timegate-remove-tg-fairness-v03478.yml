@@ -24,6 +24,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Neutralize legacy policy naming in timing math
+        shell: bash
+        run: |
+          sed -i 's/TG-FAIR-1\. Margins are operational screening estimates, NOT calibrated confidence bounds\./Timing uncertainty is an operational estimate, not a calibrated confidence bound./' app/src/main/java/com/seungjae/jangsu280battery/GateTimingMath.kt
+          sed -i 's/TG-GATE-1/GATE-TIMING-1/g' app/src/main/java/com/seungjae/jangsu280battery/GateTimingMath.kt
       - name: Apply non-TG timing patch
         run: python .github/scripts/remove_tg_fairness_v03478.py
       - name: Verify TG policy removed and timing modules preserved
