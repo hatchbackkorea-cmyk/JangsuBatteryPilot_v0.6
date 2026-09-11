@@ -105,7 +105,7 @@ object RaceLiveLapDisplayInstaller {
         setBlock(bestBlock, bestLapNo, best?.elapsedMs)
         setBlock(previousBlock, previousLapNo, previous?.elapsedMs)
 
-        val heldId = if (snapshot.state == "ARMED") RaceFairTiming.justFinalized(activity) else null
+        val heldId = if (snapshot.state == "ARMED") RaceTimingPendingStore.justFinalized(activity) else null
         val heldIndex = if (heldId == null) -1 else completedForRoom.indexOfFirst { it.runId == heldId }
         if (heldIndex >= 0) {
             val held = completedForRoom[heldIndex]

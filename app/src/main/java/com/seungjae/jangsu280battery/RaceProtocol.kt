@@ -41,8 +41,7 @@ data class RaceEventConfig(
     val gates: List<RaceGate>,
     val reference: List<RaceReferencePoint> = emptyList(),
     val leaderName: String = "",
-    val leaderElapsedMs: Long? = null,
-    val fairPolicyJson: String = ""
+    val leaderElapsedMs: Long? = null
 ) {
     fun toJson() = JSONObject().apply {
         put("event_id", eventId); put("event_code", eventCode); put("name", name)
@@ -52,7 +51,6 @@ data class RaceEventConfig(
         put("reference", JSONArray().apply { reference.forEach { put(it.toJson()) } })
         put("leader_name", leaderName)
         leaderElapsedMs?.let { put("leader_elapsed_ms", it) }
-        if (fairPolicyJson.isNotBlank()) put("fair_policy", JSONObject(fairPolicyJson))
     }
 
     companion object {
@@ -69,8 +67,7 @@ data class RaceEventConfig(
                 gates = (0 until gatesA.length()).mapNotNull { gatesA.optJSONObject(it)?.let(RaceGate::fromJson) },
                 reference = (0 until refA.length()).mapNotNull { refA.optJSONObject(it)?.let(RaceReferencePoint::fromJson) },
                 leaderName = o.optString("leader_name", ""),
-                leaderElapsedMs = if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,
-                fairPolicyJson = o.optJSONObject("fair_policy")?.toString().orEmpty()
+                leaderElapsedMs = if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null
             )
         }
     }
@@ -141,7 +138,7 @@ data class RaceRunSummary(
 
 /**
  * Canonical TimeGate visible-record precision.
- * Raw milliseconds are preserved for timing evidence and TG공정성 verification; every rider/admin/monitor
+ * Raw milliseconds are preserved for timing evidence; every rider/admin/monitor
  * time shown to people is rounded to the nearest 0.1 second (50 ms rounds upward).
  */
 fun roundRaceTimeMs(ms: Long): Long = ((ms.coerceAtLeast(0L) + 50L) / 100L) * 100L

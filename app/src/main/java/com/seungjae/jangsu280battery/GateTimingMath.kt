@@ -2,9 +2,9 @@ package com.seungjae.jangsu280battery
 
 import kotlin.math.*
 
-/** TG-FAIR-1. Margins are operational screening estimates, NOT calibrated confidence bounds. */
+/** Timing uncertainty is an operational estimate, not a calibrated confidence bound. */
 object GateTimingMath {
-    const val ALGORITHM = "TG-GATE-1"
+    const val ALGORITHM = "GATE-TIMING-1"
     data class Fix(val ns: Long, val along: Double, val across: Double, val accuracy: Double,
                    val speed: Double? = null, val timeErrorNs: Double = 0.0, val mock: Boolean = false)
     data class Estimate(val ns: Long, val originalNs: Long, val marginMs: Long?, val method: String,

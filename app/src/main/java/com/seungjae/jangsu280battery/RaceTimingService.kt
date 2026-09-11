@@ -259,7 +259,7 @@ class RaceTimingService : Service(), LocationListener {
 
     private fun cfgJson(): JSONObject = (config?.toJson() ?: JSONObject()).put("local_course_id",courseId)
     private fun recoverPendingFinish(): Boolean {
-        val saved=RaceFairTiming.readPending(this) ?: return false
+        val saved=RaceTimingPendingStore.read(this) ?: return false
         val c=saved.optJSONObject("config") ?: return false
         val snap=RaceDataStore.Snapshot.fromJson(saved.getJSONObject("snapshot"))
         val cid=c.optString("local_course_id")
@@ -465,7 +465,7 @@ class RaceTimingService : Service(), LocationListener {
             store.enqueue("START",cfg.eventCode,JSONObject().apply {
                 put("event_code",cfg.eventCode);put("run_id",runId);put("run_number",runNumber)
                 put("started_at_ms",preliminaryStartAt.takeIf { it > 0L } ?: startAt);put("timestamp_ms",startAt);put("elapsed_ms",0)
-                put("state","RUNNING");put("route_m",startGate.routeM);put("fair_policy",runCatching{JSONObject(cfg.fairPolicyJson)}.getOrDefault(JSONObject()))
+                put("state","RUNNING");put("route_m",startGate.routeM)
             },client.baseUrl())
         }
     }
@@ -648,7 +648,7 @@ class RaceTimingService : Service(), LocationListener {
             "랩타임 확인중 · 1초 GPS 궤적 정밀보정"
         )
         updateNotification("FINISH · 랩타임 확인중")
-        RaceFairTiming.savePending(this, JSONObject().apply {
+        RaceTimingPendingStore.save(this, JSONObject().apply {
             put("config", cfgJson());put("snapshot", store.snapshot().toJson())
             put("original_start", preliminaryStartAt);put("original_finish",preliminaryFinishAt)
             put("start_audit",startAudit ?: JSONObject.NULL);put("clock_offset",clockOffsetMs ?: 0L)
@@ -691,7 +691,7 @@ class RaceTimingService : Service(), LocationListener {
 
         val validation = validationStatus()
         val reasons = validationReasons()
-        val timingAudit = RaceFairTiming.audit(cfg, startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, reasons)
+        val timingAudit = RaceTimingEvidence.audit(startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, reasons)
         val summary = RaceRunSummary(
             runId,
             runNumber,
@@ -749,9 +749,8 @@ class RaceTimingService : Service(), LocationListener {
             append(" · 정밀보정 ")
             if (finishRefinementMs == 0L && startRefinementMs == 0L) append("유지")
             else append("적용")
-            append(if (timingAudit.optString("quality") == "ACCEPTED") " · 계측기준 충족(시범)" else " · 계측 기준 미달")
-            if (timingUncertaintyMs == null) append(" · 여유폭 판단 불가")
-            else append(" · 판정여유폭 ±").append(timingUncertaintyMs).append("ms(잠정)")
+            append(if (validation == "VALID") " · 계측 기준 충족" else " · 계측 기준 미달")
+            if (timingUncertaintyMs != null) append(" · 추정 불확실성 ±").append(timingUncertaintyMs).append("ms")
             if (cfg.eventCode != "PRACTICE") append(" · 서버 동기화")
             append(" · 다음 LAP 자동 준비 중")
         }
@@ -760,11 +759,11 @@ class RaceTimingService : Service(), LocationListener {
         finishFinalizeRunnable?.let(mainHandler::removeCallbacks)
         finishFinalizeRunnable = null
         pendingFinishGate = null
-        RaceFairTiming.clearPending(this)
+        RaceTimingPendingStore.clear(this)
         updateNotification("FINISH ${formatRaceTime(elapsed)} · 기록 저장")
         if (rearm) {
             val tail = finishTail.map { Location(it) }
-            RaceFairTiming.markFinalized(this, runId)
+            RaceTimingPendingStore.markFinalized(this, runId)
             arm(cfg, finishedCourseId, nextLap = true)
             prev=null;previousRouteM=null;lastFix=null;matcher=RaceRouteMatcher(loaded);timingRefiner.reset()
             val startGate=cfg.gates.first()
