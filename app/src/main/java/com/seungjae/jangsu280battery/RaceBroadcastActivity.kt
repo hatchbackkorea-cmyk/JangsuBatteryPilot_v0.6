@@ -118,7 +118,7 @@ class RaceBroadcastActivity : Activity() {
                 }
                 var s=document.createElement('script');
                 s.id='tg-ai-player-script';
-                s.src='/static/race_ai_commentary.js?app=0.34.84&ts='+Date.now();
+                s.src='/static/race_ai_commentary.js?app=0.34.85&ts='+Date.now();
                 s.async=false;
                 s.onload=function(){window.__tgAiPlayerBoot=(typeof window.__raceAiEnqueue==='function')?'loaded':'loaded-no-player';};
                 s.onerror=function(){
@@ -148,39 +148,70 @@ class RaceBroadcastActivity : Activity() {
               document.getElementById('tgDbgClose').onclick=function(){box.remove();};
               async function read(){
                 var lines=[];
+                var relay={
+                  app_version:'0.34.85',
+                  player_loaded:(typeof window.__raceAiEnqueue==='function'),
+                  player_boot:(window.__tgAiPlayerBoot||'-'),
+                  script_tag:!!document.querySelector('script[src*="race_ai_commentary.js"]'),
+                  visibility:document.visibilityState,
+                  ai_feed:{http:0,enabled:false,ready:false,pending:0,last_error:'',items:0},
+                  announcer:{http:0,items:0},
+                  live:{http:0,phase:'',active:0}
+                };
                 lines.push('event = $encoded');
                 lines.push('page = '+location.href);
-                lines.push('AI player loaded = '+(typeof window.__raceAiEnqueue==='function'));
-                lines.push('AI player boot = '+(window.__tgAiPlayerBoot||'-'));
-                lines.push('AI script tag = '+!!document.querySelector('script[src*="race_ai_commentary.js"]'));
+                lines.push('AI player loaded = '+relay.player_loaded);
+                lines.push('AI player boot = '+relay.player_boot);
+                lines.push('AI script tag = '+relay.script_tag);
                 lines.push('visibility = '+document.visibilityState);
                 lines.push('userAgent = '+navigator.userAgent);
                 try{
                   var r=await fetch('/api/race/ai-commentary/$encoded/feed?after=0',{cache:'no-store'});
                   var x=await r.json();
                   window.__tgAiDebugFeed=x;
+                  var items=Array.isArray(x.items)?x.items:[];
+                  relay.ai_feed={http:r.status,enabled:!!x.enabled,ready:!!x.ready,pending:Number(x.pending||0),last_error:String(x.last_error||''),items:items.length};
                   lines.push('');
                   lines.push('[AI FEED] HTTP '+r.status);
                   lines.push('enabled = '+x.enabled+' / ready = '+x.ready+' / pending = '+x.pending);
                   lines.push('last_error = '+(x.last_error||'-'));
-                  var items=Array.isArray(x.items)?x.items:[];
                   lines.push('items = '+items.length);
                   items.slice(-8).forEach(function(v){
                     lines.push('#'+(v.id||'?')+' '+(v.event_type||'?')+' role='+(v.role||'?')+' source='+(v.source||'?')+' exp='+(v.expires_at_ms||'-')+' audio='+(v.audio_url||'-'));
                   });
-                }catch(e){lines.push('AI feed ERROR = '+e);}
+                }catch(e){relay.ai_feed.last_error='client:'+String(e);lines.push('AI feed ERROR = '+e);}
                 try{
                   var sr=await fetch('/api/race/session-announcer/$encoded/feed?after=0',{cache:'no-store'});
                   var sx=await sr.json();
+                  relay.announcer={http:sr.status,items:Array.isArray(sx.items)?sx.items.length:0};
                   lines.push('');
-                  lines.push('[ANNOUNCER] HTTP '+sr.status+' / items = '+((sx.items||[]).length));
+                  lines.push('[ANNOUNCER] HTTP '+sr.status+' / items = '+relay.announcer.items);
                 }catch(e){lines.push('ANNOUNCER ERROR = '+e);}
                 try{
                   var lr=await fetch('/api/race/live/$encoded',{cache:'no-store'});
                   var lx=await lr.json();
+                  relay.live={http:lr.status,phase:String(lx.phase||lx.event?.phase||''),active:Array.isArray(lx.active)?lx.active.length:0};
                   lines.push('');
-                  lines.push('[LIVE] HTTP '+lr.status+' / phase = '+(lx.phase||lx.event?.phase||'-')+' / active = '+((lx.active||[]).length));
+                  lines.push('[LIVE] HTTP '+lr.status+' / phase = '+(relay.live.phase||'-')+' / active = '+relay.live.active);
                 }catch(e){lines.push('LIVE ERROR = '+e);}
+                try{
+                  var dr=await fetch('/api/race/debug-relay/$encoded',{
+                    method:'POST',
+                    cache:'no-store',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify(relay)
+                  });
+                  var dx=await dr.json();
+                  window.__tgAiDebugRelay=dx;
+                  lines.push('');
+                  lines.push('[AUTO RELAY] HTTP '+dr.status+' / published = '+!!dx.published);
+                  lines.push('branch = '+(dx.branch||'-')+' / file = '+(dx.file||'-'));
+                  if(dx.commit)lines.push('commit = '+dx.commit);
+                  if(dx.error)lines.push('relay_error = '+dx.error);
+                }catch(e){
+                  lines.push('');
+                  lines.push('[AUTO RELAY] ERROR = '+e);
+                }
                 document.getElementById('tgDbgOut').textContent=lines.join('\n');
               }
               document.getElementById('tgDbgReload').onclick=read;
