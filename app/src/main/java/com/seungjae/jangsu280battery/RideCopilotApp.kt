@@ -21,10 +21,21 @@ import java.io.File
 class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
     override fun onCreate() {
         super.onCreate()
+        bootstrapRaceServer()
         if (BuildConfig.KAKAO_NATIVE_APP_KEY.isNotBlank()) {
             KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_APP_KEY)
         }
         registerActivityLifecycleCallbacks(this)
+    }
+
+    private fun bootstrapRaceServer() {
+        val published = BuildConfig.DEFAULT_RACE_SERVER_URL.trim().trimEnd('/')
+        if (!published.startsWith("https://") && !published.startsWith("http://")) return
+        val prefs = getSharedPreferences("race_server_route_v1", MODE_PRIVATE)
+        val current = prefs.getString("event_server", "").orEmpty().trim().trimEnd('/')
+        if (current.isBlank() || current.equals(OLD_RACE_SERVER_URL, ignoreCase = true)) {
+            prefs.edit().putString("event_server", published).apply()
+        }
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
@@ -241,5 +252,6 @@ class RideCopilotApp : Application(), Application.ActivityLifecycleCallbacks {
         private const val TAG_SWITCH = "voice_volume_boost_switch_v0334"
         private const val TAG_HINT = "voice_volume_boost_hint_v0334"
         private const val TIMING_HEARTBEAT_STALE_MS = 4_000L
+        private const val OLD_RACE_SERVER_URL = "https://rider-control-center.tail8152aa.ts.net"
     }
 }
