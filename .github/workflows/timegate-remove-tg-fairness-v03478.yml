@@ -31,6 +31,11 @@ jobs:
           sed -i 's/TG-GATE-1/GATE-TIMING-1/g' app/src/main/java/com/seungjae/jangsu280battery/GateTimingMath.kt
       - name: Apply non-TG timing patch
         run: python .github/scripts/remove_tg_fairness_v03478.py
+      - name: Keep timing regression workflow unchanged for Actions push permission
+        shell: bash
+        run: |
+          git checkout HEAD -- .github/workflows/fair-timing-tests.yml || true
+          rm -f .github/workflows/timing-accuracy-tests.yml
       - name: Verify TG policy removed and timing modules preserved
         shell: bash
         run: |
@@ -49,12 +54,13 @@ jobs:
           gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace \
             -PkakaoNativeAppKey="$KAKAO_NATIVE_APP_KEY" \
             -PupdateRepo="${GITHUB_REPOSITORY}"
-      - name: Commit Android patch
+      - name: Commit Android source patch
         shell: bash
         run: |
           git config user.name 'TimeGate Automation'
           git config user.email 'actions@users.noreply.github.com'
-          git rm -f .github/workflows/timegate-remove-tg-fairness-v03478.yml .github/scripts/remove_tg_fairness_v03478.py
+          git rm -f .github/scripts/remove_tg_fairness_v03478.py
           git add -A
+          git reset .github/workflows/timegate-remove-tg-fairness-v03478.yml .github/workflows/fair-timing-tests.yml || true
           git commit -m 'Release TimeGate v0.34.78 remove TG fairness policy'
           git push origin HEAD:main
