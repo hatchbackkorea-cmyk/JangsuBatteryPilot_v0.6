@@ -126,7 +126,7 @@ class RaceLapHistoryActivity : Activity() {
             return
         }
 
-        val usable = laps.filter { it.status.equals("VALID", ignoreCase = true) }
+        val usable = laps.filter(::isRecognizedFinish)
         val schemaRun = usable.maxWithOrNull(compareBy<RaceRunSummary> { it.sectors.size }.thenBy { it.finishedAtMs })
             ?: laps.maxByOrNull { it.finishedAtMs }
         val segmentCount = schemaRun?.sectors?.size ?: 0
@@ -155,7 +155,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("랩별 전체 기록"))
         body.addView(TextView(this).apply {
-            text = "완주 기록은 BEST/OPTIMAL 계산에 포함하고 DNF/미완주만 제외합니다."
+            text = "START와 FINISH가 모두 기록된 랩은 정상 기록으로 인정합니다. DNF/미완주는 BEST 계산에서 제외합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(6))
@@ -164,7 +164,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("CP 구간 상세"))
         body.addView(TextView(this).apply {
-            text = "CP는 구간 분석용입니다. 각 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다."
+            text = "CP는 구간 분석용입니다. CP 누락 여부와 관계없이 START와 FINISH가 있으면 정상 기록으로 인정합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(7))
@@ -186,7 +186,7 @@ class RaceLapHistoryActivity : Activity() {
         table.addView(header)
 
         laps.forEachIndexed { lapIndex, run ->
-            val excluded = !run.status.equals("VALID", ignoreCase = true)
+            val excluded = !isRecognizedFinish(run)
             val row = TableRow(this).apply { setBackgroundColor(Color.WHITE) }
             val isBest = actualBest?.runId == run.runId
             row.addView(cell("${lapIndex + 1}${if (isBest) " ★" else ""}", true, if (isBest) BLUE else if (excluded) Color.GRAY else TEXT, dp(62)))
@@ -222,6 +222,10 @@ class RaceLapHistoryActivity : Activity() {
         }
     }
 
+    private fun isRecognizedFinish(run: RaceRunSummary): Boolean =
+        !run.status.equals("DNF", ignoreCase = true) &&
+            run.startedAtMs > 0L && run.finishedAtMs > run.startedAtMs && run.elapsedMs > 0L
+
     private fun sameScope(run: RaceRunSummary): Boolean =
         if (eventCode == "PRACTICE") {
             run.eventCode.equals("PRACTICE", ignoreCase = true) && run.courseId == courseId
@@ -251,7 +255,7 @@ class RaceLapHistoryActivity : Activity() {
         }
 
         laps.forEachIndexed { index, run ->
-            val excluded = !run.status.equals("VALID", ignoreCase = true)
+            val excluded = !isRecognizedFinish(run)
             val isBest = actualBest?.runId == run.runId
             val color = when {
                 excluded -> Color.GRAY

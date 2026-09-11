@@ -321,7 +321,7 @@ object RaceDebugUiInstaller {
             append("닉네임 · ").append(p.nickname).append('\n')
             append("대회 · ").append(preview.eventName).append(" · ").append(preview.eventCode).append('\n')
             append("로컬 완료 랩 · ").append(preview.runs.size).append("개\n\n")
-            append("랩타임과 시각은 바꾸지 않고 선수 소속만 분리합니다. 서버에 없던 로컬 랩은 REVIEW로 복원합니다. 휴대폰 원본은 삭제하지 않습니다.")
+            append("랩타임과 시각은 바꾸지 않고 선수 소속만 분리합니다. 서버에 없던 완주 랩은 START+FINISH 기준 정상 기록으로 복원합니다. 휴대폰 원본은 삭제하지 않습니다.")
         }
         AlertDialog.Builder(activity)
             .setTitle("이 폰 기록 복구")
@@ -340,7 +340,7 @@ object RaceDebugUiInstaller {
                     val message = buildString {
                         append("복구 완료\n\n")
                         append("서버 기록 분리 · ").append(o.optInt("reassigned", 0)).append("랩\n")
-                        append("서버에 없던 기록 복원 · ").append(o.optInt("inserted_review", 0)).append("랩\n")
+                        append("서버에 없던 기록 복원 · ").append(o.optInt("inserted_valid", 0)).append("랩\n")
                         append("이미 정상 연결 · ").append(o.optInt("already_owned", 0)).append("랩\n")
                         append("이 선수 총 기록 · ").append(o.optInt("target_total_runs", 0)).append("랩\n")
                         append("기존 합쳐진 선수에 남은 기록 · ").append(o.optInt("source_remaining_runs", 0)).append("랩\n")

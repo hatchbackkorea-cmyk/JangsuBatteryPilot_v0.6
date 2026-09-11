@@ -15,12 +15,14 @@ class RaceDataStore(context: Context) {
     private val rawDir = File(dir, "raw").apply { mkdirs() }
     private val completedFile = File(dir, "completed_runs.json")
 
+    init { migrateCompletedToStartFinishRule() }
+
     data class Snapshot(
         val state: String = "STOPPED", val eventCode: String = "", val eventName: String = "", val courseId: String = "", val courseName: String = "",
         val runId: String = "", val runNumber: Int = 0, val startedAtMs: Long = 0L, val lastGateAtMs: Long = 0L, val elapsedMs: Long = 0L,
         val routeM: Double = 0.0, val totalM: Double = 0.0, val deltaMs: Long? = null, val nextGateIndex: Int = 0, val currentSector: String = "",
         val gpsAccuracyM: Double = 0.0, val maxSpeedKph: Double = 0.0, val maxGpsAccuracyM: Double = 0.0, val maxOffRouteM: Double = 0.0,
-        val jumpCount: Int = 0, val validation: String = "", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
+        val jumpCount: Int = 0, val validation: String = "VALID", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
         val leaderName: String = "", val leaderElapsedMs: Long? = null, val leaderDeltaMs: Long? = null, val estimatedRank: Int? = null,
         val rankedCount: Int = 0, val participantCount: Int = 0, val startedElapsedNs: Long = 0L
     ) {
@@ -44,7 +46,7 @@ class RaceDataStore(context: Context) {
                     o.optString("run_id"), o.optInt("run_number", 0), o.optLong("started_at_ms"), o.optLong("last_gate_at_ms"), o.optLong("elapsed_ms"),
                     o.optDouble("route_m", 0.0), o.optDouble("total_m", 0.0), if (o.has("delta_ms") && !o.isNull("delta_ms")) o.optLong("delta_ms") else null,
                     o.optInt("next_gate_index", 0), o.optString("current_sector"), o.optDouble("gps_accuracy_m", 0.0), o.optDouble("max_speed_kph", 0.0),
-                    o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0), o.optInt("jump_count", 0), o.optString("validation", "INVALID"),
+                    o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0), o.optInt("jump_count", 0), o.optString("validation", "VALID"),
                     (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(RaceSectorResult::fromJson) },
                     if (o.has("finish_rank") && !o.isNull("finish_rank")) o.optInt("finish_rank") else null, o.optString("server_status", ""),
                     o.optString("leader_name", ""), if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,
@@ -107,27 +109,45 @@ class RaceDataStore(context: Context) {
         File(rawDir, "$runId.jsonl").appendText(o.toString() + "\n", Charsets.UTF_8)
     }
 
-    @Synchronized fun saveCompleted(summary: RaceRunSummary) {
-        val current = runCatching { JSONArray(completedFile.readText(Charsets.UTF_8)) }.getOrDefault(JSONArray()); val next = JSONArray(); var replaced = false
-        for (i in 0 until current.length()) { val old = current.optJSONObject(i) ?: continue; if (old.optString("run_id") == summary.runId) { next.put(summary.toJson()); replaced = true } else next.put(old) }
-        if (!replaced) next.put(summary.toJson()); val tmp = File(dir, "completed_runs.tmp"); tmp.writeText(next.toString(), Charsets.UTF_8); tmp.copyTo(completedFile, overwrite = true); tmp.delete()
+    private fun normalizeCompleted(summary: RaceRunSummary): RaceRunSummary {
+        if (summary.status.equals("DNF", ignoreCase = true)) return summary
+        val hasStartAndFinish = summary.startedAtMs > 0L && summary.finishedAtMs > summary.startedAtMs && summary.elapsedMs > 0L
+        return if (hasStartAndFinish && !summary.status.equals("VALID", ignoreCase = true)) summary.copy(status = "VALID") else summary
     }
+
     @Synchronized
+    private fun migrateCompletedToStartFinishRule() {
+        if (!completedFile.exists()) return
+        val current = runCatching { JSONArray(completedFile.readText(Charsets.UTF_8)) }.getOrNull() ?: return
+        val next = JSONArray()
+        var changed = false
+        for (i in 0 until current.length()) {
+            val raw = current.optJSONObject(i) ?: continue
+            val parsed = runCatching { RaceRunSummary.fromJson(raw) }.getOrNull()
+            if (parsed == null) {
+                next.put(raw)
+                continue
+            }
+            val normalized = normalizeCompleted(parsed)
+            if (normalized.status != parsed.status) changed = true
+            next.put(normalized.toJson())
+        }
+        if (!changed) return
+        val tmp = File(dir, "completed_runs.start_finish.tmp")
+        tmp.writeText(next.toString(), Charsets.UTF_8)
+        tmp.copyTo(completedFile, overwrite = true)
+        tmp.delete()
+    }
+
+    @Synchronized fun saveCompleted(summary: RaceRunSummary) {
+        val normalized = normalizeCompleted(summary)
+        val current = runCatching { JSONArray(completedFile.readText(Charsets.UTF_8)) }.getOrDefault(JSONArray()); val next = JSONArray(); var replaced = false
+        for (i in 0 until current.length()) { val old = current.optJSONObject(i) ?: continue; if (old.optString("run_id") == normalized.runId) { next.put(normalized.toJson()); replaced = true } else next.put(old) }
+        if (!replaced) next.put(normalized.toJson()); val tmp = File(dir, "completed_runs.tmp"); tmp.writeText(next.toString(), Charsets.UTF_8); tmp.copyTo(completedFile, overwrite = true); tmp.delete()
+    }
     fun completed(): List<RaceRunSummary> {
         val a = runCatching { JSONArray(completedFile.readText(Charsets.UTF_8)) }.getOrDefault(JSONArray())
-        val parsed = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { o -> runCatching { RaceRunSummary.fromJson(o) }.getOrNull() } }
-        val normalized = parsed.map { run ->
-            val normalizedStatus = normalizeRaceCompletionStatus(run.status, run.startedAtMs, run.finishedAtMs, run.elapsedMs)
-            if (normalizedStatus == run.status) run else run.copy(status = normalizedStatus)
-        }
-        if (normalized != parsed) {
-            val out = JSONArray().apply { normalized.forEach { put(it.toJson()) } }
-            val tmp = File(dir, "completed_runs.tmp")
-            tmp.writeText(out.toString(), Charsets.UTF_8)
-            tmp.copyTo(completedFile, overwrite = true)
-            tmp.delete()
-        }
-        return normalized
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { o -> runCatching { normalizeCompleted(RaceRunSummary.fromJson(o)) }.getOrNull() } }
     }
     fun nextRunNumber(eventCode: String): Int = completed().count { it.eventCode == eventCode } + 1
 

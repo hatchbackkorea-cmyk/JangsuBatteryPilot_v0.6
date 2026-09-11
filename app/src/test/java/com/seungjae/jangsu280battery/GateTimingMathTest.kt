@@ -22,6 +22,6 @@ class GateTimingMathTest {
     @Test fun oneHzSupportedWithoutInventingSamples(){val e=GateTimingMath.evaluate(motion(hz=1),base,10.0);assertTrue(e.usable);assertTrue(abs(e.ns-base)<=1_000_000L)}
     @Test fun fixedPositionBiasDoesNotGetAveragedAway(){assertTrue(GateTimingMath.evaluate(motion().map{it.copy(along=it.along+0.5)},base,10.0).marginMs!!>500L)}
     @Test fun lowNormalSpeedUnknownRatherThanDisqualification(){assertNull(GateTimingMath.evaluate(motion(v=0.2),base,10.0).marginMs)}
-    @Test fun correctionLimitIsReviewNotSilentClipping(){assertFalse(GateTimingMath.evaluate(motion(),base-1_100_000_000L,10.0).usable)}
+    @Test fun correctionLimitRejectsUnusableCrossing(){assertFalse(GateTimingMath.evaluate(motion(),base-1_100_000_000L,10.0).usable)}
     @Test fun mockSourceNotRankable(){assertFalse(GateTimingMath.evaluate(motion().map{it.copy(mock=true)},base,10.0).usable)}
 }

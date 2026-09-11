@@ -35,7 +35,7 @@ Each completed Run contains:
 - reduced distance/time reference trace
 - max speed
 - GPS accuracy/off-route quality metrics
-- VALID / REVIEW / INVALID status
+- FINISH 완료=VALID / 사용자 중단=DNF status
 - stable `run_id` for idempotent upload
 
 Leaderboards count the best valid Run per participant. Sector leaderboards are independent from the overall leaderboard. Theoretical Optimal is analysis-only and is the sum of best sectors.

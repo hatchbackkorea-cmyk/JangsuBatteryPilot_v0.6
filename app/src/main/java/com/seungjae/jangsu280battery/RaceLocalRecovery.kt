@@ -9,8 +9,8 @@ import org.json.JSONObject
  * participant profile id. Local completed runs are the authority for run ownership.
  *
  * Recovery never edits/deletes the phone-local files. The server matches by run_id, moves
- * matching server records to this device-scoped participant, and restores local-only laps as
- * INVALID records so measured times are preserved without fabricating certification.
+ * matching server records to this device-scoped participant, and restores local-only completed
+ * laps using the same START+FINISH validity rule as normal timing.
  */
 object RaceLocalRecovery {
     data class Preview(
