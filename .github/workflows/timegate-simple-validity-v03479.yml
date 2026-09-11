@@ -21,7 +21,7 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Apply non-TG completion validity policy
-        run: python .github/scripts/apply_simple_validity_v03479.py
+        run: python .github/scripts/apply_simple_validity_v03479_fix.py
       - name: Unit tests and debug APK
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
       - name: Verify no active TG fairness code
