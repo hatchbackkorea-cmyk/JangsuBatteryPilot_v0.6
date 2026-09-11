@@ -110,9 +110,23 @@ class RaceDataStore(context: Context) {
     }
 
     private fun normalizeCompleted(summary: RaceRunSummary): RaceRunSummary {
-        if (summary.status.equals("DNF", ignoreCase = true)) return summary
-        val hasStartAndFinish = summary.startedAtMs > 0L && summary.finishedAtMs > summary.startedAtMs && summary.elapsedMs > 0L
-        return if (hasStartAndFinish && !summary.status.equals("VALID", ignoreCase = true)) summary.copy(status = "VALID") else summary
+        val normalizedStatus = normalizeRaceCompletionStatus(
+            currentStatus = summary.status,
+            startedAtMs = summary.startedAtMs,
+            finishedAtMs = summary.finishedAtMs
+        )
+        val normalizedElapsed = if (
+            normalizedStatus == "VALID" && summary.elapsedMs <= 0L && summary.finishedAtMs > summary.startedAtMs
+        ) {
+            summary.finishedAtMs - summary.startedAtMs
+        } else {
+            summary.elapsedMs
+        }
+        return if (normalizedStatus != summary.status || normalizedElapsed != summary.elapsedMs) {
+            summary.copy(status = normalizedStatus, elapsedMs = normalizedElapsed)
+        } else {
+            summary
+        }
     }
 
     @Synchronized
