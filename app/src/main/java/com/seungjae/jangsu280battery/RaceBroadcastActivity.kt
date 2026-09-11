@@ -64,6 +64,7 @@ class RaceBroadcastActivity : Activity() {
             setBackgroundColor(Color.rgb(5, 8, 13))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
