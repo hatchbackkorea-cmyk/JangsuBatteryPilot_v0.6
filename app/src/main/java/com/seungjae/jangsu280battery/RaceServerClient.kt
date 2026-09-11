@@ -9,7 +9,15 @@ import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 
-/** RACE HTTP client. Sector/finish stay durable-queued; stale QR/field servers recover automatically. */
+/**
+ * RACE HTTP client.
+ *
+ * Timing authority rule:
+ * - the rider phone owns START/CP/FINISH measurement and elapsed_ms;
+ * - the server receives/stores/displays the phone values and never recomputes official elapsed time;
+ * - a tiny terminal LIVE packet is sent before the durable FINISH upload so the monitor freezes fast;
+ * - Sector/finish stay durable-queued and stale QR/field servers recover automatically.
+ */
 class RaceServerClient(context: Context) {
     companion object {
         private const val PREF = "race_server_route_v1"
@@ -183,11 +191,38 @@ class RaceServerClient(context: Context) {
     fun sendFinish(eventCode: String, token: String, payload: JSONObject): JSONObject =
         if (eventCode == "PRACTICE") JSONObject().put("ok", true) else request("POST", "/api/race/finish", payload, token)
 
+    private fun terminalLivePayload(eventCode: String, payload: JSONObject): JSONObject {
+        val isDnf = payload.optString("status").equals("DNF", ignoreCase = true) || payload.optBoolean("dnf", false)
+        val state = if (isDnf) "DNF" else "FINISHED"
+        val finishedAt = payload.optLong("finished_at_ms", 0L).takeIf { it > 0L }
+            ?: payload.optLong("timestamp_ms", 0L).takeIf { it > 0L }
+            ?: System.currentTimeMillis()
+        return JSONObject().apply {
+            put("event_code", eventCode.trim().uppercase())
+            put("run_id", payload.optString("run_id"))
+            put("run_number", payload.optInt("run_number", 1))
+            put("state", state)
+            put("status", state)
+            put("dnf", isDnf)
+            put("started_at_ms", payload.optLong("started_at_ms", 0L))
+            put("finished_at_ms", finishedAt)
+            put("timestamp_ms", finishedAt)
+            put("elapsed_ms", payload.optLong("elapsed_ms", 0L))
+            put("route_m", payload.optDouble("route_m", payload.optDouble("total_m", 0.0)))
+            put("sector_index", (payload.optJSONArray("sectors")?.length() ?: 0) + 1)
+            put("timing_authority", "PHONE")
+            put("phone_time_frozen", true)
+        }
+    }
+
     fun flushPending() {
         if (!available()) return
         val currentServer = baseUrl()
         val fieldOverrideActive = eventServerOverride().isNotBlank()
-        for (item in store.queued()) {
+        // FINISH/DNF gets first chance after a connection recovers, so an old START/CP packet can
+        // never keep the monitor clock running after the phone has already stopped the lap.
+        val pending = store.queued().sortedBy { if (it.optString("type") == "FINISH") 0 else 1 }
+        for (item in pending) {
             val queuedServer = item.optString("server_url")
             if (queuedServer.isBlank() && fieldOverrideActive) continue
             if (queuedServer.isNotBlank() && norm(queuedServer) != norm(currentServer)) continue
@@ -195,17 +230,40 @@ class RaceServerClient(context: Context) {
             val type = item.optString("type")
             val eventCode = item.optString("event_code")
             val payload = item.optJSONObject("payload") ?: continue
+            val runId = payload.optString("run_id")
             val token = store.joined(eventCode, currentServer)?.token.orEmpty()
             if (eventCode != "PRACTICE" && token.isBlank()) continue
-            val ok = runCatching {
+
+            payload.put("timing_authority", "PHONE")
+            RaceTimingTransportLog.write(app, "QUEUE_TX", eventCode, runId, payload, type)
+
+            val result = runCatching {
                 when (type) {
                     "START" -> sendLive(eventCode, token, payload)
                     "SECTOR" -> sendSector(eventCode, token, payload)
-                    "FINISH" -> sendFinish(eventCode, token, payload)
+                    "FINISH" -> {
+                        // Stop/freeze the server monitor first with the phone's exact elapsed_ms.
+                        // Durable result persistence follows. If this tiny packet fails, /finish
+                        // still publishes the same terminal state server-side.
+                        val terminal = terminalLivePayload(eventCode, payload)
+                        RaceTimingTransportLog.write(app, "TERMINAL_TX", eventCode, runId, terminal)
+                        runCatching { sendLive(eventCode, token, terminal) }
+                            .onSuccess { RaceTimingTransportLog.write(app, "TERMINAL_ACK", eventCode, runId, terminal) }
+                            .onFailure { RaceTimingTransportLog.write(app, "TERMINAL_FAIL", eventCode, runId, terminal, it.message.orEmpty()) }
+                        sendFinish(eventCode, token, payload)
+                    }
                     else -> JSONObject()
                 }
-            }.isSuccess
-            if (ok) store.removeQueued(key) else break
+            }
+            if (result.isSuccess) {
+                RaceTimingTransportLog.write(app, "QUEUE_ACK", eventCode, runId, payload, type)
+                store.removeQueued(key)
+            } else {
+                RaceTimingTransportLog.write(app, "QUEUE_FAIL", eventCode, runId, payload, result.exceptionOrNull()?.message.orEmpty())
+                // FINISH was already prioritised. A real network outage will be retried from the
+                // durable queue on the next flush instead of burning battery in a tight loop.
+                break
+            }
         }
     }
 
