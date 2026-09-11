@@ -126,7 +126,7 @@ data class RaceRunSummary(
             return RaceRunSummary(
                 o.optString("run_id"), o.optInt("run_number", 1), o.optString("event_code"), o.optString("event_name"),
                 o.optString("course_id"), o.optString("course_name"), o.optLong("started_at_ms"), o.optLong("finished_at_ms"),
-                o.optLong("elapsed_ms"), o.optString("status", "INVALID"),
+                o.optLong("elapsed_ms"), o.optString("status", ""),
                 (0 until s.length()).mapNotNull { s.optJSONObject(it)?.let(RaceSectorResult::fromJson) },
                 (0 until r.length()).mapNotNull { r.optJSONObject(it)?.let(RaceReferencePoint::fromJson) },
                 o.optDouble("max_speed_kph", 0.0), o.optDouble("max_gps_accuracy_m", 0.0), o.optDouble("max_off_route_m", 0.0),
@@ -134,6 +134,16 @@ data class RaceRunSummary(
             )
         }
     }
+}
+
+/** Completion validity is intentionally independent of CP/quality diagnostics. */
+fun normalizeRaceCompletionStatus(status: String, startedAtMs: Long, finishedAtMs: Long, elapsedMs: Long): String {
+    val current = status.trim().uppercase()
+    if (current == "DNF") return "DNF"
+    if (startedAtMs > 0L && finishedAtMs > startedAtMs) return "VALID"
+    if (finishedAtMs > 0L && elapsedMs > 0L) return "VALID"
+    if (startedAtMs > 0L && finishedAtMs <= 0L) return "DNF"
+    return current
 }
 
 /**

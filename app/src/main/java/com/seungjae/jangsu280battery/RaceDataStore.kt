@@ -20,7 +20,7 @@ class RaceDataStore(context: Context) {
         val runId: String = "", val runNumber: Int = 0, val startedAtMs: Long = 0L, val lastGateAtMs: Long = 0L, val elapsedMs: Long = 0L,
         val routeM: Double = 0.0, val totalM: Double = 0.0, val deltaMs: Long? = null, val nextGateIndex: Int = 0, val currentSector: String = "",
         val gpsAccuracyM: Double = 0.0, val maxSpeedKph: Double = 0.0, val maxGpsAccuracyM: Double = 0.0, val maxOffRouteM: Double = 0.0,
-        val jumpCount: Int = 0, val validation: String = "INVALID", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
+        val jumpCount: Int = 0, val validation: String = "", val sectors: List<RaceSectorResult> = emptyList(), val finishRank: Int? = null, val serverStatus: String = "",
         val leaderName: String = "", val leaderElapsedMs: Long? = null, val leaderDeltaMs: Long? = null, val estimatedRank: Int? = null,
         val rankedCount: Int = 0, val participantCount: Int = 0, val startedElapsedNs: Long = 0L
     ) {
@@ -112,7 +112,23 @@ class RaceDataStore(context: Context) {
         for (i in 0 until current.length()) { val old = current.optJSONObject(i) ?: continue; if (old.optString("run_id") == summary.runId) { next.put(summary.toJson()); replaced = true } else next.put(old) }
         if (!replaced) next.put(summary.toJson()); val tmp = File(dir, "completed_runs.tmp"); tmp.writeText(next.toString(), Charsets.UTF_8); tmp.copyTo(completedFile, overwrite = true); tmp.delete()
     }
-    fun completed(): List<RaceRunSummary> { val a = runCatching { JSONArray(completedFile.readText(Charsets.UTF_8)) }.getOrDefault(JSONArray()); return (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { o -> runCatching { RaceRunSummary.fromJson(o) }.getOrNull() } } }
+    @Synchronized
+    fun completed(): List<RaceRunSummary> {
+        val a = runCatching { JSONArray(completedFile.readText(Charsets.UTF_8)) }.getOrDefault(JSONArray())
+        val parsed = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { o -> runCatching { RaceRunSummary.fromJson(o) }.getOrNull() } }
+        val normalized = parsed.map { run ->
+            val normalizedStatus = normalizeRaceCompletionStatus(run.status, run.startedAtMs, run.finishedAtMs, run.elapsedMs)
+            if (normalizedStatus == run.status) run else run.copy(status = normalizedStatus)
+        }
+        if (normalized != parsed) {
+            val out = JSONArray().apply { normalized.forEach { put(it.toJson()) } }
+            val tmp = File(dir, "completed_runs.tmp")
+            tmp.writeText(out.toString(), Charsets.UTF_8)
+            tmp.copyTo(completedFile, overwrite = true)
+            tmp.delete()
+        }
+        return normalized
+    }
     fun nextRunNumber(eventCode: String): Int = completed().count { it.eventCode == eventCode } + 1
 
     private fun normServer(value: String): String = value.trim().trimEnd('/').lowercase()

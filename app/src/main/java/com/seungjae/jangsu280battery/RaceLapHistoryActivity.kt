@@ -155,7 +155,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("랩별 전체 기록"))
         body.addView(TextView(this).apply {
-            text = "기존 REVIEW/DNF/INVALID는 기록표에는 남지만 BEST/OPTIMAL 계산에서는 제외합니다."
+            text = "완주 기록은 BEST/OPTIMAL 계산에 포함하고 DNF/미완주만 제외합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(6))
@@ -164,7 +164,7 @@ class RaceLapHistoryActivity : Activity() {
 
         body.addView(sectionTitle("CP 구간 상세"))
         body.addView(TextView(this).apply {
-            text = "각 CP 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다. 기존 REVIEW/DNF/INVALID 구간은 비교에서 제외합니다."
+            text = "CP는 구간 분석용입니다. 각 구간별 최속은 파랑, 최저속은 빨강으로 표시합니다."
             textSize = 11f
             setTextColor(SECONDARY)
             setPadding(0, 0, 0, dp(7))
@@ -183,7 +183,6 @@ class RaceLapHistoryActivity : Activity() {
         header.addView(cell("LAP", true, TEXT, dp(62)))
         segmentLabels.forEach { header.addView(cell(it, true, TEXT, dp(118))) }
         header.addView(cell("FINISH", true, TEXT, dp(108)))
-        header.addView(cell("상태", true, TEXT, dp(84)))
         table.addView(header)
 
         laps.forEachIndexed { lapIndex, run ->
@@ -211,7 +210,6 @@ class RaceLapHistoryActivity : Activity() {
                 else -> TEXT
             }
             row.addView(cell(formatTime(run.elapsedMs), true, finishColor, dp(108)))
-            row.addView(cell(run.status, false, if (excluded) RED else SECONDARY, dp(84)))
             table.addView(row)
         }
 
@@ -220,7 +218,6 @@ class RaceLapHistoryActivity : Activity() {
             row.addView(cell("OPT", true, BLUE, dp(62)))
             for (i in 0 until segmentCount) row.addView(cell(formatTime(minBySegment[i]), true, BLUE, dp(118)))
             row.addView(cell(formatTime(theoretical), true, BLUE, dp(108)))
-            row.addView(cell("이론상", true, BLUE, dp(84)))
             table.addView(row)
         }
     }

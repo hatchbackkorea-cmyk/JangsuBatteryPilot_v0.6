@@ -689,9 +689,9 @@ class RaceTimingService : Service(), LocationListener {
         liveDeltaMs = referenceDeltaAt(gate.routeM, elapsed)
         referenceSamples += RaceReferencePoint(cfg.distanceM.coerceAtLeast(pendingFinishRouteM), elapsed)
 
-        val validation = validationStatus()
-        val reasons = validationReasons()
-        val timingAudit = RaceTimingEvidence.audit(startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, reasons)
+        val validation = "VALID"
+        val measurementNotes = measurementNotes()
+        val timingAudit = RaceTimingEvidence.audit(startAudit, refined?.audit, preliminaryStartAt, preliminaryFinishAt, measurementNotes)
         val summary = RaceRunSummary(
             runId,
             runNumber,
@@ -726,8 +726,7 @@ class RaceTimingService : Service(), LocationListener {
                 put("fusion_rejected_candidates", rejectedCrossingCandidates)
                 put("start_recovered", recoveredStart)
                 put("skipped_intermediate_gate", skippedIntermediateGate)
-                put("validation_reason", reasons.joinToString(","))
-                put("validation_reasons", JSONArray().apply { reasons.forEach { put(it) } })
+                put("measurement_notes", JSONArray().apply { measurementNotes.forEach { put(it) } })
                 put("gnss_satellites_used", sensor.satellitesUsed)
                 put("gnss_cn0_dbhz", sensor.averageCn0DbHz)
                 put("gnss_constellations", sensor.constellationCount)
@@ -749,7 +748,7 @@ class RaceTimingService : Service(), LocationListener {
             append(" · 정밀보정 ")
             if (finishRefinementMs == 0L && startRefinementMs == 0L) append("유지")
             else append("적용")
-            append(if (validation == "VALID") " · 계측 기준 충족" else " · 계측 기준 미달")
+            append(" · 계측 완료")
             if (timingUncertaintyMs != null) append(" · 추정 불확실성 ±").append(timingUncertaintyMs).append("ms")
             if (cfg.eventCode != "PRACTICE") append(" · 서버 동기화")
             append(" · 다음 LAP 자동 준비 중")
@@ -811,7 +810,7 @@ class RaceTimingService : Service(), LocationListener {
         Thread { runCatching { client.sendLive(cfg.eventCode, joined.token, payload) } }.start()
     }
 
-    private fun validationReasons(): List<String> = buildList {
+    private fun measurementNotes(): List<String> = buildList {
         if (timingRecovered) add("TIMING_RECOVERY")
         if (jumpCount > 0) add("GPS_JUMP")
         if (maxOffRouteM > 120.0) add("OFF_ROUTE_SEVERE") else if (maxOffRouteM > 60.0) add("OFF_ROUTE")
@@ -821,11 +820,6 @@ class RaceTimingService : Service(), LocationListener {
         if (skippedIntermediateGate) add("CP_SKIPPED")
     }
 
-    private fun validationStatus(): String = when {
-        jumpCount > 0 || maxOffRouteM > 120.0 || maxAccuracyM > 100.0 -> "INVALID"
-        recoveredStart || maxOffRouteM > 60.0 || maxAccuracyM > 50.0 || weakCrossingCount > 0 || skippedIntermediateGate -> "INVALID"
-        else -> "VALID"
-    }
 
     private fun writeSnapshot(routeM: Double, accuracy: Double, delta: Long?, serverStatus: String? = null) {
         val cfg = config
@@ -858,7 +852,7 @@ class RaceTimingService : Service(), LocationListener {
                 maxGpsAccuracyM = maxAccuracyM,
                 maxOffRouteM = maxOffRouteM,
                 jumpCount = jumpCount,
-                validation = validationStatus(),
+                validation = if (state == "FINISHED") "VALID" else "",
                 sectors = sectors.toList(),
                 serverStatus = serverStatus ?: previous.serverStatus.takeIf { previous.state == state }.orEmpty()
             )
