@@ -29,7 +29,8 @@ class RaceSpectatorActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         client = RaceServerClient(this)
-        buildUi(); loadEvents()
+        buildUi()
+        loadEvents()
     }
 
     private fun buildUi() {
@@ -54,33 +55,57 @@ class RaceSpectatorActivity : Activity() {
         scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         body.addView(TextView(this).apply {
-            text = "참가 등록 없이 현재 개설된 대회를 선택해 실시간 중계를 볼 수 있습니다."; textSize = 13f; setTextColor(secondary)
+            text = "참가 등록 없이 현재 개설된 대회를 선택해 실시간 중계를 볼 수 있습니다.\n앱 v${UpdateManager.currentVersion(this@RaceSpectatorActivity)}"
+            textSize = 13f; setTextColor(secondary)
         })
         body.addView(Button(this).apply {
             text = "새로고침"; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(blue, blue); setOnClickListener { loadEvents() }
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(12) })
 
-        status = TextView(this).apply { text = "대회 목록을 불러오는 중…"; textSize = 13f; setTextColor(secondary); setPadding(0, dp(10), 0, dp(8)) }
+        status = TextView(this).apply {
+            text = "대회 목록을 불러오는 중…"
+            textSize = 13f
+            setTextColor(secondary)
+            setPadding(0, dp(10), 0, dp(8))
+            setTextIsSelectable(true)
+        }
         body.addView(status)
         eventsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(eventsBox, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun loadEvents() {
-        status.setTextColor(secondary); status.text = "대회 목록을 불러오는 중…"; eventsBox.removeAllViews()
+        status.setTextColor(secondary)
+        status.text = "대회 목록을 불러오는 중…\n서버: ${client.baseUrl()}"
+        eventsBox.removeAllViews()
         Thread {
             val result = runCatching { client.listEvents() }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.onSuccess { events ->
-                    if (events.isEmpty()) status.text = "현재 관전 가능한 대회가 없습니다."
-                    else { status.text = "관전 가능한 대회 ${events.size}개"; events.forEach(::addEventCard) }
-                }.onFailure { e ->
-                    status.setTextColor(red)
-                    status.text = "대회 목록을 불러오지 못했습니다.\n${e.message ?: "서버 연결을 확인하세요."}\n서버: ${client.baseUrl()}"
-                }
+                    runCatching {
+                        if (events.isEmpty()) {
+                            status.text = "현재 관전 가능한 대회가 없습니다.\n서버: ${client.baseUrl()}"
+                        } else {
+                            status.setTextColor(secondary)
+                            status.text = "관전 가능한 대회 ${events.size}개 · 서버 연결 정상\n서버: ${client.baseUrl()}"
+                            events.forEach(::addEventCard)
+                        }
+                    }.onFailure { renderError("목록 화면 구성 실패", it) }
+                }.onFailure { e -> renderError("대회 목록을 불러오지 못했습니다.", e) }
             }
         }.start()
+    }
+
+    private fun renderError(title: String, e: Throwable) {
+        status.setTextColor(red)
+        status.text = buildString {
+            append(title).append('\n')
+            append(e.javaClass.simpleName).append(" · ").append(e.message ?: "서버 연결을 확인하세요.").append('\n')
+            append("서버: ").append(client.baseUrl()).append('\n')
+            append("후보: ").append(client.debugCandidates()).append('\n')
+            append("앱: v").append(UpdateManager.currentVersion(this@RaceSpectatorActivity))
+        }
     }
 
     private fun addEventCard(item: RaceServerClient.EventListItem) {
