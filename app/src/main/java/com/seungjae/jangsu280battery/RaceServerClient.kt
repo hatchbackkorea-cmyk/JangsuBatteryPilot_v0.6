@@ -1,6 +1,10 @@
 package com.seungjae.jangsu280battery
 
 import android.content.Context
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -8,6 +12,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 /**
  * RACE HTTP client.
@@ -22,12 +27,21 @@ class RaceServerClient(context: Context) {
     companion object {
         private const val PREF = "race_server_route_v1"
         private const val KEY_EVENT_SERVER = "event_server"
+        private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 
     private val app = context.applicationContext
     private val sync = RiderServerSync(app)
     private val store = RaceDataStore(app)
     private val prefs = app.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
+        .build()
 
     data class JoinResult(val config: RaceEventConfig, val participantToken: String, val phase: String)
     data class EventListItem(
@@ -56,8 +70,13 @@ class RaceServerClient(context: Context) {
     }
 
     fun eventServerOverride(): String = prefs.getString(KEY_EVENT_SERVER, "").orEmpty().trim().trimEnd('/')
-    fun baseUrl(): String = eventServerOverride().ifBlank { sync.serverUrl().trim().trimEnd('/') }
+
+    fun baseUrl(): String = eventServerOverride()
+        .ifBlank { BuildConfig.DEFAULT_RACE_SERVER_URL.trim().trimEnd('/') }
+        .ifBlank { sync.serverUrl().trim().trimEnd('/') }
+
     fun available(): Boolean = candidateBaseUrls().isNotEmpty()
+    fun debugCandidates(): String = candidateBaseUrls().joinToString(" -> ")
     private fun norm(v: String) = v.trim().trimEnd('/').lowercase()
 
     private fun parseEvent(o: JSONObject): EventListItem {
@@ -76,7 +95,8 @@ class RaceServerClient(context: Context) {
     }
 
     fun listEvents(): List<EventListItem> {
-        val a = request("GET", "/api/race/events", null, null).optJSONArray("events") ?: JSONArray()
+        val payload = request("GET", "/api/race/events", null, null)
+        val a = payload.optJSONArray("events") ?: JSONArray()
         return (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(::parseEvent) }
     }
 
@@ -135,6 +155,7 @@ class RaceServerClient(context: Context) {
                 conn.requestMethod = "GET"
                 conn.connectTimeout = 8000
                 conn.readTimeout = 20000
+                conn.setRequestProperty("User-Agent", "TimeGate/${UpdateManager.currentVersion(app)}")
                 val status = conn.responseCode
                 if (status !in 200..299) {
                     conn.disconnect()
@@ -151,13 +172,13 @@ class RaceServerClient(context: Context) {
                 return target
             } catch (e: Throwable) {
                 last = e
-                if (e is HttpFailure && e.status in setOf(400, 401, 403, 409, 422)) {
+                if (e is HttpFailure && e.status in setOf(400, 409, 422)) {
                     RaceGpxDownloadStatus.markFailed(app, cleanEventCode, e.message ?: "GPX 다운로드 실패")
                     throw e
                 }
             }
         }
-        val message = "대회 GPX 다운로드 실패 · ${last?.message ?: "RACE 서버 연결을 확인하세요."}"
+        val message = "대회 GPX 다운로드 실패 · ${last?.javaClass?.simpleName ?: "오류"}: ${last?.message ?: "RACE 서버 연결을 확인하세요."}"
         RaceGpxDownloadStatus.markFailed(app, cleanEventCode, message)
         error(message)
     }
@@ -219,8 +240,6 @@ class RaceServerClient(context: Context) {
         if (!available()) return
         val currentServer = baseUrl()
         val fieldOverrideActive = eventServerOverride().isNotBlank()
-        // FINISH/DNF gets first chance after a connection recovers, so an old START/CP packet can
-        // never keep the monitor clock running after the phone has already stopped the lap.
         val pending = store.queued().sortedBy { if (it.optString("type") == "FINISH") 0 else 1 }
         for (item in pending) {
             val queuedServer = item.optString("server_url")
@@ -236,15 +255,11 @@ class RaceServerClient(context: Context) {
 
             payload.put("timing_authority", "PHONE")
             RaceTimingTransportLog.write(app, "QUEUE_TX", eventCode, runId, payload, type)
-
             val result = runCatching {
                 when (type) {
                     "START" -> sendLive(eventCode, token, payload)
                     "SECTOR" -> sendSector(eventCode, token, payload)
                     "FINISH" -> {
-                        // Stop/freeze the server monitor first with the phone's exact elapsed_ms.
-                        // Durable result persistence follows. If this tiny packet fails, /finish
-                        // still publishes the same terminal state server-side.
                         val terminal = terminalLivePayload(eventCode, payload)
                         RaceTimingTransportLog.write(app, "TERMINAL_TX", eventCode, runId, terminal)
                         runCatching { sendLive(eventCode, token, terminal) }
@@ -260,8 +275,6 @@ class RaceServerClient(context: Context) {
                 store.removeQueued(key)
             } else {
                 RaceTimingTransportLog.write(app, "QUEUE_FAIL", eventCode, runId, payload, result.exceptionOrNull()?.message.orEmpty())
-                // FINISH was already prioritised. A real network outage will be retried from the
-                // durable queue on the next flush instead of burning battery in a tight loop.
                 break
             }
         }
@@ -273,9 +286,12 @@ class RaceServerClient(context: Context) {
             val clean = v.orEmpty().trim().trimEnd('/')
             if (clean.startsWith("http://") || clean.startsWith("https://")) out += clean
         }
+        // Deep-link/event override remains first for field servers. The APK-published address is
+        // always included immediately after it so a stale local/admin URL can never strand a fresh phone.
         add(eventServerOverride())
-        add(sync.serverUrl())
+        add(BuildConfig.DEFAULT_RACE_SERVER_URL)
         add(fetchPublishedPcServer())
+        add(sync.serverUrl())
         return out.toList()
     }
 
@@ -302,18 +318,13 @@ class RaceServerClient(context: Context) {
 
     private fun adoptWorkingBase(base: String) {
         val clean = base.trim().trimEnd('/')
-        val override = eventServerOverride()
-        val syncBase = sync.serverUrl().trim().trimEnd('/')
-        when {
-            override.isNotBlank() && norm(clean) == norm(syncBase) -> clearEventServer()
-            norm(clean) != norm(syncBase) -> setEventServer(clean)
-        }
+        if (clean.startsWith("http")) setEventServer(clean)
     }
 
     private fun request(method: String, path: String, body: JSONObject?, token: String?): JSONObject {
         val candidates = candidateBaseUrls()
         require(candidates.isNotEmpty()) { "Rider Control Center 서버가 연결되지 않았습니다." }
-
+        val errors = mutableListOf<String>()
         var last: Throwable? = null
         for (base in candidates) {
             try {
@@ -322,32 +333,41 @@ class RaceServerClient(context: Context) {
                 return result
             } catch (e: Throwable) {
                 last = e
-                if (e is HttpFailure && e.status in setOf(400, 401, 403, 409, 422)) throw e
+                errors += "${base.substringAfter("://")}=${e.javaClass.simpleName}:${e.message.orEmpty().take(100)}"
+                // Invalid request data should not be retried against another server. Authentication/network
+                // failures are retried because stale field/admin routes are common on participant phones.
+                if (e is HttpFailure && e.status in setOf(400, 409, 422)) throw e
             }
         }
-        error("RACE 서버 연결 실패 · ${last?.message ?: "서버 주소 또는 네트워크를 확인하세요."}")
+        val detail = errors.joinToString(" | ").take(700)
+        error("RACE 서버 연결 실패 · ${last?.javaClass?.simpleName ?: "오류"}: ${last?.message ?: "서버 주소 또는 네트워크를 확인하세요."}\n시도: $detail")
     }
 
     private fun requestAt(base: String, method: String, path: String, body: JSONObject?, token: String?): JSONObject {
-        val conn = URL(base.trim().trimEnd('/') + path).openConnection() as HttpURLConnection
-        conn.requestMethod = method
-        conn.connectTimeout = 8000
-        conn.readTimeout = 15000
-        conn.setRequestProperty("Accept", "application/json")
-        if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
-        if (body != null) {
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        val url = base.trim().trimEnd('/') + path
+        val builder = Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header("Cache-Control", "no-cache")
+            .header("User-Agent", "TimeGate/${UpdateManager.currentVersion(app)} Android")
+        if (!token.isNullOrBlank()) builder.header("Authorization", "Bearer $token")
+
+        val requestBody = body?.toString()?.toRequestBody(JSON)
+        when (method.uppercase()) {
+            "GET" -> builder.get()
+            "POST" -> builder.post(requestBody ?: "{}".toRequestBody(JSON))
+            "PUT" -> builder.put(requestBody ?: "{}".toRequestBody(JSON))
+            "DELETE" -> if (requestBody != null) builder.delete(requestBody) else builder.delete()
+            else -> builder.method(method.uppercase(), requestBody)
         }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-        conn.disconnect()
-        if (code !in 200..299) {
-            val detail = runCatching { JSONObject(text).optString("detail") }.getOrNull().orEmpty()
-            throw HttpFailure(code, detail.ifBlank { "HTTP $code · ${text.take(180)}" })
+
+        return http.newCall(builder.build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val detail = runCatching { JSONObject(text).optString("detail") }.getOrNull().orEmpty()
+                throw HttpFailure(response.code, detail.ifBlank { "HTTP ${response.code} · ${text.take(180)}" })
+            }
+            if (text.isBlank()) JSONObject() else JSONObject(text)
         }
-        return if (text.isBlank()) JSONObject() else JSONObject(text)
     }
 }
