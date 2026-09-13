@@ -25,15 +25,10 @@ import java.util.concurrent.TimeUnit
 /**
  * High-speed Camera Gate bridge.
  *
- * A SurfaceTexture-only Camera2 high-speed target is treated as a preview surface on some Samsung
- * devices and is therefore delivered near 30 FPS even when the requested range is 120-120. This
- * class instead returns a real MediaCodec recording surface to Camera2. The encoded stream is
- * decoded immediately to a private SurfaceTexture, then OpenGL reads only a tiny centre strip for
- * motion analysis. Presentation timestamps survive the encode/decode bridge, so trigger timing
- * still uses the camera stream timestamp rather than decoder arrival time.
- *
- * The decoded texture is also copied to the app TextureView at a reduced cadence for human preview.
- * This keeps the timing/analyser path independent from the phone display refresh rate.
+ * Camera2 writes a real high-speed recording stream into a MediaCodec surface. The stream is
+ * decoded immediately into a private SurfaceTexture and only a tiny centre strip is read back for
+ * motion analysis. The human preview is deliberately refreshed much less often than the timing
+ * path so a 60/120 Hz display cannot throttle analysis throughput.
  */
 class CameraGateGlAnalyzer(
     private val previewTexture: SurfaceTexture,
@@ -47,6 +42,8 @@ class CameraGateGlAnalyzer(
     private var analysisEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var previewEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var previewNativeSurface: Surface? = null
+    private var previewWidth = 1
+    private var previewHeight = 1
 
     private var decodedTextureId = 0
     private var decodedTexture: SurfaceTexture? = null
@@ -68,8 +65,9 @@ class CameraGateGlAnalyzer(
     private var aTexCoord = -1
     private var uTexMatrix = -1
     private var frameCounter = 0
-    private var previewEvery = 2
+    private var previewEvery = 6
     private var released = false
+    private var sampleBufferIndex = 0
 
     private data class EncodedFrame(
         val bytes: ByteArray,
@@ -89,14 +87,19 @@ class CameraGateGlAnalyzer(
     private val stripCoords by lazy { floatBuffer(textureCoords(0.485f, 0.515f)) }
     private val transform = FloatArray(16)
     private val pixels = ByteBuffer.allocateDirect(ANALYSIS_W * ANALYSIS_H * 4).order(ByteOrder.nativeOrder())
+    private val sampleBuffers = arrayOf(
+        IntArray(ANALYSIS_W * ANALYSIS_H),
+        IntArray(ANALYSIS_W * ANALYSIS_H)
+    )
 
     fun start(size: Size, targetFps: Int): Surface {
         check(Looper.myLooper() == handler.looper) { "GL analyzer must start on camera thread" }
         releaseInternal()
         released = false
-        previewEvery = if (targetFps >= 100) 2 else 1
+        previewEvery = if (targetFps >= 100) 6 else 2
         streamFps = 0.0
         encodedTimesUs.clear()
+        sampleBufferIndex = 0
 
         initEgl()
         makeCurrent(analysisEglSurface)
@@ -185,11 +188,13 @@ class CameraGateGlAnalyzer(
                     if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                         trackEncodedFps(info.presentationTimeUs)
                         val buffer = codec.getOutputBuffer(index)
-                        if (buffer != null) {
-                            buffer.position(info.offset)
-                            buffer.limit(info.offset + info.size)
+                        if (buffer != null && !feedDecoderDirect(buffer, info)) {
+                            val copy = buffer.duplicate().apply {
+                                position(info.offset)
+                                limit(info.offset + info.size)
+                            }
                             val bytes = ByteArray(info.size)
-                            buffer.get(bytes)
+                            copy.get(bytes)
                             encodedFrames.addLast(EncodedFrame(bytes, info.presentationTimeUs, info.flags))
                             while (encodedFrames.size > MAX_PENDING_FRAMES) encodedFrames.removeFirst()
                         }
@@ -201,7 +206,7 @@ class CameraGateGlAnalyzer(
             }
 
             override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
-                // Activity FPS counters will make a stalled codec visible without crashing timing.
+                // FPS/status telemetry exposes a stalled codec without taking down camera timing.
             }
 
             override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
@@ -245,6 +250,37 @@ class CameraGateGlAnalyzer(
         pumpDecoder()
     }
 
+    /**
+     * Fast path: once the decoder is running, copy the encoder output directly into an available
+     * decoder input buffer. This avoids allocating a large ByteArray for every 120 FPS frame.
+     */
+    private fun feedDecoderDirect(source: ByteBuffer, info: MediaCodec.BufferInfo): Boolean {
+        val d = decoder ?: return false
+        if (decoderInputs.isEmpty()) return false
+        val inputIndex = decoderInputs.removeFirst()
+        val input = d.getInputBuffer(inputIndex)
+        if (input == null || input.capacity() < info.size) {
+            runCatching { d.queueInputBuffer(inputIndex, 0, 0, info.presentationTimeUs, 0) }
+            return false
+        }
+        val copy = source.duplicate().apply {
+            position(info.offset)
+            limit(info.offset + info.size)
+        }
+        input.clear()
+        input.put(copy)
+        return runCatching {
+            d.queueInputBuffer(
+                inputIndex,
+                0,
+                info.size,
+                info.presentationTimeUs,
+                info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM
+            )
+            true
+        }.getOrDefault(false)
+    }
+
     private fun pumpDecoder() {
         val d = decoder ?: return
         while (!released && decoderInputs.isNotEmpty() && encodedFrames.isNotEmpty()) {
@@ -258,7 +294,13 @@ class CameraGateGlAnalyzer(
             input.clear()
             input.put(frame.bytes)
             runCatching {
-                d.queueInputBuffer(inputIndex, 0, frame.bytes.size, frame.ptsUs, frame.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                d.queueInputBuffer(
+                    inputIndex,
+                    0,
+                    frame.bytes.size,
+                    frame.ptsUs,
+                    frame.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                )
             }
         }
     }
@@ -275,7 +317,9 @@ class CameraGateGlAnalyzer(
             draw(stripCoords, analysisEglSurface, ANALYSIS_W, ANALYSIS_H)
             pixels.position(0)
             GLES20.glReadPixels(0, 0, ANALYSIS_W, ANALYSIS_H, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-            val samples = IntArray(ANALYSIS_W * ANALYSIS_H)
+
+            val samples = sampleBuffers[sampleBufferIndex]
+            sampleBufferIndex = 1 - sampleBufferIndex
             pixels.position(0)
             var p = 0
             while (p < samples.size) {
@@ -289,11 +333,7 @@ class CameraGateGlAnalyzer(
 
             frameCounter++
             if (frameCounter % previewEvery == 0 && previewEglSurface != EGL14.EGL_NO_SURFACE) {
-                val w = IntArray(1)
-                val h = IntArray(1)
-                EGL14.eglQuerySurface(eglDisplay, previewEglSurface, EGL14.EGL_WIDTH, w, 0)
-                EGL14.eglQuerySurface(eglDisplay, previewEglSurface, EGL14.EGL_HEIGHT, h, 0)
-                draw(previewCoords, previewEglSurface, w[0].coerceAtLeast(1), h[0].coerceAtLeast(1))
+                draw(previewCoords, previewEglSurface, previewWidth, previewHeight)
                 EGL14.eglSwapBuffers(eglDisplay, previewEglSurface)
             }
         } catch (_: Throwable) {
@@ -314,7 +354,7 @@ class CameraGateGlAnalyzer(
 
     private fun draw(coords: FloatBuffer, target: EGLSurface, width: Int, height: Int) {
         makeCurrent(target)
-        GLES20.glViewport(0, 0, width, height)
+        GLES20.glViewport(0, 0, width.coerceAtLeast(1), height.coerceAtLeast(1))
         GLES20.glUseProgram(program)
         positions.position(0)
         coords.position(0)
@@ -346,12 +386,18 @@ class CameraGateGlAnalyzer(
         )
         val configs = arrayOfNulls<EGLConfig>(1)
         val count = IntArray(1)
-        check(EGL14.eglChooseConfig(eglDisplay, attrs, 0, configs, 0, 1, count, 0) && count[0] > 0) { "eglChooseConfig failed" }
+        check(EGL14.eglChooseConfig(eglDisplay, attrs, 0, configs, 0, 1, count, 0) && count[0] > 0) {
+            "eglChooseConfig failed"
+        }
         eglConfig = configs[0]
         val ctxAttrs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, ctxAttrs, 0)
         check(eglContext != EGL14.EGL_NO_CONTEXT) { "eglCreateContext failed" }
-        val pbAttrs = intArrayOf(EGL14.EGL_WIDTH, ANALYSIS_W, EGL14.EGL_HEIGHT, ANALYSIS_H, EGL14.EGL_NONE)
+        val pbAttrs = intArrayOf(
+            EGL14.EGL_WIDTH, ANALYSIS_W,
+            EGL14.EGL_HEIGHT, ANALYSIS_H,
+            EGL14.EGL_NONE
+        )
         analysisEglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, eglConfig, pbAttrs, 0)
         check(analysisEglSurface != EGL14.EGL_NO_SURFACE) { "eglCreatePbufferSurface failed" }
 
@@ -363,6 +409,14 @@ class CameraGateGlAnalyzer(
             intArrayOf(EGL14.EGL_NONE),
             0
         )
+        if (previewEglSurface != EGL14.EGL_NO_SURFACE) {
+            val w = IntArray(1)
+            val h = IntArray(1)
+            EGL14.eglQuerySurface(eglDisplay, previewEglSurface, EGL14.EGL_WIDTH, w, 0)
+            EGL14.eglQuerySurface(eglDisplay, previewEglSurface, EGL14.EGL_HEIGHT, h, 0)
+            previewWidth = w[0].coerceAtLeast(1)
+            previewHeight = h[0].coerceAtLeast(1)
+        }
     }
 
     private fun initProgram() {
@@ -429,7 +483,7 @@ class CameraGateGlAnalyzer(
 
     private fun bitrateFor(size: Size, fps: Int): Int {
         val pixelsPerSecond = size.width.toLong() * size.height.toLong() * fps.toLong()
-        return (pixelsPerSecond / 16L).coerceIn(8_000_000L, 28_000_000L).toInt()
+        return (pixelsPerSecond / 20L).coerceIn(7_000_000L, 22_000_000L).toInt()
     }
 
     private fun floatBuffer(values: FloatArray): FloatBuffer =
@@ -447,14 +501,14 @@ class CameraGateGlAnalyzer(
         decoder = null
         decoderInputs.clear()
         encodedFrames.clear()
-        encodedTimesUs.clear()
-        streamFps = 0.0
 
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
         encoder = null
         runCatching { cameraSurface?.release() }
         cameraSurface = null
+        encodedTimesUs.clear()
+        streamFps = 0.0
 
         runCatching { decodedTexture?.setOnFrameAvailableListener(null) }
         runCatching { decoderOutputSurface?.release() }
@@ -463,14 +517,29 @@ class CameraGateGlAnalyzer(
         decodedTexture = null
 
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
-            runCatching { EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT) }
-            if (previewEglSurface != EGL14.EGL_NO_SURFACE) runCatching { EGL14.eglDestroySurface(eglDisplay, previewEglSurface) }
-            if (analysisEglSurface != EGL14.EGL_NO_SURFACE) runCatching { EGL14.eglDestroySurface(eglDisplay, analysisEglSurface) }
-            if (eglContext != EGL14.EGL_NO_CONTEXT) runCatching { EGL14.eglDestroyContext(eglDisplay, eglContext) }
+            runCatching {
+                EGL14.eglMakeCurrent(
+                    eglDisplay,
+                    EGL14.EGL_NO_SURFACE,
+                    EGL14.EGL_NO_SURFACE,
+                    EGL14.EGL_NO_CONTEXT
+                )
+            }
+            if (previewEglSurface != EGL14.EGL_NO_SURFACE) {
+                runCatching { EGL14.eglDestroySurface(eglDisplay, previewEglSurface) }
+            }
+            if (analysisEglSurface != EGL14.EGL_NO_SURFACE) {
+                runCatching { EGL14.eglDestroySurface(eglDisplay, analysisEglSurface) }
+            }
+            if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                runCatching { EGL14.eglDestroyContext(eglDisplay, eglContext) }
+            }
             runCatching { EGL14.eglTerminate(eglDisplay) }
         }
         runCatching { previewNativeSurface?.release() }
         previewNativeSurface = null
+        previewWidth = 1
+        previewHeight = 1
         eglDisplay = EGL14.EGL_NO_DISPLAY
         eglContext = EGL14.EGL_NO_CONTEXT
         analysisEglSurface = EGL14.EGL_NO_SURFACE
@@ -482,8 +551,9 @@ class CameraGateGlAnalyzer(
     }
 
     companion object {
-        private const val ANALYSIS_W = 8
-        private const val ANALYSIS_H = 160
-        private const val MAX_PENDING_FRAMES = 16
+        // 4×96 keeps the motion score stable while cutting synchronous glReadPixels work by ~70%.
+        private const val ANALYSIS_W = 4
+        private const val ANALYSIS_H = 96
+        private const val MAX_PENDING_FRAMES = 10
     }
 }
