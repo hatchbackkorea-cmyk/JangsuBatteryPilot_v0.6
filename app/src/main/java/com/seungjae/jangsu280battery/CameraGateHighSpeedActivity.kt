@@ -53,17 +53,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-/**
- * Camera Gate field-test v4.
- *
- * Camera frames are consumed by a private SurfaceTexture + OpenGL pipeline instead of TextureView
- * refresh callbacks. Therefore the trigger analyzer can receive 120 FPS even when the display is
- * only 60 Hz. The same GL texture is copied to TextureView only for human preview.
- *
- * A true constrained-high-speed 120 FPS session is tried first. If a vendor rejects it, the app
- * falls back to stable 60 FPS and keeps the rejection reason visible in the FPS status line.
- * GPS and official race records remain untouched.
- */
+/** Camera Gate field-test v5: true high-speed stream analysis + validated frame PTS timing. */
 class CameraGateHighSpeedActivity : Activity() {
     private lateinit var textureView: TextureView
     private lateinit var overlay: GateOverlay
@@ -107,7 +97,7 @@ class CameraGateHighSpeedActivity : Activity() {
 
     @Volatile private var armed = false
     @Volatile private var threshold = 18.0
-    @Volatile private var sensorFps = 0.0
+    @Volatile private var metadataFps = 0.0
     @Volatile private var analysisFps = 0.0
     @Volatile private var lastScore = 0.0
     @Volatile private var highSpeedActive = false
@@ -122,9 +112,10 @@ class CameraGateHighSpeedActivity : Activity() {
     private var lastTriggerElapsedMs = 0L
     private var cameraStartedElapsedMs = 0L
     private var lastMetricUiElapsedMs = 0L
-    private val sensorFrameTimes = ArrayDeque<Long>()
+    private val metadataFrameTimes = ArrayDeque<Long>()
     private val analysisFrameTimes = ArrayDeque<Long>()
     private val triggerLog = ArrayDeque<String>()
+    private val frameClock = CameraGateFrameClock()
     private var triggerCount = 0
 
     private val clockTicker = object : Runnable {
@@ -137,7 +128,7 @@ class CameraGateHighSpeedActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        cameraThread = HandlerThread("CameraGateHighSpeedV4").apply { start() }
+        cameraThread = HandlerThread("CameraGateHighSpeedV5").apply { start() }
         cameraHandler = Handler(cameraThread.looper)
         buildUi()
         ui.post(clockTicker)
@@ -149,7 +140,9 @@ class CameraGateHighSpeedActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED && textureView.isAvailable) openCamera()
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED && textureView.isAvailable) {
+            openCamera()
+        }
     }
 
     override fun onPause() {
@@ -195,7 +188,7 @@ class CameraGateHighSpeedActivity : Activity() {
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(dp(60), dp(48)))
         top.addView(TextView(this).apply {
-            text = "CAMERA GATE BETA v4 · DIRECT 120"
+            text = "CAMERA GATE BETA v5 · DIRECT 120"
             textSize = 18f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
@@ -286,7 +279,7 @@ class CameraGateHighSpeedActivity : Activity() {
         logText = metric(info, "[이벤트 로그]\n-", 12f, Color.LTGRAY, false)
         metric(
             info,
-            "카메라 프레임은 화면 주사율과 분리된 GL 파이프라인에서 직접 분석합니다. 120 FPS 고속세션을 우선 시도하고 실패하면 60 FPS로 자동 폴백합니다. GPS와 공식 경기 기록은 건드리지 않습니다.",
+            "120 FPS 녹화스트림을 화면 주사율과 분리해 직접 분석하고, 프레임 PTS가 BOOTTIME과 실제로 정렬되는지 런타임 검증한 뒤 계측 시각으로 사용합니다. GPS와 공식 경기 기록은 건드리지 않습니다.",
             11f,
             Color.GRAY,
             false
@@ -360,6 +353,7 @@ class CameraGateHighSpeedActivity : Activity() {
         sensorOrientation = selected.sensorOrientation
         timestampRealtime = selected.timestampRealtime
         supportLabel = selected.supportLabel
+        frameClock.reset(timestampRealtime)
 
         try {
             manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
@@ -371,11 +365,13 @@ class CameraGateHighSpeedActivity : Activity() {
                     else createRegularSession(camera)
                 }
                 override fun onDisconnected(camera: CameraDevice) {
-                    camera.close(); cameraDevice = null
+                    camera.close()
+                    cameraDevice = null
                     ui.post { stateText.text = "카메라 연결 끊김" }
                 }
                 override fun onError(camera: CameraDevice, error: Int) {
-                    camera.close(); cameraDevice = null
+                    camera.close()
+                    cameraDevice = null
                     ui.post { stateText.text = "카메라 오류 · $error" }
                 }
             }, cameraHandler)
@@ -449,7 +445,10 @@ class CameraGateHighSpeedActivity : Activity() {
 
     private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-            result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { trackSensorFps(it) }
+            result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { ts ->
+                trackMetadataFps(ts)
+                frameClock.observeCapture(ts, SystemClock.elapsedRealtimeNanos())
+            }
         }
     }
 
@@ -462,18 +461,22 @@ class CameraGateHighSpeedActivity : Activity() {
         return glAnalyzer!!.start(size, targetFps).also { cameraOutputSurface = it }
     }
 
+    private fun resetFpsCounters() {
+        metadataFrameTimes.clear()
+        analysisFrameTimes.clear()
+        metadataFps = 0.0
+        analysisFps = 0.0
+    }
+
     private fun createHighSpeedSession(camera: CameraDevice, size: Size, fps: Range<Int>) {
         val surface = try {
             createAnalyzerSurface(size, fps.upper)
         } catch (e: Throwable) {
-            fallbackToRegular(camera, "GL 분석 Surface 준비 실패 · ${e.message ?: e.javaClass.simpleName}")
+            fallbackToRegular(camera, "GL/코덱 분석 Surface 준비 실패 · ${e.message ?: e.javaClass.simpleName}")
             return
         }
         highSpeedActive = false
-        sensorFrameTimes.clear()
-        analysisFrameTimes.clear()
-        sensorFps = 0.0
-        analysisFps = 0.0
+        resetFpsCounters()
         sessionLabel = "DIRECT 120 FPS 고속세션 연결 중"
         ui.post { stateText.text = sessionLabel }
 
@@ -507,6 +510,7 @@ class CameraGateHighSpeedActivity : Activity() {
                             fallbackToRegular(camera, "120 FPS 시작 실패 · ${e.message ?: e.javaClass.simpleName}")
                         }
                     }
+
                     override fun onConfigureFailed(session: CameraCaptureSession) {
                         runCatching { session.close() }
                         fallbackToRegular(camera, "120 FPS 세션 구성 실패")
@@ -541,14 +545,11 @@ class CameraGateHighSpeedActivity : Activity() {
         val surface = try {
             createAnalyzerSurface(regularSize, targetFps)
         } catch (e: Throwable) {
-            ui.post { stateText.text = "GL 분석 Surface 준비 실패 · ${e.message ?: e.javaClass.simpleName}" }
+            ui.post { stateText.text = "GL/코덱 분석 Surface 준비 실패 · ${e.message ?: e.javaClass.simpleName}" }
             return
         }
         highSpeedActive = false
-        sensorFrameTimes.clear()
-        analysisFrameTimes.clear()
-        sensorFps = 0.0
-        analysisFps = 0.0
+        resetFpsCounters()
 
         try {
             camera.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
@@ -566,13 +567,16 @@ class CameraGateHighSpeedActivity : Activity() {
                         cameraStartedElapsedMs = SystemClock.elapsedRealtime()
                         previousSamples = null
                         val r = regularRange
-                        val base = if (r != null) "DIRECT 일반 ${r.lower}-${r.upper} FPS · ${regularSize.width}×${regularSize.height}" else "DIRECT 일반 자동 FPS"
+                        val base = if (r != null) {
+                            "DIRECT 일반 ${r.lower}-${r.upper} FPS · ${regularSize.width}×${regularSize.height}"
+                        } else "DIRECT 일반 자동 FPS"
                         sessionLabel = if (fallbackReason.isBlank()) base else "$base · 폴백: $fallbackReason"
                         ui.post { stateText.text = "$sessionLabel 정상 · ARM을 눌러 테스트하세요." }
                     } catch (e: Throwable) {
                         ui.post { stateText.text = "일반 카메라 시작 실패 · ${e.message ?: e.javaClass.simpleName}" }
                     }
                 }
+
                 override fun onConfigureFailed(session: CameraCaptureSession) {
                     ui.post { stateText.text = "일반 카메라 세션 구성 실패" }
                 }
@@ -593,15 +597,13 @@ class CameraGateHighSpeedActivity : Activity() {
         glAnalyzer = null
         cameraOutputSurface = null
         previousSamples = null
-        sensorFrameTimes.clear()
-        analysisFrameTimes.clear()
-        sensorFps = 0.0
-        analysisFps = 0.0
+        resetFpsCounters()
     }
 
     private fun analyzeDirectFrame(timestampNs: Long, samples: IntArray) {
         if (cameraDevice == null || timestampNs <= 0L || samples.isEmpty()) return
         trackAnalysisFps(timestampNs)
+
         val previous = previousSamples
         val score = if (previous != null && previous.size == samples.size) {
             var sum = 0L
@@ -612,38 +614,34 @@ class CameraGateHighSpeedActivity : Activity() {
         lastScore = score
 
         val nowElapsed = SystemClock.elapsedRealtime()
+        val receiveWall = System.currentTimeMillis()
+        val receiveMonoNs = SystemClock.elapsedRealtimeNanos()
+        val resolved = frameClock.resolve(timestampNs, receiveMonoNs, receiveWall)
+
         if (armed && nowElapsed - cameraStartedElapsedMs >= 900L && score >= threshold && nowElapsed - lastTriggerElapsedMs >= 650L) {
             lastTriggerElapsedMs = nowElapsed
-            val receiveWall = System.currentTimeMillis()
-            val receiveMonoNs = SystemClock.elapsedRealtimeNanos()
-            val frameAgeNs = receiveMonoNs - timestampNs
-            val localMs = if (timestampRealtime && frameAgeNs in 0L..2_000_000_000L) {
-                lastFrameSource = if (highSpeedActive) "DIRECT 120 GL 프레임 타임스탬프" else "DIRECT GL 프레임 타임스탬프"
-                receiveWall - frameAgeNs / 1_000_000L
-            } else {
-                lastFrameSource = "DIRECT 프레임 수신 시각(센서시각 도메인 미확정)"
-                receiveWall
-            }
-            onTrigger(localMs, score)
+            lastFrameSource = resolved.sourceLabel
+            onTrigger(resolved.localWallMs, score)
         }
 
         if (nowElapsed - lastMetricUiElapsedMs >= 150L) {
             lastMetricUiElapsedMs = nowElapsed
             val mode = if (highSpeedActive) "DIRECT 고속세션" else "DIRECT 일반세션"
+            val streamFps = glAnalyzer?.streamFps ?: 0.0
             ui.post {
-                fpsText.text = "$mode · 센서 ${"%.1f".format(Locale.US, sensorFps)} FPS · 직접분석 ${"%.1f".format(Locale.US, analysisFps)} FPS\n$sessionLabel\n$supportLabel"
+                fpsText.text = "$mode\n메타데이터 ${"%.1f".format(Locale.US, metadataFps)} FPS · 녹화스트림 ${"%.1f".format(Locale.US, streamFps)} FPS · 직접분석 ${"%.1f".format(Locale.US, analysisFps)} FPS\n$sessionLabel\n프레임시각 · ${frameClock.statusLabel}\n$supportLabel"
                 scoreText.text = "모션 점수 · ${"%.1f".format(Locale.US, lastScore)} · 임계 ${"%.1f".format(Locale.US, threshold)}"
             }
         }
     }
 
-    private fun trackSensorFps(timestampNs: Long) {
+    private fun trackMetadataFps(timestampNs: Long) {
         if (timestampNs <= 0L) return
-        sensorFrameTimes.addLast(timestampNs)
-        while (sensorFrameTimes.size > 180) sensorFrameTimes.removeFirst()
-        if (sensorFrameTimes.size >= 2) {
-            val span = sensorFrameTimes.last() - sensorFrameTimes.first()
-            if (span > 0L) sensorFps = (sensorFrameTimes.size - 1) * 1_000_000_000.0 / span
+        metadataFrameTimes.addLast(timestampNs)
+        while (metadataFrameTimes.size > 180) metadataFrameTimes.removeFirst()
+        if (metadataFrameTimes.size >= 2) {
+            val span = metadataFrameTimes.last() - metadataFrameTimes.first()
+            if (span > 0L) metadataFps = (metadataFrameTimes.size - 1) * 1_000_000_000.0 / span
         }
     }
 
@@ -898,7 +896,7 @@ class CameraGateHighSpeedActivity : Activity() {
     }
 
     companion object {
-        private const val REQ_CAMERA = 4704
+        private const val REQ_CAMERA = 4705
         private const val NTP_EPOCH_OFFSET_SECONDS = 2_208_988_800L
     }
 }
