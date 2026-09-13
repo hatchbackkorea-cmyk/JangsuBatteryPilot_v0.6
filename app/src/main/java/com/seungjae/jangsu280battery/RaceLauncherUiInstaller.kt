@@ -11,7 +11,7 @@ import android.widget.LinearLayout
 /** Keeps RACE and Camera Gate field-test entries on the launcher. */
 object RaceLauncherUiInstaller {
     private const val TAG_RACE_BUTTON = "race_mode_launcher_button_v2"
-    private const val TAG_CAMERA_BUTTON = "camera_gate_beta_launcher_button_v3"
+    private const val TAG_CAMERA_BUTTON = "camera_gate_beta_launcher_button_v4"
 
     fun install(activity: Activity) {
         val anchor = activity.findViewById<View?>(R.id.btnBikeModeEmtb) ?: return
@@ -37,7 +37,7 @@ object RaceLauncherUiInstaller {
         if (parent.findViewWithTag<View>(TAG_CAMERA_BUTTON) == null) {
             val cameraButton = Button(activity).apply {
                 tag = TAG_CAMERA_BUTTON
-                text = "📷 CAMERA GATE BETA v3\n120 FPS 고속세션 · 센서/분석 FPS · 정밀 시간 동기화"
+                text = "📷 CAMERA GATE BETA v4\nDIRECT 120 FPS · 화면주사율 독립 분석 · 정밀 시간 동기화"
                 textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 isAllCaps = false
