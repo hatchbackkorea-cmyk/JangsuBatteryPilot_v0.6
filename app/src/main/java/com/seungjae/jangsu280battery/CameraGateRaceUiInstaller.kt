@@ -11,12 +11,9 @@ import android.widget.Button
 import android.widget.LinearLayout
 import java.util.WeakHashMap
 
-/**
- * Injects a permanent CAMERA GATE BETA entry into the TimeGate RACE home screen.
- * RaceActivity builds its UI programmatically, so the entry is re-attached when HOME is rebuilt.
- */
+/** Injects a permanent CAMERA GATE BETA entry into the TimeGate RACE home screen. */
 object CameraGateRaceUiInstaller {
-    private const val TAG_CAMERA_BUTTON = "camera_gate_beta_race_home_v4"
+    private const val TAG_CAMERA_BUTTON = "camera_gate_beta_race_home_v5"
     private val listeners = WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener>()
 
     fun install(activity: Activity) {
@@ -53,7 +50,7 @@ object CameraGateRaceUiInstaller {
 
         val button = Button(activity).apply {
             tag = TAG_CAMERA_BUTTON
-            text = "📷 카메라 계측 테스트 (BETA v4)\nDIRECT 120 FPS · 화면주사율 독립 분석 · 정밀 시간 동기화"
+            text = "📷 카메라 계측 테스트 (BETA v5)\nDIRECT 120 FPS · 스트림/분석 FPS · PTS 시각 검증"
             textSize = 15f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
