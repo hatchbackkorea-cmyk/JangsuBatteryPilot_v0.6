@@ -69,8 +69,9 @@ class CameraGateGlAnalyzer(
         released = false
         previewEvery = if (targetFps >= 100) 2 else 1
         initEgl()
-        initProgram()
+        // GLES objects can only be created after an EGL context is current.
         makeCurrent(analysisEglSurface)
+        initProgram()
 
         val tex = IntArray(1)
         GLES20.glGenTextures(1, tex, 0)
@@ -121,7 +122,7 @@ class CameraGateGlAnalyzer(
                 val r = pixels.get().toInt() and 0xff
                 val g = pixels.get().toInt() and 0xff
                 val b = pixels.get().toInt() and 0xff
-                pixels.get() // alpha
+                pixels.get()
                 samples[p++] = (77 * r + 150 * g + 29 * b) shr 8
             }
             onFrame(timestamp, samples)
@@ -136,7 +137,7 @@ class CameraGateGlAnalyzer(
                 EGL14.eglSwapBuffers(eglDisplay, previewEglSurface)
             }
         } catch (_: Throwable) {
-            // A dropped GL frame must not kill the camera timing thread.
+            // A dropped GL frame must never kill the camera timing thread.
         }
     }
 
@@ -191,7 +192,6 @@ class CameraGateGlAnalyzer(
             intArrayOf(EGL14.EGL_NONE),
             0
         )
-        // Preview is optional. Direct analysis continues even if a vendor rejects this EGL window.
     }
 
     private fun initProgram() {
