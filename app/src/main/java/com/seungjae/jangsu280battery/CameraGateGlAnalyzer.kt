@@ -58,6 +58,10 @@ class CameraGateGlAnalyzer(
     private var codecMime = ""
     private val decoderInputs = ArrayDeque<Int>()
     private val encodedFrames = ArrayDeque<EncodedFrame>()
+    private val encodedTimesUs = ArrayDeque<Long>()
+
+    @Volatile var streamFps: Double = 0.0
+        private set
 
     private var program = 0
     private var aPosition = -1
@@ -91,6 +95,8 @@ class CameraGateGlAnalyzer(
         releaseInternal()
         released = false
         previewEvery = if (targetFps >= 100) 2 else 1
+        streamFps = 0.0
+        encodedTimesUs.clear()
 
         initEgl()
         makeCurrent(analysisEglSurface)
@@ -177,6 +183,7 @@ class CameraGateGlAnalyzer(
                 }
                 try {
                     if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                        trackEncodedFps(info.presentationTimeUs)
                         val buffer = codec.getOutputBuffer(index)
                         if (buffer != null) {
                             buffer.position(info.offset)
@@ -291,6 +298,17 @@ class CameraGateGlAnalyzer(
             }
         } catch (_: Throwable) {
             // A dropped decode/GL frame must never kill the timing thread.
+        }
+    }
+
+    private fun trackEncodedFps(ptsUs: Long) {
+        if (ptsUs <= 0L) return
+        if (encodedTimesUs.isNotEmpty() && ptsUs <= encodedTimesUs.last()) return
+        encodedTimesUs.addLast(ptsUs)
+        while (encodedTimesUs.size > 360) encodedTimesUs.removeFirst()
+        if (encodedTimesUs.size >= 2) {
+            val spanUs = encodedTimesUs.last() - encodedTimesUs.first()
+            if (spanUs > 0L) streamFps = (encodedTimesUs.size - 1) * 1_000_000.0 / spanUs
         }
     }
 
@@ -429,6 +447,8 @@ class CameraGateGlAnalyzer(
         decoder = null
         decoderInputs.clear()
         encodedFrames.clear()
+        encodedTimesUs.clear()
+        streamFps = 0.0
 
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
