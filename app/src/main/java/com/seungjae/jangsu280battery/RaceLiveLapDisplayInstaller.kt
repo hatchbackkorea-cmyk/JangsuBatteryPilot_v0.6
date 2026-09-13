@@ -3,6 +3,8 @@ package com.seungjae.jangsu280battery
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -11,8 +13,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
 import java.util.WeakHashMap
+import kotlin.math.abs
 
 /**
  * Owns BEST/PREVIOUS/CURRENT and repurposes the old DELTA area as a simple course-best panel.
@@ -23,13 +27,26 @@ import java.util.WeakHashMap
  * - A joined event uses eventCode as the durable room boundary. Re-downloading the same server GPX
  *   may create a different local courseId, so local ids must never split one server room's history.
  * - The event course-best panel is server-authoritative and never merges unrelated room history.
+ *
+ * CP feedback rule:
+ * - CP popup is driven only by the phone-local Snapshot.sectors list, never by a server round trip.
+ * - The first observed snapshot is a baseline so opening the live screen after CP1 does not replay it.
+ * - FINISH is intentionally excluded because the normal FINISH UI owns that moment.
  */
 object RaceLiveLapDisplayInstaller {
     private const val TAG_HISTORY = "timegate_lap_history_v03444"
     private const val TAG_OLD_LEADER_ROW = "timegate_live_leader_row_v03444"
     private const val TAG_COURSE_BEST_LABEL = "timegate_course_best_label_v03453"
     private const val TAG_COURSE_BEST_VALUE = "timegate_course_best_value_v03453"
-    private data class State(val handler: Handler, val runnable: Runnable)
+    private const val CP_POPUP_HOLD_MS = 1_450L
+
+    private class State(val handler: Handler, val runnable: Runnable) {
+        var cpRunId: String = ""
+        var cpSectorCount: Int = 0
+        var cpPopup: PopupWindow? = null
+        var cpDismiss: Runnable? = null
+    }
+
     private val states = WeakHashMap<RaceActivity, State>()
 
     fun install(activity: RaceActivity) {
@@ -46,7 +63,13 @@ object RaceLiveLapDisplayInstaller {
     }
 
     fun uninstall(activity: RaceActivity) {
-        states.remove(activity)?.let { it.handler.removeCallbacks(it.runnable) }
+        states.remove(activity)?.let { state ->
+            state.handler.removeCallbacks(state.runnable)
+            state.cpDismiss?.let(state.handler::removeCallbacks)
+            runCatching { state.cpPopup?.dismiss() }
+            state.cpPopup = null
+            state.cpDismiss = null
+        }
     }
 
     private fun update(activity: RaceActivity) {
@@ -76,6 +99,10 @@ object RaceLiveLapDisplayInstaller {
             .toList()
         val comparisonRuns = completedForRoom
             .filter { it.status.equals("VALID", ignoreCase = true) }
+
+        states[activity]?.let { state ->
+            updateCpPopup(activity, root, state, snapshot, comparisonRuns)
+        }
 
         val currentCompletedIndex = completedForRoom.indexOfFirst { it.runId == snapshot.runId }
         val best = comparisonRuns.minByOrNull { it.elapsedMs }
@@ -124,6 +151,151 @@ object RaceLiveLapDisplayInstaller {
         } else {
             setBlock(currentBlock, currentLapNo, currentElapsed(snapshot))
         }
+    }
+
+    private fun updateCpPopup(
+        activity: RaceActivity,
+        anchor: View,
+        state: State,
+        snapshot: RaceDataStore.Snapshot,
+        comparisonRuns: List<RaceRunSummary>
+    ) {
+        val runId = snapshot.runId
+        if (runId.isBlank()) {
+            state.cpRunId = ""
+            state.cpSectorCount = 0
+            return
+        }
+
+        // New run/activity baseline: do not replay CPs that happened before this screen observed it.
+        if (state.cpRunId != runId) {
+            state.cpRunId = runId
+            state.cpSectorCount = snapshot.sectors.size
+            dismissCpPopup(state)
+            return
+        }
+
+        val count = snapshot.sectors.size
+        if (count <= state.cpSectorCount) {
+            if (count < state.cpSectorCount) state.cpSectorCount = count
+            return
+        }
+
+        val latest = snapshot.sectors.lastOrNull()
+        state.cpSectorCount = count
+        // FINISH appends one final sector result too. FINISH keeps its dedicated screen/animation.
+        if (snapshot.state != "RUNNING" || latest == null) return
+
+        val bestSplit = comparisonRuns
+            .asSequence()
+            .mapNotNull { run -> run.sectors.firstOrNull { it.index == latest.index }?.splitMs }
+            .filter { it > 0L }
+            .minOrNull()
+        val bestDelta = bestSplit?.let { latest.splitMs - it }
+        showCpPopup(activity, anchor, state, latest, bestDelta)
+    }
+
+    private fun showCpPopup(
+        activity: RaceActivity,
+        anchor: View,
+        state: State,
+        sector: RaceSectorResult,
+        bestDeltaMs: Long?
+    ) {
+        dismissCpPopup(state)
+
+        val fast = bestDeltaMs != null && bestDeltaMs < -50L
+        val slow = bestDeltaMs != null && bestDeltaMs > 50L
+        val accent = when {
+            fast -> Color.rgb(43, 225, 140)
+            slow -> Color.rgb(255, 98, 109)
+            else -> Color.rgb(45, 156, 255)
+        }
+        val gapText = when {
+            bestDeltaMs == null -> "첫 구간 기록"
+            abs(bestDeltaMs) < 50L -> "BEST 대비 ±0.0초"
+            bestDeltaMs < 0L -> "BEST 대비 −%.1f초".format(abs(bestDeltaMs) / 1000.0)
+            else -> "BEST 대비 +%.1f초".format(bestDeltaMs / 1000.0)
+        }
+
+        val card = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(activity, 26), dp(activity, 22), dp(activity, 26), dp(activity, 22))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(activity, 22).toFloat()
+                setColor(Color.rgb(7, 17, 29))
+                setStroke(dp(activity, 3), accent)
+            }
+            alpha = 0f
+            scaleX = 0.86f
+            scaleY = 0.86f
+        }
+        card.addView(TextView(activity).apply {
+            text = "${sector.name.ifBlank { "CP${sector.index}" }} 통과!"
+            textSize = 32f
+            setTextColor(accent)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        })
+        card.addView(TextView(activity).apply {
+            text = formatTime(sector.splitMs)
+            textSize = 52f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setPadding(0, dp(activity, 9), 0, 0)
+        })
+        card.addView(TextView(activity).apply {
+            text = gapText
+            textSize = 20f
+            setTextColor(accent)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setPadding(0, dp(activity, 8), 0, 0)
+        })
+
+        val width = (activity.resources.displayMetrics.widthPixels * 0.88f).toInt()
+        val popup = PopupWindow(card, width, ViewGroup.LayoutParams.WRAP_CONTENT, false).apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            isTouchable = false
+            isOutsideTouchable = false
+            isClippingEnabled = true
+            elevation = dp(activity, 14).toFloat()
+        }
+        state.cpPopup = popup
+        popup.showAtLocation(anchor, Gravity.CENTER, 0, 0)
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170L).start()
+
+        val dismiss = Runnable {
+            if (state.cpPopup !== popup) return@Runnable
+            card.animate()
+                .alpha(0f)
+                .scaleX(0.94f)
+                .scaleY(0.94f)
+                .setDuration(160L)
+                .withEndAction {
+                    if (state.cpPopup === popup) {
+                        runCatching { popup.dismiss() }
+                        state.cpPopup = null
+                        state.cpDismiss = null
+                    }
+                }
+                .start()
+        }
+        state.cpDismiss = dismiss
+        state.handler.postDelayed(dismiss, CP_POPUP_HOLD_MS)
+    }
+
+    private fun dismissCpPopup(state: State) {
+        state.cpDismiss?.let(state.handler::removeCallbacks)
+        state.cpDismiss = null
+        runCatching { state.cpPopup?.dismiss() }
+        state.cpPopup = null
     }
 
     private fun sameRoom(run: RaceRunSummary, eventCode: String, courseId: String): Boolean =
