@@ -1,0 +1,48 @@
+name: Export current signed release APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(tr -d '\r\n[:space:]' < VERSION.txt)
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download signed release APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p export
+          for i in {1..18}; do
+            if gh release view "${{ steps.version.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release download "${{ steps.version.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --dir export --clobber
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Release ${{ steps.version.outputs.tag }} was not available in time" >&2
+          exit 1
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TimeGate-v${{ steps.version.outputs.name }}-signed-apk
+          path: export/*.apk
+          if-no-files-found: error
+          retention-days: 7
