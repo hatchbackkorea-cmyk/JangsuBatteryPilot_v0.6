@@ -1,6 +1,9 @@
 package com.seungjae.jangsu280battery
 
 import android.graphics.SurfaceTexture
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -15,16 +18,22 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Camera2 high-speed helper that keeps camera consumption off the display-vsync path.
+ * High-speed Camera Gate bridge.
  *
- * The camera writes to a private SurfaceTexture owned by this class. Every camera frame wakes the
- * camera thread, updateTexImage() is called immediately, a narrow centre strip is rendered into a
- * tiny pbuffer and read back for motion analysis. The same texture is rendered to the TextureView
- * at a reduced rate only for human preview, so a 60 Hz display does not cap the analysis stream.
+ * A SurfaceTexture-only Camera2 high-speed target is treated as a preview surface on some Samsung
+ * devices and is therefore delivered near 30 FPS even when the requested range is 120-120. This
+ * class instead returns a real MediaCodec recording surface to Camera2. The encoded stream is
+ * decoded immediately to a private SurfaceTexture, then OpenGL reads only a tiny centre strip for
+ * motion analysis. Presentation timestamps survive the encode/decode bridge, so trigger timing
+ * still uses the camera stream timestamp rather than decoder arrival time.
+ *
+ * The decoded texture is also copied to the app TextureView at a reduced cadence for human preview.
+ * This keeps the timing/analyser path independent from the phone display refresh rate.
  */
 class CameraGateGlAnalyzer(
     private val previewTexture: SurfaceTexture,
@@ -39,9 +48,17 @@ class CameraGateGlAnalyzer(
     private var previewEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var previewNativeSurface: Surface? = null
 
-    private var cameraTextureId = 0
-    private var cameraTexture: SurfaceTexture? = null
+    private var decodedTextureId = 0
+    private var decodedTexture: SurfaceTexture? = null
+    private var decoderOutputSurface: Surface? = null
     private var cameraSurface: Surface? = null
+
+    private var encoder: MediaCodec? = null
+    private var decoder: MediaCodec? = null
+    private var codecMime = ""
+    private val decoderInputs = ArrayDeque<Int>()
+    private val encodedFrames = ArrayDeque<EncodedFrame>()
+
     private var program = 0
     private var aPosition = -1
     private var aTexCoord = -1
@@ -49,6 +66,12 @@ class CameraGateGlAnalyzer(
     private var frameCounter = 0
     private var previewEvery = 2
     private var released = false
+
+    private data class EncodedFrame(
+        val bytes: ByteArray,
+        val ptsUs: Long,
+        val flags: Int
+    )
 
     private val positions = floatBuffer(
         floatArrayOf(
@@ -68,27 +91,15 @@ class CameraGateGlAnalyzer(
         releaseInternal()
         released = false
         previewEvery = if (targetFps >= 100) 2 else 1
+
         initEgl()
-        // GLES objects can only be created after an EGL context is current.
         makeCurrent(analysisEglSurface)
         initProgram()
+        initDecodedTexture(size)
 
-        val tex = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        cameraTextureId = tex[0]
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-
-        val st = SurfaceTexture(cameraTextureId)
-        st.setDefaultBufferSize(size.width, size.height)
-        st.setOnFrameAvailableListener({ consumeFrame() }, handler)
-        cameraTexture = st
-        cameraSurface = Surface(st)
+        cameraSurface = startCodecBridge(size, targetFps)
         frameCounter = 0
-        return cameraSurface!!
+        return cameraSurface ?: error("고속 기록 Surface 생성 실패")
     }
 
     fun release() {
@@ -98,14 +109,156 @@ class CameraGateGlAnalyzer(
         }
         val latch = CountDownLatch(1)
         handler.post {
-            try { releaseInternal() } finally { latch.countDown() }
+            try {
+                releaseInternal()
+            } finally {
+                latch.countDown()
+            }
         }
-        latch.await(700, TimeUnit.MILLISECONDS)
+        latch.await(900, TimeUnit.MILLISECONDS)
     }
 
-    private fun consumeFrame() {
+    private fun initDecodedTexture(size: Size) {
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        decodedTextureId = tex[0]
+        check(decodedTextureId != 0) { "GL texture 생성 실패" }
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, decodedTextureId)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+
+        val st = SurfaceTexture(decodedTextureId)
+        st.setDefaultBufferSize(size.width, size.height)
+        st.setOnFrameAvailableListener({ consumeDecodedFrame() }, handler)
+        decodedTexture = st
+        decoderOutputSurface = Surface(st)
+    }
+
+    private fun startCodecBridge(size: Size, targetFps: Int): Surface {
+        var last: Throwable? = null
+        for (mime in listOf("video/avc", "video/hevc")) {
+            try {
+                codecMime = mime
+                return startEncoder(mime, size, targetFps)
+            } catch (e: Throwable) {
+                last = e
+                runCatching { encoder?.stop() }
+                runCatching { encoder?.release() }
+                encoder = null
+                runCatching { cameraSurface?.release() }
+                cameraSurface = null
+            }
+        }
+        throw IllegalStateException("120 FPS 하드웨어 인코더 준비 실패: ${last?.message ?: "지원 코덱 없음"}")
+    }
+
+    private fun startEncoder(mime: String, size: Size, targetFps: Int): Surface {
+        val c = MediaCodec.createEncoderByType(mime)
+        val format = MediaFormat.createVideoFormat(mime, size.width, size.height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrateFor(size, targetFps))
+            setInteger(MediaFormat.KEY_FRAME_RATE, targetFps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
+            setFloat(MediaFormat.KEY_OPERATING_RATE, targetFps.toFloat())
+        }
+        c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        val input = c.createInputSurface()
+        c.setCallback(object : MediaCodec.Callback() {
+            override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = Unit
+
+            override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+                if (released) {
+                    runCatching { codec.releaseOutputBuffer(index, false) }
+                    return
+                }
+                try {
+                    if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                        val buffer = codec.getOutputBuffer(index)
+                        if (buffer != null) {
+                            buffer.position(info.offset)
+                            buffer.limit(info.offset + info.size)
+                            val bytes = ByteArray(info.size)
+                            buffer.get(bytes)
+                            encodedFrames.addLast(EncodedFrame(bytes, info.presentationTimeUs, info.flags))
+                            while (encodedFrames.size > MAX_PENDING_FRAMES) encodedFrames.removeFirst()
+                        }
+                    }
+                } finally {
+                    runCatching { codec.releaseOutputBuffer(index, false) }
+                }
+                pumpDecoder()
+            }
+
+            override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+                // Activity FPS counters will make a stalled codec visible without crashing timing.
+            }
+
+            override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                if (!released) configureDecoder(format)
+            }
+        }, handler)
+        c.start()
+        encoder = c
+        cameraSurface = input
+        return input
+    }
+
+    private fun configureDecoder(encodedFormat: MediaFormat) {
+        if (decoder != null || released) return
+        val output = decoderOutputSurface ?: return
+        val d = MediaCodec.createDecoderByType(codecMime)
+        d.setCallback(object : MediaCodec.Callback() {
+            override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+                if (released) return
+                decoderInputs.addLast(index)
+                pumpDecoder()
+            }
+
+            override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+                if (released) {
+                    runCatching { codec.releaseOutputBuffer(index, false) }
+                    return
+                }
+                runCatching { codec.releaseOutputBuffer(index, info.size > 0) }
+            }
+
+            override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+                // Keep the camera session alive; zero decoded FPS clearly exposes the failure.
+            }
+
+            override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) = Unit
+        }, handler)
+        d.configure(encodedFormat, output, null, 0)
+        d.start()
+        decoder = d
+        pumpDecoder()
+    }
+
+    private fun pumpDecoder() {
+        val d = decoder ?: return
+        while (!released && decoderInputs.isNotEmpty() && encodedFrames.isNotEmpty()) {
+            val inputIndex = decoderInputs.removeFirst()
+            val frame = encodedFrames.removeFirst()
+            val input = d.getInputBuffer(inputIndex)
+            if (input == null || input.capacity() < frame.bytes.size) {
+                runCatching { d.queueInputBuffer(inputIndex, 0, 0, frame.ptsUs, 0) }
+                continue
+            }
+            input.clear()
+            input.put(frame.bytes)
+            runCatching {
+                d.queueInputBuffer(inputIndex, 0, frame.bytes.size, frame.ptsUs, frame.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            }
+        }
+    }
+
+    private fun consumeDecodedFrame() {
         if (released) return
-        val st = cameraTexture ?: return
+        val st = decodedTexture ?: return
         try {
             makeCurrent(analysisEglSurface)
             st.updateTexImage()
@@ -137,7 +290,7 @@ class CameraGateGlAnalyzer(
                 EGL14.eglSwapBuffers(eglDisplay, previewEglSurface)
             }
         } catch (_: Throwable) {
-            // A dropped GL frame must never kill the camera timing thread.
+            // A dropped decode/GL frame must never kill the timing thread.
         }
     }
 
@@ -153,7 +306,7 @@ class CameraGateGlAnalyzer(
         GLES20.glVertexAttribPointer(aTexCoord, 2, GLES20.GL_FLOAT, false, 0, coords)
         GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, transform, 0)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, decodedTextureId)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(aPosition)
         GLES20.glDisableVertexAttribArray(aTexCoord)
@@ -244,9 +397,9 @@ class CameraGateGlAnalyzer(
 
     private fun textureCoords(left: Float, right: Float): FloatArray {
         fun map(u: Float, v: Float): Pair<Float, Float> = when ((sensorOrientation % 360 + 360) % 360) {
-            90 -> v to (1f - u)
+            90 -> (1f - v) to u
             180 -> (1f - u) to (1f - v)
-            270 -> (1f - v) to u
+            270 -> v to (1f - u)
             else -> u to v
         }
         val bl = map(left, 0f)
@@ -254,6 +407,11 @@ class CameraGateGlAnalyzer(
         val tl = map(left, 1f)
         val tr = map(right, 1f)
         return floatArrayOf(bl.first, bl.second, br.first, br.second, tl.first, tl.second, tr.first, tr.second)
+    }
+
+    private fun bitrateFor(size: Size, fps: Int): Int {
+        val pixelsPerSecond = size.width.toLong() * size.height.toLong() * fps.toLong()
+        return (pixelsPerSecond / 16L).coerceIn(8_000_000L, 28_000_000L).toInt()
     }
 
     private fun floatBuffer(values: FloatArray): FloatBuffer =
@@ -265,11 +423,25 @@ class CameraGateGlAnalyzer(
     private fun releaseInternal() {
         if (released) return
         released = true
-        runCatching { cameraTexture?.setOnFrameAvailableListener(null) }
+
+        runCatching { decoder?.stop() }
+        runCatching { decoder?.release() }
+        decoder = null
+        decoderInputs.clear()
+        encodedFrames.clear()
+
+        runCatching { encoder?.stop() }
+        runCatching { encoder?.release() }
+        encoder = null
         runCatching { cameraSurface?.release() }
-        runCatching { cameraTexture?.release() }
         cameraSurface = null
-        cameraTexture = null
+
+        runCatching { decodedTexture?.setOnFrameAvailableListener(null) }
+        runCatching { decoderOutputSurface?.release() }
+        runCatching { decodedTexture?.release() }
+        decoderOutputSurface = null
+        decodedTexture = null
+
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             runCatching { EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT) }
             if (previewEglSurface != EGL14.EGL_NO_SURFACE) runCatching { EGL14.eglDestroySurface(eglDisplay, previewEglSurface) }
@@ -285,11 +457,13 @@ class CameraGateGlAnalyzer(
         previewEglSurface = EGL14.EGL_NO_SURFACE
         eglConfig = null
         program = 0
-        cameraTextureId = 0
+        decodedTextureId = 0
+        codecMime = ""
     }
 
     companion object {
         private const val ANALYSIS_W = 8
         private const val ANALYSIS_H = 160
+        private const val MAX_PENDING_FRAMES = 16
     }
 }
