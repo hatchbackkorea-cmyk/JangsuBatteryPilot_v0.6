@@ -222,8 +222,8 @@ class CameraGateTestActivity : Activity() {
                 lastTriggerElapsedMs = 0L
                 text = if (armed) "■ 계측 중지" else "계측 대기 ARM"
                 stateText.text = if (armed) "ARMED · 손이나 물체를 빨간 START 선을 가로질러 휙 지나가세요." else "대기 · ARM을 누르면 트리거를 검사합니다."
-                overlay.armed = armed
-                overlay.invalidate()
+                this@CameraGateTestActivity.overlay.armed = armed
+                this@CameraGateTestActivity.overlay.invalidate()
             }
         }
         controls.addView(armButton, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(5) })
@@ -299,10 +299,10 @@ class CameraGateTestActivity : Activity() {
             stateText.text = "후면 카메라 확인 실패 · ${it.message ?: it.javaClass.simpleName}"
             return
         }
-        activeCameraId = selected.first
-        analysisSize = selected.second
-        requestedFpsRange = selected.third
-        sensorOrientation = selected.fourth
+        activeCameraId = selected.id
+        analysisSize = selected.size
+        requestedFpsRange = selected.fps
+        sensorOrientation = selected.sensorOrientation
         requestedFpsLabel = requestedFpsRange?.let { "요청 ${it.lower}-${it.upper} FPS" } ?: "자동 FPS"
         try {
             manager.openCamera(activeCameraId, object : CameraDevice.StateCallback() {
@@ -614,9 +614,7 @@ class CameraGateTestActivity : Activity() {
 
     private fun vibrateTrigger() {
         val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
-        runCatching {
-            vibrator.vibrate(VibrationEffect.createOneShot(45L, 120))
-        }
+        runCatching { vibrator.vibrate(VibrationEffect.createOneShot(45L, 120)) }
     }
 
     private fun signedMs(value: Double): String = String.format(Locale.US, "%+.1f ms", value)
