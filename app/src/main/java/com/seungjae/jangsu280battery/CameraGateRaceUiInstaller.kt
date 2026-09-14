@@ -11,7 +11,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import java.util.WeakHashMap
 
-/** Injects a permanent CAMERA GATE BETA entry into the TimeGate RACE home screen. */
+/** Adds the Camera Gate operator entry to RACE only on a paired TimeGate admin phone. */
 object CameraGateRaceUiInstaller {
     private const val TAG_CAMERA_BUTTON = "camera_gate_beta_race_home_v5"
     private val listeners = WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener>()
@@ -36,7 +36,16 @@ object CameraGateRaceUiInstaller {
 
     private fun attachIfHome(activity: Activity) {
         val decor = activity.window.decorView as? ViewGroup ?: return
-        if (decor.findViewWithTag<View>(TAG_CAMERA_BUTTON) != null) return
+        val existing = decor.findViewWithTag<View>(TAG_CAMERA_BUTTON)
+        val admin = runCatching { RiderServerSync(activity).isAdminDeviceCached() }.getOrDefault(false)
+
+        // Ordinary participant phones must not see or enter the field timing controls.
+        if (!admin) {
+            existing?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            return
+        }
+        if (existing != null) return
+
         val start = findStartButton(decor) ?: return
         val body = start.parent as? LinearLayout ?: return
         val startIndex = body.indexOfChild(start)
@@ -50,13 +59,14 @@ object CameraGateRaceUiInstaller {
 
         val button = Button(activity).apply {
             tag = TAG_CAMERA_BUTTON
-            text = "📷 카메라 계측 테스트 (BETA v5)\nDIRECT 120 FPS · 스트림/분석 FPS · PTS 시각 검증"
+            text = "🔒 운영자 계측\nSTART · CP · FINISH · 카메라 게이트"
             textSize = 15f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             isAllCaps = false
             setBackgroundColor(Color.rgb(52, 78, 104))
             setOnClickListener {
+                if (!RiderServerSync(activity).isAdminDeviceCached()) return@setOnClickListener
                 activity.startActivity(Intent(activity, CameraGateHighSpeedActivity::class.java))
             }
         }
