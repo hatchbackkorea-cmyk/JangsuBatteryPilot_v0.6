@@ -41,7 +41,8 @@ data class RaceEventConfig(
     val gates: List<RaceGate>,
     val reference: List<RaceReferencePoint> = emptyList(),
     val leaderName: String = "",
-    val leaderElapsedMs: Long? = null
+    val leaderElapsedMs: Long? = null,
+    val timingMode: String = "GPS"
 ) {
     fun toJson() = JSONObject().apply {
         put("event_id", eventId); put("event_code", eventCode); put("name", name)
@@ -49,7 +50,7 @@ data class RaceEventConfig(
         put("course_name", courseName); put("distance_m", distanceM)
         put("gates", JSONArray().apply { gates.forEach { put(it.toJson()) } })
         put("reference", JSONArray().apply { reference.forEach { put(it.toJson()) } })
-        put("leader_name", leaderName)
+        put("leader_name", leaderName); put("timing_mode", timingMode.uppercase())
         leaderElapsedMs?.let { put("leader_elapsed_ms", it) }
     }
 
@@ -67,7 +68,8 @@ data class RaceEventConfig(
                 gates = (0 until gatesA.length()).mapNotNull { gatesA.optJSONObject(it)?.let(RaceGate::fromJson) },
                 reference = (0 until refA.length()).mapNotNull { refA.optJSONObject(it)?.let(RaceReferencePoint::fromJson) },
                 leaderName = o.optString("leader_name", ""),
-                leaderElapsedMs = if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null
+                leaderElapsedMs = if (o.has("leader_elapsed_ms") && !o.isNull("leader_elapsed_ms")) o.optLong("leader_elapsed_ms") else null,
+                timingMode = o.optString("timing_mode", "GPS").uppercase().let { if (it == "CAMERA") "CAMERA" else "GPS" }
             )
         }
     }
@@ -136,11 +138,6 @@ data class RaceRunSummary(
     }
 }
 
-/**
- * Canonical TimeGate visible-record precision.
- * Raw milliseconds are preserved for timing evidence; every rider/admin/monitor
- * time shown to people is rounded to the nearest 0.1 second (50 ms rounds upward).
- */
 fun roundRaceTimeMs(ms: Long): Long = ((ms.coerceAtLeast(0L) + 50L) / 100L) * 100L
 
 fun formatRaceTime(ms: Long): String {
