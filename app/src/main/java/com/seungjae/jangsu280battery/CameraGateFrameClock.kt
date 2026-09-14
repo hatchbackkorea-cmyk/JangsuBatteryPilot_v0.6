@@ -8,19 +8,11 @@ import kotlin.math.max
 /**
  * Resolves the decoded high-speed stream PTS onto Android BOOTTIME.
  *
- * On several Samsung devices Camera2 SENSOR_TIMESTAMP is REALTIME/BOOTTIME, while MediaCodec
- * rebases the recording-surface timestamps onto a relative media timeline. In that case the raw
- * decoded SurfaceTexture timestamp cannot be subtracted from elapsedRealtimeNanos() directly.
- *
- * This helper supports both cases:
- *  1) raw frame PTS is already BOOTTIME -> use it directly;
- *  2) MediaCodec rebased PTS -> learn a stable offset from Camera2 SENSOR_TIMESTAMP samples and
- *     map the media PTS back to CAMERA REALTIME before converting it to wall clock time.
- *
- * Calibration is deliberately runtime-validated. Camera metadata is ~60 FPS in a 120 FPS
- * constrained-high-speed session, so each metadata timestamp is matched to the nearest recording
- * PTS after an initial first-frame anchor. Once enough matches agree, decoder/GL delivery latency
- * no longer changes the recorded crossing time.
+ * v8 also timestamps a motion transition at the midpoint between the previous and current trusted
+ * camera frames. Camera Gate detects a crossing by comparing two consecutive frames, so the real
+ * physical transition happened somewhere inside that interval. Using the midpoint removes the
+ * systematic "current-frame" late bias and bounds frame-quantisation error to about half a frame:
+ * roughly +/-4.2 ms at 120 FPS and +/-8.3 ms at 60 FPS.
  */
 class CameraGateFrameClock {
     data class Resolution(
@@ -35,6 +27,7 @@ class CameraGateFrameClock {
     private var relativeCalibrated = false
     private var ptsToBootOffsetNs: Long? = null
     private var calibrationUncertaintyMs = Double.NaN
+    private var previousResolvedWallMs: Long? = null
 
     private val frameAgesNs = ArrayDeque<Long>()
     private val captureAgesNs = ArrayDeque<Long>()
@@ -44,12 +37,17 @@ class CameraGateFrameClock {
     @Volatile var statusLabel: String = "PTS 시각 도메인 확인 중"
         private set
 
+    @Volatile var eventFrameUncertaintyMs: Double = Double.NaN
+        private set
+
     fun reset(timestampSourceRealtime: Boolean) {
         characteristicRealtime = timestampSourceRealtime
         runtimeDirectAligned = false
         relativeCalibrated = false
         ptsToBootOffsetNs = null
         calibrationUncertaintyMs = Double.NaN
+        previousResolvedWallMs = null
+        eventFrameUncertaintyMs = Double.NaN
         frameAgesNs.clear()
         captureAgesNs.clear()
         framePtsNs.clear()
@@ -82,6 +80,7 @@ class CameraGateFrameClock {
 
     fun resolve(frameTimestampNs: Long, receiveMonoNs: Long, receiveWallMs: Long): Resolution {
         if (frameTimestampNs <= 0L) {
+            previousResolvedWallMs = null
             return Resolution(receiveWallMs, "DIRECT 프레임 수신 시각 · PTS 없음", Double.NaN, false)
         }
 
@@ -89,6 +88,7 @@ class CameraGateFrameClock {
             framePtsNs.addLast(frameTimestampNs)
             while (framePtsNs.size > MAX_FRAME_SAMPLES) framePtsNs.removeFirst()
         }
+        updateEventFrameUncertainty()
 
         val rawAgeNs = receiveMonoNs - frameTimestampNs
         val rawPlausible = rawAgeNs in 0L..MAX_REASONABLE_AGE_NS
@@ -102,14 +102,16 @@ class CameraGateFrameClock {
 
         // Best case: the decoded PTS itself is already CAMERA REALTIME/BOOTTIME.
         if (rawPlausible && (characteristicRealtime || runtimeDirectAligned)) {
-            val localWall = receiveWallMs - rawAgeNs / 1_000_000L
+            val frameWall = receiveWallMs - rawAgeNs / 1_000_000L
+            val eventWall = midpointEventWall(frameWall)
             updateStatus()
-            val source = if (characteristicRealtime) {
-                "DIRECT PTS 프레임시각 · CAMERA REALTIME"
-            } else {
-                "DIRECT PTS 프레임시각 · BOOTTIME 런타임 정렬 확인"
-            }
-            return Resolution(localWall, source, rawAgeNs / 1_000_000.0, true)
+            val prefix = if (characteristicRealtime) "CAMERA REALTIME" else "BOOTTIME 런타임 정렬 확인"
+            return Resolution(
+                eventWall,
+                "DIRECT PTS 프레임사이 중앙시각 · $prefix${eventUncertaintyLabel()}",
+                rawAgeNs / 1_000_000.0,
+                true
+            )
         }
 
         // MediaCodec-rebased case: map relative media PTS back onto CAMERA REALTIME.
@@ -118,20 +120,23 @@ class CameraGateFrameClock {
             val mappedBootNs = frameTimestampNs + offset
             val mappedAgeNs = receiveMonoNs - mappedBootNs
             if (mappedAgeNs in 0L..MAX_REASONABLE_AGE_NS) {
-                val localWall = receiveWallMs - mappedAgeNs / 1_000_000L
+                val frameWall = receiveWallMs - mappedAgeNs / 1_000_000L
+                val eventWall = midpointEventWall(frameWall)
                 updateStatus(mappedAgeNs)
-                val uncertainty = if (calibrationUncertaintyMs.isFinite()) {
-                    " · 보정불확도 ±${fmt(calibrationUncertaintyMs)} ms"
+                val calibration = if (calibrationUncertaintyMs.isFinite()) {
+                    " · PTS보정 ±${fmt(calibrationUncertaintyMs)} ms"
                 } else ""
                 return Resolution(
-                    localWall,
-                    "DIRECT PTS 프레임시각 · CAMERA REALTIME 보정 완료$uncertainty",
+                    eventWall,
+                    "DIRECT PTS 프레임사이 중앙시각 · CAMERA REALTIME 보정 완료$calibration${eventUncertaintyLabel()}",
                     mappedAgeNs / 1_000_000.0,
                     true
                 )
             }
         }
 
+        // Do not carry a midpoint anchor across an untrusted frame timestamp.
+        previousResolvedWallMs = null
         updateStatus()
         return Resolution(
             receiveWallMs,
@@ -144,6 +149,29 @@ class CameraGateFrameClock {
             false
         )
     }
+
+    /**
+     * Motion score compares previous/current images. The physical crossing therefore belongs to the
+     * interval between their frame timestamps, not automatically to the newer frame. Midpoint is the
+     * minimum-bias estimate when no sub-frame optical information is available.
+     */
+    private fun midpointEventWall(frameWallMs: Long): Long {
+        val previous = previousResolvedWallMs
+        previousResolvedWallMs = frameWallMs
+        if (previous == null) return frameWallMs
+        val delta = frameWallMs - previous
+        if (delta !in 1L..MAX_MIDPOINT_FRAME_GAP_MS) return frameWallMs
+        return previous + delta / 2L
+    }
+
+    private fun updateEventFrameUncertainty() {
+        val periodNs = medianFramePeriodNs() ?: return
+        eventFrameUncertaintyMs = periodNs / 2_000_000.0
+    }
+
+    private fun eventUncertaintyLabel(): String = if (eventFrameUncertaintyMs.isFinite()) {
+        " · 프레임경계 ±${fmt(eventFrameUncertaintyMs)} ms"
+    } else ""
 
     private fun validateDirectTimeline() {
         if (runtimeDirectAligned || frameAgesNs.size < MIN_FRAME_SAMPLES) return
@@ -161,8 +189,8 @@ class CameraGateFrameClock {
      * Learns CAMERA_REALTIME ~= mediaPTS + offset.
      *
      * The first metadata/frame pair establishes the phase. We then repeatedly match each sparse
-     * Camera2 sensor timestamp to the nearest 120 FPS media PTS and use the median offset. A wrong
-     * or unstable timeline fails the residual test and timing safely stays on receive time.
+     * Camera2 sensor timestamp to the nearest recording PTS and use the median offset. A wrong or
+     * unstable timeline fails the residual test and timing safely stays on receive time.
      */
     private fun tryRelativeCalibration() {
         if (relativeCalibrated || framePtsNs.size < MIN_CAL_FRAME_SAMPLES || captureSensorNs.size < MIN_CAL_CAPTURE_SAMPLES) return
@@ -171,7 +199,6 @@ class CameraGateFrameClock {
         var offset = ptsToBootOffsetNs
             ?: (captureSensorNs.first() - framePtsNs.first()).also { ptsToBootOffsetNs = it }
 
-        var matchedOffsets = emptyList<Long>()
         repeat(3) {
             val candidates = mutableListOf<Long>()
             for (sensorNs in captureSensorNs) {
@@ -182,7 +209,6 @@ class CameraGateFrameClock {
             if (candidates.size < MIN_CAL_MATCHES) return
             candidates.sort()
             offset = candidates[candidates.size / 2]
-            matchedOffsets = candidates
         }
 
         val residuals = mutableListOf<Long>()
@@ -197,8 +223,7 @@ class CameraGateFrameClock {
         if (p90 > MAX_CAL_RESIDUAL_NS) return
 
         val framePeriodNs = medianFramePeriodNs()
-        // First-frame phase can be ambiguous by roughly one high-speed frame on some HALs.
-        // Report that conservatively instead of pretending sub-frame absolute accuracy.
+        // Mapping uncertainty is kept separate from the midpoint frame-boundary uncertainty.
         val phaseAllowanceNs = framePeriodNs ?: DEFAULT_120_FRAME_NS
         calibrationUncertaintyMs = max(p90.toDouble(), phaseAllowanceNs.toDouble()) / 1_000_000.0
         ptsToBootOffsetNs = offset
@@ -244,15 +269,16 @@ class CameraGateFrameClock {
     private fun updateStatus(mappedAgeNs: Long? = null) {
         val rawMedian = medianMs(frameAgesNs)
         val captureMedian = medianMs(captureAgesNs)
+        val event = eventUncertaintyLabel()
         statusLabel = when {
             relativeCalibrated -> {
                 val age = mappedAgeNs?.let { " · 파이프라인 ${fmt(it / 1_000_000.0)} ms" } ?: ""
-                val uncertainty = if (calibrationUncertaintyMs.isFinite()) " · 보정 ±${fmt(calibrationUncertaintyMs)} ms" else ""
-                "CAMERA REALTIME 보정 완료 · PTS 직접 사용$uncertainty$age"
+                val uncertainty = if (calibrationUncertaintyMs.isFinite()) " · PTS보정 ±${fmt(calibrationUncertaintyMs)} ms" else ""
+                "CAMERA REALTIME 보정 완료 · PTS 직접 사용$uncertainty$event$age"
             }
             rawMedian != null && (characteristicRealtime || runtimeDirectAligned) -> {
                 val prefix = if (characteristicRealtime) "CAMERA REALTIME" else "BOOTTIME 런타임 정렬 확인"
-                "$prefix · PTS 직접 사용 · 파이프라인 ${fmt(rawMedian)} ms"
+                "$prefix · PTS 직접 사용$event · 파이프라인 ${fmt(rawMedian)} ms"
             }
             ptsToBootOffsetNs != null -> {
                 "상대 PTS → CAMERA REALTIME 보정 검증 중 · 메타 ${captureSensorNs.size} · 프레임 ${framePtsNs.size}"
@@ -297,5 +323,6 @@ class CameraGateFrameClock {
         private const val MIN_FRAME_PERIOD_NS = 3_000_000L
         private const val MAX_FRAME_PERIOD_NS = 20_000_000L
         private const val DEFAULT_120_FRAME_NS = 8_333_333L
+        private const val MAX_MIDPOINT_FRAME_GAP_MS = 40L
     }
 }
