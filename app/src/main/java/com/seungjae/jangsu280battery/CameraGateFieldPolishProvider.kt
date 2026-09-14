@@ -7,13 +7,13 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.VibrationEffect
 import android.os.Vibrator
 import android.text.Editable
 import android.text.TextWatcher
@@ -33,6 +33,7 @@ import kotlin.math.roundToInt
  * - Direction is one toggle button (방향 > / 방향 <).
  * - Reverse/unknown crossings never show the green gate flash.
  * - A loud alarm-stream beep is played only for a direction-approved timing trigger.
+ * - Field buttons use a compact ~50% translucent glass surface so the camera stays visible.
  */
 class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -86,7 +87,7 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         val left = findTagged(dock, TAG_LEFT) as? LinearLayout
         val right = findTagged(dock, TAG_RIGHT) as? LinearLayout ?: return
         val arm = readField(activity, "armButton") as? Button ?: return
-        val sync = findButton(decor) { it.text?.toString()?.contains("재동기화") == true } ?: return
+        val sync = findButton(decor) { it.text?.toString()?.contains("재동기화") == true || it.text?.toString() == "동기화" } ?: return
         val log = findTagged(dock, TAG_LOG_BUTTON) as? Button ?: return
 
         // Hide the old two-button direction row. The compact single toggle below owns direction UI.
@@ -115,6 +116,7 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
                 setPadding(0, 0, 0, dp(activity, 2))
+                setBackgroundColor(Color.TRANSPARENT)
             }
             right.removeAllViews()
             right.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -171,7 +173,15 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         button.textSize = 12f
         button.minHeight = 0
         button.minWidth = 0
+        button.setTextColor(Color.WHITE)
         button.setPadding(dp(activity, 5), 0, dp(activity, 5), 0)
+        button.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(Color.argb(128, 16, 16, 18))
+            cornerRadius = dp(activity, 9).toFloat()
+            setStroke(dp(activity, 1), Color.argb(90, 255, 255, 255))
+        }
+        button.elevation = dp(activity, 2).toFloat()
         button.layoutParams = weightLp(activity, weight)
     }
 
@@ -229,7 +239,6 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
             overlay.javaClass.getDeclaredField("flashUntil").apply { isAccessible = true }.setLong(overlay, 0L)
             overlay.invalidate()
         }
-        // Reject feedback should also not keep buzzing after the direction guard rejected it.
         runCatching { (activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.cancel() }
     }
 
@@ -244,8 +253,6 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
     }
 
     private fun resetDirectionDetector(activity: CameraGateHighSpeedActivity) {
-        // Existing provider owns the detector. Resetting by toggling its visible row is unnecessary;
-        // changing the shared preference is enough, and stale direction expires in <1 second.
         findTagged(activity.window.decorView, TAG_DIRECTION_ROW)?.visibility = View.GONE
     }
 
