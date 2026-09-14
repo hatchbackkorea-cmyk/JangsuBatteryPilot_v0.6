@@ -27,6 +27,8 @@
     <application android:name=".RideCopilotApp" android:allowBackup="true" android:usesCleartextTraffic="true" android:icon="@drawable/ic_battery_pilot" android:label="TimeGate" android:supportsRtl="true" android:theme="@style/AppTheme">
         <activity android:name=".BikeModeChooserActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
         <activity android:name=".RaceActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="race"/></intent-filter></activity>
+        <activity android:name=".TimingDeviceManagerActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".TimingOperatorEnrollmentActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="timing" android:pathPrefix="/enroll"/></intent-filter></activity>
         <activity android:name=".CameraGateTestActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateTestActivityV2" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateHighSpeedActivity" android:exported="false" android:screenOrientation="portrait" />
@@ -57,6 +59,7 @@
         <provider android:name=".RaceLiveStatusRelocatorProvider" android:authorities="${applicationId}.race-live-status-relocator" android:exported="false" android:initOrder="90" />
         <provider android:name=".CameraGateRaceUiProvider" android:authorities="${applicationId}.camera-gate-race-ui" android:exported="false" android:initOrder="80" />
         <provider android:name=".CameraGateRegularFpsProvider" android:authorities="${applicationId}.camera-gate-regular-fps" android:exported="false" android:initOrder="79" />
+        <provider android:name=".TimingOperatorLockProvider" android:authorities="${applicationId}.timing-operator-lock" android:exported="false" android:initOrder="78" />
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" /></provider>
 
