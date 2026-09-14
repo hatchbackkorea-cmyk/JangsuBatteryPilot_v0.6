@@ -17,9 +17,10 @@ import java.util.WeakHashMap
 /**
  * Registers the Camera Gate RACE-home injector and keeps Camera Gate clocks disciplined.
  *
- * While the Camera Gate beta screen is visible, v7 asks the existing sync routine to refresh every
- * 30 seconds. CameraGateClockSync then uses those repeated observations to learn each phone's
- * monotonic-clock drift, keeping START and FINISH phones on the same time axis during long races.
+ * v8 refreshes the clock every 15 seconds while the Camera Gate screen is visible. The shorter
+ * interval gives the drift model more observations before and during a race, while syncClock's own
+ * guard prevents overlapping network probes. CameraGateFrameClock v8 handles 60/120 FPS crossing
+ * time with a midpoint estimate between consecutive trusted frames.
  */
 class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -37,7 +38,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
             return
         }
         if (activity is CameraGateHighSpeedActivity) {
-            activity.window.decorView.post { markV7(activity.window.decorView) }
+            activity.window.decorView.post { markV8(activity.window.decorView) }
             startClockDiscipline(activity)
         }
     }
@@ -64,7 +65,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
             }
         }
         autoSyncJobs[activity] = job
-        // onCreate already performs the first sync; the first automatic refresh happens 30 s later.
+        // onCreate already performs the first sync; automatic discipline starts 15 s later.
         main.postDelayed(job, AUTO_SYNC_INTERVAL_MS)
     }
 
@@ -80,15 +81,17 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         }
     }
 
-    private fun markV7(view: View) {
+    private fun markV8(view: View) {
         if (view is TextView) {
             val text = view.text?.toString().orEmpty()
             if (text.contains("CAMERA GATE BETA v6")) {
-                view.text = text.replace("CAMERA GATE BETA v6", "CAMERA GATE BETA v7")
+                view.text = text.replace("CAMERA GATE BETA v6", "CAMERA GATE BETA v8")
+            } else if (text.contains("CAMERA GATE BETA v7")) {
+                view.text = text.replace("CAMERA GATE BETA v7", "CAMERA GATE BETA v8")
             }
         }
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) markV7(view.getChildAt(i))
+            for (i in 0 until view.childCount) markV8(view.getChildAt(i))
         }
     }
 
@@ -104,6 +107,6 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     companion object {
-        private const val AUTO_SYNC_INTERVAL_MS = 30_000L
+        private const val AUTO_SYNC_INTERVAL_MS = 15_000L
     }
 }
