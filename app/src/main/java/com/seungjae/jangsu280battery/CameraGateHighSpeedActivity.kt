@@ -53,7 +53,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-/** Camera Gate field-test v5: true high-speed stream analysis + validated frame PTS timing. */
+/** Camera Gate field-test v6: true high-speed stream analysis + robust multi-source clock sync. */
 class CameraGateHighSpeedActivity : Activity() {
     private lateinit var textureView: TextureView
     private lateinit var overlay: GateOverlay
@@ -105,6 +105,7 @@ class CameraGateHighSpeedActivity : Activity() {
     @Volatile private var lastFrameSource = "-"
     @Volatile private var clockOffsetMs = 0.0
     @Volatile private var clockUncertaintyMs = Double.POSITIVE_INFINITY
+    @Volatile private var clockQuality = "미동기화"
     @Volatile private var syncRunning = false
 
     private var frozenClockMs: Long? = null
@@ -128,7 +129,7 @@ class CameraGateHighSpeedActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        cameraThread = HandlerThread("CameraGateHighSpeedV5").apply { start() }
+        cameraThread = HandlerThread("CameraGateHighSpeedV6").apply { start() }
         cameraHandler = Handler(cameraThread.looper)
         buildUi()
         ui.post(clockTicker)
@@ -188,7 +189,7 @@ class CameraGateHighSpeedActivity : Activity() {
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(dp(60), dp(48)))
         top.addView(TextView(this).apply {
-            text = "CAMERA GATE BETA v5 · DIRECT 120"
+            text = "CAMERA GATE BETA v6 · DIRECT 120"
             textSize = 18f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
@@ -664,7 +665,7 @@ class CameraGateHighSpeedActivity : Activity() {
             while (triggerLog.size > 20) triggerLog.removeLast()
         }
         ui.post {
-            triggerText.text = "TRIGGER #$triggerCount\n폰 ${formatClock(localMs)}\n기준보정 ${formatClock(corrected)}\n오프셋 ${if (clockUncertaintyMs.isFinite()) signedMs(clockOffsetMs) else "미동기화"} · 동기화추정 $uncertainty\n$lastFrameSource"
+            triggerText.text = "TRIGGER #$triggerCount\n폰 ${formatClock(localMs)}\n기준보정 ${formatClock(corrected)}\n오프셋 ${if (clockUncertaintyMs.isFinite()) signedMs(clockOffsetMs) else "미동기화"} · 동기화추정 $uncertainty · 품질 $clockQuality\n$lastFrameSource"
             triggerText.setTextColor(Color.rgb(100, 255, 140))
             logText.text = synchronized(triggerLog) { "[이벤트 로그]\n" + triggerLog.joinToString("\n") }
             overlay.flash()
@@ -678,15 +679,21 @@ class CameraGateHighSpeedActivity : Activity() {
     private fun syncClock() {
         if (syncRunning) return
         syncRunning = true
-        syncText.text = "시간 동기화 · 정밀 샘플 수집 중…"
+        syncText.text = "시간 동기화 · RACE/NTP 정밀 샘플 비교 중…"
         syncText.setTextColor(Color.LTGRAY)
+        val previousOffset = clockOffsetMs
+        val previousUncertainty = clockUncertaintyMs
         syncExecutor.execute {
-            val result = runCatching { measureClockOffset() }
+            val result = runCatching {
+                val measured = CameraGateClockSync.measure(RaceServerClient(this).baseUrl(), syncHttp)
+                CameraGateClockSync.stabilize(previousOffset, previousUncertainty, measured)
+            }
             ui.post {
                 syncRunning = false
                 result.onSuccess { s ->
                     clockOffsetMs = s.offsetMs
                     clockUncertaintyMs = s.uncertaintyMs
+                    clockQuality = s.quality
                     renderClock(frozenClockMs ?: System.currentTimeMillis())
                     syncText.setTextColor(
                         when {
@@ -695,9 +702,12 @@ class CameraGateHighSpeedActivity : Activity() {
                             else -> Color.rgb(255, 145, 70)
                         }
                     )
-                    syncText.text = "시간 동기화 · ${s.source}\n오프셋 ${signedMs(s.offsetMs)} · 추정오차 ±${"%.0f".format(Locale.US, s.uncertaintyMs)} ms · 최저 RTT ${s.rttMs} ms\nRACE 서버 ${RaceServerClient(this).baseUrl()}"
+                    syncText.text = "시간 동기화 · ${s.source}\n품질 ${s.quality} · 오프셋 ${signedMs(s.offsetMs)} · 추정오차 ±${"%.1f".format(Locale.US, s.uncertaintyMs)} ms · 최저 RTT ${s.bestRttMs} ms · 채택 ${s.usedSamples}개\nRACE 서버 ${RaceServerClient(this).baseUrl()}"
                 }.onFailure { e ->
-                    clockUncertaintyMs = Double.POSITIVE_INFINITY
+                    if (!previousUncertainty.isFinite()) {
+                        clockUncertaintyMs = Double.POSITIVE_INFINITY
+                        clockQuality = "미동기화"
+                    }
                     renderClock(frozenClockMs ?: System.currentTimeMillis())
                     syncText.setTextColor(Color.rgb(255, 95, 95))
                     syncText.text = "시간 동기화 실패 · ${e.message ?: e.javaClass.simpleName}\n서버 ${RaceServerClient(this).baseUrl()}"
@@ -706,6 +716,8 @@ class CameraGateHighSpeedActivity : Activity() {
         }
     }
 
+    // Legacy synchronizer retained as a fallback reference for the beta test screen. v6 uses
+    // CameraGateClockSync above, which compares RACE four-timestamp samples with public NTP.
     private fun measureClockOffset(): ClockResult {
         val base = RaceServerClient(this).baseUrl().trimEnd('/')
         require(base.startsWith("http://") || base.startsWith("https://")) { "RACE 서버 주소가 없습니다." }
