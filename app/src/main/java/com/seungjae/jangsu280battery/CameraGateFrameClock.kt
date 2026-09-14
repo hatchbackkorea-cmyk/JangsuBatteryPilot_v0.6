@@ -6,13 +6,12 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * Resolves the decoded high-speed stream PTS onto Android BOOTTIME.
+ * Resolves the decoded camera stream PTS onto Android BOOTTIME.
  *
- * v8 also timestamps a motion transition at the midpoint between the previous and current trusted
- * camera frames. Camera Gate detects a crossing by comparing two consecutive frames, so the real
- * physical transition happened somewhere inside that interval. Using the midpoint removes the
- * systematic "current-frame" late bias and bounds frame-quantisation error to about half a frame:
- * roughly +/-4.2 ms at 120 FPS and +/-8.3 ms at 60 FPS.
+ * v12 timestamps a motion transition at the midpoint between the previous and current trusted
+ * camera frames and derives frame-boundary uncertainty from the actual measured stream period.
+ * This keeps the displayed quantisation bound honest across fallback modes: roughly +/-4.2 ms at
+ * 120 FPS, +/-8.3 ms at 60 FPS, and +/-16.7 ms at 30 FPS.
  */
 class CameraGateFrameClock {
     data class Resolution(
@@ -223,8 +222,9 @@ class CameraGateFrameClock {
         if (p90 > MAX_CAL_RESIDUAL_NS) return
 
         val framePeriodNs = medianFramePeriodNs()
-        // Mapping uncertainty is kept separate from the midpoint frame-boundary uncertainty.
-        val phaseAllowanceNs = framePeriodNs ?: DEFAULT_120_FRAME_NS
+        // Event timing uses the midpoint between adjacent frames, so the frame-phase contribution
+        // to the timing bound is half a measured frame period rather than a full frame.
+        val phaseAllowanceNs = (framePeriodNs ?: DEFAULT_120_FRAME_NS) / 2L
         calibrationUncertaintyMs = max(p90.toDouble(), phaseAllowanceNs.toDouble()) / 1_000_000.0
         ptsToBootOffsetNs = offset
         relativeCalibrated = true
@@ -321,8 +321,8 @@ class CameraGateFrameClock {
         private const val MAX_CAL_RESIDUAL_NS = 7_000_000L
 
         private const val MIN_FRAME_PERIOD_NS = 3_000_000L
-        private const val MAX_FRAME_PERIOD_NS = 20_000_000L
+        private const val MAX_FRAME_PERIOD_NS = 50_000_000L
         private const val DEFAULT_120_FRAME_NS = 8_333_333L
-        private const val MAX_MIDPOINT_FRAME_GAP_MS = 40L
+        private const val MAX_MIDPOINT_FRAME_GAP_MS = 50L
     }
 }
