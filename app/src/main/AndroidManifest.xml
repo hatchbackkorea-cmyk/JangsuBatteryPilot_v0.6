@@ -63,6 +63,7 @@
         <provider android:name=".CameraGateRaceUiProvider" android:authorities="${applicationId}.camera-gate-race-ui" android:exported="false" android:initOrder="80" />
         <provider android:name=".CameraGateRegularFpsProvider" android:authorities="${applicationId}.camera-gate-regular-fps" android:exported="false" android:initOrder="79" />
         <provider android:name=".TimingOperatorLockProvider" android:authorities="${applicationId}.timing-operator-lock" android:exported="false" android:initOrder="78" />
+        <provider android:name=".CameraGateRoleLabelProvider" android:authorities="${applicationId}.camera-gate-role-label" android:exported="false" android:initOrder="75" />
         <provider android:name=".CameraGateFullscreenUiProvider" android:authorities="${applicationId}.camera-gate-fullscreen-ui" android:exported="false" android:initOrder="70" />
         <provider android:name=".CameraGateFieldPolishProvider" android:authorities="${applicationId}.camera-gate-field-polish" android:exported="false" android:initOrder="60" />
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
