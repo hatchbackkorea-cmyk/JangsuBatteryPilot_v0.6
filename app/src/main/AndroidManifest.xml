@@ -57,6 +57,7 @@
 
         <provider android:name=".RaceRuntimeSessionGuardProvider" android:authorities="${applicationId}.race-runtime-session" android:exported="false" android:initOrder="100" />
         <provider android:name=".RaceLiveStatusRelocatorProvider" android:authorities="${applicationId}.race-live-status-relocator" android:exported="false" android:initOrder="90" />
+        <provider android:name=".CameraGateRotationSyncProvider" android:authorities="${applicationId}.camera-gate-rotation-sync" android:exported="false" android:initOrder="86" />
         <provider android:name=".CameraGatePreviewAspectProvider" android:authorities="${applicationId}.camera-gate-preview-aspect" android:exported="false" android:initOrder="85" />
         <provider android:name=".CameraGateRaceUiProvider" android:authorities="${applicationId}.camera-gate-race-ui" android:exported="false" android:initOrder="80" />
         <provider android:name=".CameraGateRegularFpsProvider" android:authorities="${applicationId}.camera-gate-regular-fps" android:exported="false" android:initOrder="79" />
