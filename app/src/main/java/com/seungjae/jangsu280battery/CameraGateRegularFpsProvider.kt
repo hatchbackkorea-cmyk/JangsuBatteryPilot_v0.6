@@ -50,6 +50,7 @@ class CameraGateRegularFpsProvider : ContentProvider(), Application.ActivityLife
         main.postDelayed({ if (!activity.isFinishing && !activity.isDestroyed) markV14(activity.window.decorView) }, 1_000L)
         prepareRegular60ProbeWithRetry(activity, 0)
         startProbeWatchdog(activity)
+        CameraGateRoleInstaller.onResume(activity)
     }
 
     override fun onActivityPaused(activity: Activity) {
@@ -60,6 +61,7 @@ class CameraGateRegularFpsProvider : ContentProvider(), Application.ActivityLife
         stopProbeWatchdog(activity)
         forcedProbe.remove(activity)
         fallbackSeenAtMs.remove(activity)
+        CameraGateRoleInstaller.onDestroyed(activity)
     }
 
     private fun prepareRegular60ProbeWithRetry(activity: CameraGateHighSpeedActivity, attempt: Int) {
