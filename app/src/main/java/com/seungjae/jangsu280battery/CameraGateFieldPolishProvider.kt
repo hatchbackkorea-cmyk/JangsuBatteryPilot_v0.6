@@ -29,11 +29,12 @@ import kotlin.math.roundToInt
 /**
  * Final field polish for Camera Gate.
  *
- * - Compact lower-right controls: direction, start/stop, sync, log.
- * - Direction is one toggle button (방향 > / 방향 <).
+ * - One compact lower-right glass control bar split into four equal cells.
+ * - Direction cell shows only L/R and toggles the selected travel direction.
+ * - Start/stop, sync and log occupy the remaining three equal cells.
+ * - Old direction/status UI at lower-left is removed completely.
  * - Reverse/unknown crossings never show the green gate flash.
  * - A loud alarm-stream beep is played only for a direction-approved timing trigger.
- * - Field buttons use a compact ~50% translucent glass surface so the camera stays visible.
  */
 class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -87,50 +88,65 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         val left = findTagged(dock, TAG_LEFT) as? LinearLayout
         val right = findTagged(dock, TAG_RIGHT) as? LinearLayout ?: return
         val arm = readField(activity, "armButton") as? Button ?: return
-        val sync = findButton(decor) { it.text?.toString()?.contains("재동기화") == true || it.text?.toString() == "동기화" } ?: return
+        val sync = findButton(decor) {
+            it.text?.toString()?.contains("재동기화") == true || it.text?.toString() == "동기화"
+        } ?: return
         val log = findTagged(dock, TAG_LOG_BUTTON) as? Button ?: return
 
-        // Hide the old two-button direction row. The compact single toggle below owns direction UI.
-        findTagged(decor, TAG_DIRECTION_ROW)?.visibility = View.GONE
-
+        // Delete the old lower-left direction/status block completely. The detector itself continues
+        // to use the same shared preference, so no timing logic is lost.
+        findTagged(decor, TAG_DIRECTION_ROW)?.let { old ->
+            (old.parent as? ViewGroup)?.removeView(old)
+        }
         left?.let {
             it.removeAllViews()
-            val lp = it.layoutParams as? LinearLayout.LayoutParams
-            if (lp != null) {
-                lp.weight = 0.35f
-                lp.width = 0
-                it.layoutParams = lp
-            }
+            it.visibility = View.GONE
         }
+
+        // The fullscreen dock itself must not look like a bar. Only the compact four-cell capsule is visible.
+        dock.setBackgroundColor(Color.TRANSPARENT)
+        dock.gravity = Gravity.BOTTOM or Gravity.END
+        dock.setPadding(dp(activity, 6), dp(activity, 4), dp(activity, 8), dp(activity, 8))
+
         val rightLp = right.layoutParams as? LinearLayout.LayoutParams
         if (rightLp != null) {
-            rightLp.weight = 1.65f
+            rightLp.weight = 1f
             rightLp.width = 0
             right.layoutParams = rightLp
         }
+        right.gravity = Gravity.BOTTOM or Gravity.END
+        right.setPadding(0, 0, 0, 0)
 
         var row = findTagged(right, TAG_COMPACT_ROW) as? LinearLayout
         if (row == null) {
             row = LinearLayout(activity).apply {
                 tag = TAG_COMPACT_ROW
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, dp(activity, 2))
-                setBackgroundColor(Color.TRANSPARENT)
+                gravity = Gravity.CENTER_VERTICAL
+                clipToOutline = true
             }
             right.removeAllViews()
-            right.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            right.addView(row)
         }
+
+        val menuWidthPx = minOf(
+            (activity.resources.displayMetrics.widthPixels * 0.76f).roundToInt(),
+            dp(activity, 340)
+        ).coerceAtLeast(dp(activity, 248))
+        row.layoutParams = LinearLayout.LayoutParams(menuWidthPx, dp(activity, 36))
+        row.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(Color.argb(128, 14, 14, 16))
+            cornerRadius = dp(activity, 11).toFloat()
+            setStroke(dp(activity, 1), Color.argb(90, 255, 255, 255))
+        }
+        row.elevation = dp(activity, 2).toFloat()
 
         var direction = findTagged(row, TAG_DIRECTION_TOGGLE) as? Button
         if (direction == null) {
             direction = Button(activity).apply {
                 tag = TAG_DIRECTION_TOGGLE
                 isAllCaps = false
-                textSize = 12f
-                minHeight = 0
-                minWidth = 0
-                setPadding(dp(activity, 6), 0, dp(activity, 6), 0)
                 setOnClickListener {
                     val next = if (selectedDirection(activity) == DIR_LTR) DIR_RTL else DIR_LTR
                     prefs(activity).edit().putInt(KEY_DIRECTION, next).apply()
@@ -140,21 +156,24 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
             }
         }
 
-        // Re-home existing buttons so their original behavior survives.
+        // Re-home the existing functional buttons, preserving their original sync/log behavior.
         for (button in listOf(direction, arm, sync, log)) {
             (button.parent as? ViewGroup)?.removeView(button)
         }
         row.removeAllViews()
 
-        compact(direction, activity, 1.05f)
-        compact(arm, activity, 0.85f)
-        compact(sync, activity, 0.95f)
-        compact(log, activity, 0.78f)
+        styleCell(direction)
+        styleCell(arm)
+        styleCell(sync)
+        styleCell(log)
 
-        row.addView(direction, weightLp(activity, 1.05f))
-        row.addView(arm, weightLp(activity, 0.85f))
-        row.addView(sync, weightLp(activity, 0.95f))
-        row.addView(log, weightLp(activity, 0.78f))
+        row.addView(direction, equalCellLp())
+        row.addView(divider(activity))
+        row.addView(arm, equalCellLp())
+        row.addView(divider(activity))
+        row.addView(sync, equalCellLp())
+        row.addView(divider(activity))
+        row.addView(log, equalCellLp())
 
         refreshDirectionButton(activity, direction)
         arm.text = if (readBooleanField(activity, "armed")) "중지" else "시작"
@@ -169,30 +188,30 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         removeBottomCloseButtons(dock)
     }
 
-    private fun compact(button: Button, activity: Activity, weight: Float) {
+    private fun styleCell(button: Button) {
         button.textSize = 12f
         button.minHeight = 0
         button.minWidth = 0
         button.setTextColor(Color.WHITE)
-        button.setPadding(dp(activity, 5), 0, dp(activity, 5), 0)
-        button.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(Color.argb(128, 16, 16, 18))
-            cornerRadius = dp(activity, 9).toFloat()
-            setStroke(dp(activity, 1), Color.argb(90, 255, 255, 255))
-        }
-        button.elevation = dp(activity, 2).toFloat()
-        button.layoutParams = weightLp(activity, weight)
+        button.setPadding(0, 0, 0, 0)
+        button.setBackgroundColor(Color.TRANSPARENT)
+        button.elevation = 0f
+        button.gravity = Gravity.CENTER
     }
 
-    private fun weightLp(activity: Activity, weight: Float) =
-        LinearLayout.LayoutParams(0, dp(activity, 38), weight).apply {
-            marginStart = dp(activity, 2)
-            marginEnd = dp(activity, 2)
+    private fun equalCellLp() = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+
+    private fun divider(activity: Activity) = View(activity).apply {
+        setBackgroundColor(Color.argb(62, 255, 255, 255))
+        layoutParams = LinearLayout.LayoutParams(dp(activity, 1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            topMargin = dp(activity, 7)
+            bottomMargin = dp(activity, 7)
         }
+    }
 
     private fun refreshDirectionButton(activity: Activity, button: Button) {
-        button.text = if (selectedDirection(activity) == DIR_LTR) "방향 >" else "방향 <"
+        // L means race travel toward screen-left; R means race travel toward screen-right.
+        button.text = if (selectedDirection(activity) == DIR_LTR) "R" else "L"
     }
 
     private fun removeBottomCloseButtons(dock: ViewGroup) {
@@ -216,7 +235,8 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
                     main.post { clearGateFlash(activity) }
                     return
                 }
-                val index = Regex("^TRIGGER #(\\d+)").find(snapshot)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return
+                val index = Regex("^TRIGGER #(\\d+)")
+                    .find(snapshot)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return
                 main.postDelayed({
                     val current = trigger.text?.toString().orEmpty()
                     if (!current.startsWith("TRIGGER #$index")) {
@@ -248,12 +268,17 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
             val max = audio?.getStreamMaxVolume(AudioManager.STREAM_ALARM) ?: 0
             if (max > 0) audio?.setStreamVolume(AudioManager.STREAM_ALARM, max, 0)
         }
-        val tone = tones[activity] ?: ToneGenerator(AudioManager.STREAM_ALARM, 100).also { tones[activity] = it }
+        val tone = tones[activity]
+            ?: ToneGenerator(AudioManager.STREAM_ALARM, 100).also { tones[activity] = it }
         runCatching { tone.startTone(ToneGenerator.TONE_PROP_BEEP, BEEP_MS) }
     }
 
     private fun resetDirectionDetector(activity: CameraGateHighSpeedActivity) {
-        findTagged(activity.window.decorView, TAG_DIRECTION_ROW)?.visibility = View.GONE
+        // Stale approach direction expires in under one second in the existing direction detector.
+        // The old visual row intentionally stays removed.
+        findTagged(activity.window.decorView, TAG_DIRECTION_ROW)?.let { old ->
+            (old.parent as? ViewGroup)?.removeView(old)
+        }
     }
 
     private fun selectedDirection(context: Context): Int =
@@ -306,7 +331,14 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
-    override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor? = null
+
     override fun getType(uri: Uri): String? = null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
