@@ -58,6 +58,7 @@
         <provider android:name=".RaceRuntimeSessionGuardProvider" android:authorities="${applicationId}.race-runtime-session" android:exported="false" android:initOrder="100" />
         <provider android:name=".RaceLiveStatusRelocatorProvider" android:authorities="${applicationId}.race-live-status-relocator" android:exported="false" android:initOrder="90" />
         <provider android:name=".CameraGateRaceUiProvider" android:authorities="${applicationId}.camera-gate-race-ui" android:exported="false" android:initOrder="80" />
+        <provider android:name=".CameraGatePreviewAspectProvider" android:authorities="${applicationId}.camera-gate-preview-aspect" android:exported="false" android:initOrder="80" />
         <provider android:name=".CameraGateRegularFpsProvider" android:authorities="${applicationId}.camera-gate-regular-fps" android:exported="false" android:initOrder="79" />
         <provider android:name=".TimingOperatorLockProvider" android:authorities="${applicationId}.timing-operator-lock" android:exported="false" android:initOrder="78" />
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
