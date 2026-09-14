@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.ArrayDeque
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -16,10 +17,10 @@ import kotlin.math.min
 /**
  * Robust wall-clock synchronizer for Camera Gate.
  *
- * The RACE clock endpoint may travel through a public tunnel with highly variable RTT.  This
- * synchronizer therefore uses the server receive/send timestamps when available (NTP-style four
- * timestamp calculation), rejects slow/outlier samples, and compares the result with public NTP
- * instead of trusting the first reachable source.
+ * v7 adds a clock-discipline layer on top of the v6 multi-source sampler. Repeated syncs are
+ * tracked against Android's monotonic clock so each phone learns not only its current offset but
+ * also its slow clock drift. That makes START/FINISH phones stay on one time axis for long races
+ * instead of treating every resync as an unrelated snapshot.
  */
 object CameraGateClockSync {
     data class Result(
@@ -28,7 +29,9 @@ object CameraGateClockSync {
         val bestRttMs: Long,
         val source: String,
         val usedSamples: Int,
-        val quality: String
+        val quality: String,
+        val driftPpm: Double = 0.0,
+        val disciplineSamples: Int = 1
     )
 
     private data class Sample(
@@ -37,7 +40,28 @@ object CameraGateClockSync {
         val rawRttMs: Long
     )
 
+    private data class Observation(
+        val monoMs: Double,
+        val offsetMs: Double,
+        val uncertaintyMs: Double
+    )
+
+    private data class DriftModel(
+        val predictedOffsetMs: Double,
+        val driftPpm: Double,
+        val residualMs: Double,
+        val spanMs: Double,
+        val samples: Int
+    )
+
     private const val NTP_EPOCH_OFFSET_SECONDS = 2_208_988_800L
+    private const val HISTORY_MAX = 24
+    private const val HISTORY_MAX_AGE_MS = 60.0 * 60.0 * 1000.0
+    private const val DRIFT_MIN_SPAN_MS = 45_000.0
+    private const val DRIFT_PPM_LIMIT = 120.0
+
+    private val historyLock = Any()
+    private val history = ArrayDeque<Observation>()
 
     fun measure(baseUrl: String, http: OkHttpClient): Result {
         val base = baseUrl.trimEnd('/')
@@ -45,26 +69,27 @@ object CameraGateClockSync {
             "RACE 서버 주소가 없습니다."
         }
 
+        val followUp = synchronized(historyLock) { history.isNotEmpty() }
+        val raceProbeCount = if (followUp) 6 else 12
+        val ntpProbeCount = if (followUp) 3 else 5
         val candidates = mutableListOf<Result>()
 
         val raceSamples = mutableListOf<Sample>()
-        repeat(12) {
+        repeat(raceProbeCount) {
             preciseRaceSample(base, http)?.let(raceSamples::add)
-            Thread.sleep(20L)
+            Thread.sleep(if (followUp) 12L else 20L)
         }
         if (raceSamples.isNotEmpty()) {
             val race = combineBest(raceSamples, "정밀 RACE 서버시각 API")
             candidates += race
-            // A genuinely low-delay local/nearby RACE endpoint is already better than spending
-            // several more seconds probing UDP NTP.
-            if (race.uncertaintyMs <= 12.0 && race.usedSamples >= 3) return race
+            if (race.uncertaintyMs <= 10.0 && race.usedSamples >= 3) return race
         }
 
         for (host in listOf("time.google.com", "time.cloudflare.com")) {
             val ntpSamples = mutableListOf<Sample>()
-            repeat(5) {
+            repeat(ntpProbeCount) {
                 ntpSample(host)?.let(ntpSamples::add)
-                Thread.sleep(15L)
+                Thread.sleep(12L)
             }
             if (ntpSamples.isNotEmpty()) {
                 candidates += combineBest(ntpSamples, "NTP 기준시각 · $host")
@@ -80,10 +105,73 @@ object CameraGateClockSync {
     }
 
     /**
-     * Keeps an already-good correction from being replaced by a noisy one-off resync.
-     * Large jumps are accepted only when the new measurement is materially more trustworthy.
+     * Stabilizes one-shot measurements and learns clock drift over time.
+     *
+     * Important: the discipline model never claims better absolute accuracy than the best accepted
+     * sync observation. Its purpose is to stop two phones slowly walking away from each other
+     * between syncs, not to hide network uncertainty.
      */
     fun stabilize(previousOffsetMs: Double, previousUncertaintyMs: Double, fresh: Result): Result {
+        val baseline = stabilizeSnapshot(previousOffsetMs, previousUncertaintyMs, fresh)
+        val nowMonoMs = SystemClock.elapsedRealtimeNanos() / 1_000_000.0
+
+        synchronized(historyLock) {
+            pruneHistory(nowMonoMs)
+
+            if (fresh.uncertaintyMs.isFinite() && fresh.uncertaintyMs <= 80.0) {
+                val accept = if (history.size < 2) {
+                    true
+                } else {
+                    val offsets = history.map { it.offsetMs }.sorted()
+                    val uncertainties = history.map { it.uncertaintyMs }.sorted()
+                    val center = median(offsets)
+                    val typicalUncertainty = median(uncertainties)
+                    val tolerance = max(20.0, max(typicalUncertainty, fresh.uncertaintyMs) * 4.0)
+                    abs(fresh.offsetMs - center) <= tolerance
+                }
+                if (accept) {
+                    history.addLast(Observation(nowMonoMs, fresh.offsetMs, fresh.uncertaintyMs))
+                    while (history.size > HISTORY_MAX) history.removeFirst()
+                }
+            }
+
+            val model = fitDrift(nowMonoMs)
+            if (model == null) {
+                val count = history.size
+                return baseline.copy(
+                    source = if (count >= 2) "${baseline.source} · 자동추적 ${count}회(드리프트 학습중)" else baseline.source,
+                    disciplineSamples = max(1, count)
+                )
+            }
+
+            val bestObservedUncertainty = history.minOf { it.uncertaintyMs }
+            val modelUncertainty = max(bestObservedUncertainty, model.residualMs)
+            val predicted = model.predictedOffsetMs
+            val freshDistance = abs(predicted - baseline.offsetMs)
+            val allowedDistance = max(20.0, baseline.uncertaintyMs * 3.0)
+
+            val disciplinedOffset = if (freshDistance <= allowedDistance) {
+                // Keep the long-term time axis while allowing the newest high-quality sample to
+                // nudge it slightly. This prevents a single asymmetric network request from
+                // moving the official clock by tens or hundreds of milliseconds.
+                predicted * 0.75 + baseline.offsetMs * 0.25
+            } else {
+                baseline.offsetMs
+            }
+
+            val uncertainty = max(1.0, max(modelUncertainty, min(baseline.uncertaintyMs, modelUncertainty * 1.25)))
+            return baseline.copy(
+                offsetMs = disciplinedOffset,
+                uncertaintyMs = uncertainty,
+                source = "${fresh.source} · 자동추적 ${model.samples}회 · 드리프트 ${String.format(Locale.US, "%+.2f", model.driftPpm)} ppm",
+                quality = quality(uncertainty),
+                driftPpm = model.driftPpm,
+                disciplineSamples = model.samples
+            )
+        }
+    }
+
+    private fun stabilizeSnapshot(previousOffsetMs: Double, previousUncertaintyMs: Double, fresh: Result): Result {
         if (!previousUncertaintyMs.isFinite()) return fresh
 
         val jump = abs(fresh.offsetMs - previousOffsetMs)
@@ -97,11 +185,64 @@ object CameraGateClockSync {
             (previousUncertaintyMs > 50.0 && fresh.uncertaintyMs <= 20.0)
         if (clearlyBetter) return fresh
 
+        val keptUncertainty = max(previousUncertaintyMs, fresh.uncertaintyMs)
         return fresh.copy(
             offsetMs = previousOffsetMs,
-            uncertaintyMs = max(previousUncertaintyMs, fresh.uncertaintyMs),
+            uncertaintyMs = keptUncertainty,
             source = "${fresh.source} · 급변 보류",
-            quality = quality(max(previousUncertaintyMs, fresh.uncertaintyMs))
+            quality = quality(keptUncertainty)
+        )
+    }
+
+    private fun pruneHistory(nowMonoMs: Double) {
+        while (history.isNotEmpty() && nowMonoMs - history.first().monoMs > HISTORY_MAX_AGE_MS) {
+            history.removeFirst()
+        }
+    }
+
+    private fun fitDrift(nowMonoMs: Double): DriftModel? {
+        if (history.size < 3) return null
+        val points = history.toList()
+        val first = points.first().monoMs
+        val last = points.last().monoMs
+        val span = last - first
+        if (span < DRIFT_MIN_SPAN_MS) return null
+
+        val ref = last
+        var sw = 0.0
+        var swx = 0.0
+        var swy = 0.0
+        var swxx = 0.0
+        var swxy = 0.0
+        for (p in points) {
+            val x = p.monoMs - ref
+            val sigma = max(2.0, p.uncertaintyMs)
+            val w = 1.0 / (sigma * sigma)
+            sw += w
+            swx += w * x
+            swy += w * p.offsetMs
+            swxx += w * x * x
+            swxy += w * x * p.offsetMs
+        }
+        val denom = sw * swxx - swx * swx
+        if (abs(denom) < 1e-9 || sw <= 0.0) return null
+
+        val slope = ((sw * swxy - swx * swy) / denom)
+            .coerceIn(-DRIFT_PPM_LIMIT / 1_000_000.0, DRIFT_PPM_LIMIT / 1_000_000.0)
+        val interceptAtRef = (swy - slope * swx) / sw
+        val predictedNow = interceptAtRef + slope * (nowMonoMs - ref)
+        val residuals = points.map { p ->
+            val predicted = interceptAtRef + slope * (p.monoMs - ref)
+            abs(p.offsetMs - predicted)
+        }.sorted()
+        val residual = max(1.0, median(residuals) * 1.4826)
+
+        return DriftModel(
+            predictedOffsetMs = predictedNow,
+            driftPpm = slope * 1_000_000.0,
+            residualMs = residual,
+            spanMs = span,
+            samples = points.size
         )
     }
 
@@ -131,9 +272,6 @@ object CameraGateClockSync {
                 return Sample(offset, effectiveDelay, rawRtt)
             }
 
-            // Backward compatibility for old RACE clock endpoints. This sample remains usable,
-            // but its entire RTT is treated as network uncertainty so it loses to a better NTP
-            // source when the public tunnel is slow.
             val keys = listOf(
                 "server_time_ms", "server_ms", "serverTimeMs", "epochMs", "now_ms",
                 "nowMs", "time_ms", "timeMs", "timestamp_ms"
@@ -194,18 +332,15 @@ object CameraGateClockSync {
             .ifEmpty { valid.sortedBy { it.effectiveDelayMs }.take(1) }
 
         val offsets = filtered.map { it.offsetMs }.sorted()
-        val median = median(offsets)
-        val deviations = filtered.map { abs(it.offsetMs - median) }.sorted()
+        val offset = median(offsets)
+        val deviations = filtered.map { abs(it.offsetMs - offset) }.sorted()
         val mad = median(deviations)
         val minDelay = filtered.minOf { it.effectiveDelayMs }
         val minRtt = filtered.minOf { it.rawRttMs }
-
-        // Half the best effective network delay is the physical one-way ambiguity floor.
-        // MAD protects against route jitter/outlier offsets without letting one slow request
-        // inflate every subsequent trigger's displayed uncertainty.
         val uncertainty = max(1.0, max(minDelay / 2.0, mad * 1.4826))
+
         return Result(
-            offsetMs = median,
+            offsetMs = offset,
             uncertaintyMs = uncertainty,
             bestRttMs = minRtt,
             source = source,
@@ -252,11 +387,13 @@ object CameraGateClockSync {
 
     fun debugSummary(result: Result): String = String.format(
         Locale.US,
-        "%s · offset %+.1f ms · ±%.1f ms · RTT %d ms · n=%d",
+        "%s · offset %+.1f ms · ±%.1f ms · RTT %d ms · n=%d · drift %+.2f ppm · discipline=%d",
         result.source,
         result.offsetMs,
         result.uncertaintyMs,
         result.bestRttMs,
-        result.usedSamples
+        result.usedSamples,
+        result.driftPpm,
+        result.disciplineSamples
     )
 }
