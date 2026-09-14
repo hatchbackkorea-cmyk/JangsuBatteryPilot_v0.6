@@ -8,10 +8,12 @@ import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
 import android.opengl.EGLDisplay
+import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.util.Size
 import android.view.Surface
@@ -25,10 +27,10 @@ import java.util.concurrent.TimeUnit
 /**
  * High-speed Camera Gate bridge.
  *
- * Camera2 writes a real high-speed recording stream into a MediaCodec surface. The stream is
- * decoded immediately into a private SurfaceTexture and only a tiny centre strip is read back for
- * motion analysis. The human preview is deliberately refreshed much less often than the timing
- * path so a 60/120 Hz display cannot throttle analysis throughput.
+ * Camera2 writes the real 60/120 FPS timing stream into the primary MediaCodec surface. The stream
+ * is decoded into one GL texture for the narrow timing strip and operator preview. A completely
+ * separate H.264 encoder receives only every Nth decoded frame (target 30 FPS) for HD broadcast.
+ * If that secondary encoder is unavailable, timing continues unchanged.
  */
 class CameraGateGlAnalyzer(
     private val previewTexture: SurfaceTexture,
@@ -57,7 +59,23 @@ class CameraGateGlAnalyzer(
     private val encodedFrames = ArrayDeque<EncodedFrame>()
     private val encodedTimesUs = ArrayDeque<Long>()
 
+    // Secondary broadcast path. It never feeds timing analysis and is allowed to fail independently.
+    private var broadcastEncoder: MediaCodec? = null
+    private var broadcastInputSurface: Surface? = null
+    private var broadcastEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var broadcastThread: HandlerThread? = null
+    private var broadcastHandler: Handler? = null
+    private var broadcastWidth = 0
+    private var broadcastHeight = 0
+    private var broadcastBitrate = 0
+    private var broadcastEvery = 4
+    private val broadcastTimesUs = ArrayDeque<Long>()
+
     @Volatile var streamFps: Double = 0.0
+        private set
+    @Volatile var broadcastFps: Double = 0.0
+        private set
+    @Volatile var broadcastActive: Boolean = false
         private set
 
     private var program = 0
@@ -83,6 +101,8 @@ class CameraGateGlAnalyzer(
             1f, 1f
         )
     )
+    // These lazy field names are intentionally stable. CameraGateRotationSyncProvider updates the
+    // underlying FloatBuffers after display rotation so preview, timing strip and broadcast agree.
     private val previewCoords by lazy { floatBuffer(textureCoords(0f, 1f)) }
     private val stripCoords by lazy { floatBuffer(textureCoords(0.485f, 0.515f)) }
     private val transform = FloatArray(16)
@@ -97,14 +117,19 @@ class CameraGateGlAnalyzer(
         releaseInternal()
         released = false
         previewEvery = if (targetFps >= 100) 6 else 2
+        broadcastEvery = (targetFps / BROADCAST_FPS).coerceAtLeast(1)
         streamFps = 0.0
+        broadcastFps = 0.0
+        broadcastActive = false
         encodedTimesUs.clear()
+        broadcastTimesUs.clear()
         sampleBufferIndex = 0
 
         initEgl()
         makeCurrent(analysisEglSurface)
         initProgram()
         initDecodedTexture(size)
+        startBroadcastEncoderSafely(size)
 
         cameraSurface = startCodecBridge(size, targetFps)
         frameCounter = 0
@@ -219,6 +244,117 @@ class CameraGateGlAnalyzer(
         return input
     }
 
+    /** Start a second AVC encoder. Any failure disables broadcast only. */
+    private fun startBroadcastEncoderSafely(sourceSize: Size) {
+        runCatching {
+            val outSize = when {
+                sourceSize.width >= 1920 && sourceSize.height >= 1080 -> Size(1920, 1080)
+                sourceSize.width >= 1280 && sourceSize.height >= 720 -> Size(1280, 720)
+                else -> sourceSize
+            }
+            broadcastWidth = outSize.width
+            broadcastHeight = outSize.height
+            broadcastBitrate = if (outSize.width >= 1920) 8_000_000 else 5_000_000
+
+            val thread = HandlerThread("CameraGateBroadcastCodec").apply { start() }
+            broadcastThread = thread
+            val callbackHandler = Handler(thread.looper)
+            broadcastHandler = callbackHandler
+
+            val codec = MediaCodec.createEncoderByType(BROADCAST_MIME)
+            val format = MediaFormat.createVideoFormat(BROADCAST_MIME, outSize.width, outSize.height).apply {
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                setInteger(MediaFormat.KEY_BIT_RATE, broadcastBitrate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, BROADCAST_FPS)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                setInteger(MediaFormat.KEY_PRIORITY, 0)
+                setFloat(MediaFormat.KEY_OPERATING_RATE, BROADCAST_FPS.toFloat())
+            }
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val inputSurface = codec.createInputSurface()
+            val eglSurface = EGL14.eglCreateWindowSurface(
+                eglDisplay,
+                eglConfig,
+                inputSurface,
+                intArrayOf(EGL14.EGL_NONE),
+                0
+            )
+            check(eglSurface != EGL14.EGL_NO_SURFACE) { "중계 EGL Surface 생성 실패" }
+
+            codec.setCallback(object : MediaCodec.Callback() {
+                override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = Unit
+
+                override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+                    try {
+                        if (released || info.size <= 0 || info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) return
+                        val buffer = codec.getOutputBuffer(index) ?: return
+                        val copy = buffer.duplicate().apply {
+                            position(info.offset)
+                            limit(info.offset + info.size)
+                        }
+                        val bytes = ByteArray(info.size)
+                        copy.get(bytes)
+                        trackBroadcastFps(info.presentationTimeUs)
+                        CameraGateBroadcastBridge.offer(
+                            CameraGateBroadcastPacket(
+                                kind = CameraGateBroadcastStreamer.KIND_FRAME,
+                                ptsUs = info.presentationTimeUs,
+                                flags = info.flags,
+                                data = bytes,
+                                width = broadcastWidth,
+                                height = broadcastHeight,
+                                mime = BROADCAST_MIME,
+                                fps = BROADCAST_FPS,
+                                bitrate = broadcastBitrate,
+                            )
+                        )
+                    } finally {
+                        runCatching { codec.releaseOutputBuffer(index, false) }
+                    }
+                }
+
+                override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+                    broadcastActive = false
+                }
+
+                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                    emitCodecSpecificData(format, "csd-0", CameraGateBroadcastStreamer.KIND_CSD0)
+                    emitCodecSpecificData(format, "csd-1", CameraGateBroadcastStreamer.KIND_CSD1)
+                }
+            }, callbackHandler)
+            codec.start()
+
+            broadcastEncoder = codec
+            broadcastInputSurface = inputSurface
+            broadcastEglSurface = eglSurface
+            broadcastActive = true
+        }.onFailure {
+            releaseBroadcastEncoder()
+            broadcastActive = false
+        }
+    }
+
+    private fun emitCodecSpecificData(format: MediaFormat, key: String, kind: Int) {
+        val buffer = format.getByteBuffer(key) ?: return
+        val copy = buffer.duplicate()
+        val bytes = ByteArray(copy.remaining())
+        copy.get(bytes)
+        CameraGateBroadcastBridge.offer(
+            CameraGateBroadcastPacket(
+                kind = kind,
+                ptsUs = 0L,
+                flags = MediaCodec.BUFFER_FLAG_CODEC_CONFIG,
+                data = bytes,
+                width = broadcastWidth,
+                height = broadcastHeight,
+                mime = BROADCAST_MIME,
+                fps = BROADCAST_FPS,
+                bitrate = broadcastBitrate,
+            )
+        )
+    }
+
     private fun configureDecoder(encodedFormat: MediaFormat) {
         if (decoder != null || released) return
         val output = decoderOutputSurface ?: return
@@ -250,10 +386,6 @@ class CameraGateGlAnalyzer(
         pumpDecoder()
     }
 
-    /**
-     * Fast path: once the decoder is running, copy the encoder output directly into an available
-     * decoder input buffer. This avoids allocating a large ByteArray for every 120 FPS frame.
-     */
     private fun feedDecoderDirect(source: ByteBuffer, info: MediaCodec.BufferInfo): Boolean {
         val d = decoder ?: return false
         if (decoderInputs.isEmpty()) return false
@@ -332,12 +464,30 @@ class CameraGateGlAnalyzer(
             onFrame(timestamp, samples)
 
             frameCounter++
+
+            // Broadcast draw is intentionally independent from timing. At 120 FPS this runs every
+            // fourth decoded frame; at 60 FPS every second frame. No glReadPixels is used here.
+            if (
+                broadcastActive &&
+                broadcastEglSurface != EGL14.EGL_NO_SURFACE &&
+                timestamp > 0L &&
+                frameCounter % broadcastEvery == 0
+            ) {
+                runCatching {
+                    draw(previewCoords, broadcastEglSurface, broadcastWidth, broadcastHeight)
+                    EGLExt.eglPresentationTimeANDROID(eglDisplay, broadcastEglSurface, timestamp)
+                    if (!EGL14.eglSwapBuffers(eglDisplay, broadcastEglSurface)) {
+                        broadcastActive = false
+                    }
+                }.onFailure { broadcastActive = false }
+            }
+
             if (frameCounter % previewEvery == 0 && previewEglSurface != EGL14.EGL_NO_SURFACE) {
                 draw(previewCoords, previewEglSurface, previewWidth, previewHeight)
                 EGL14.eglSwapBuffers(eglDisplay, previewEglSurface)
             }
         } catch (_: Throwable) {
-            // A dropped decode/GL frame must never kill the timing thread.
+            // A dropped decode/GL/broadcast frame must never kill the timing thread.
         }
     }
 
@@ -349,6 +499,17 @@ class CameraGateGlAnalyzer(
         if (encodedTimesUs.size >= 2) {
             val spanUs = encodedTimesUs.last() - encodedTimesUs.first()
             if (spanUs > 0L) streamFps = (encodedTimesUs.size - 1) * 1_000_000.0 / spanUs
+        }
+    }
+
+    private fun trackBroadcastFps(ptsUs: Long) {
+        if (ptsUs <= 0L) return
+        if (broadcastTimesUs.isNotEmpty() && ptsUs <= broadcastTimesUs.last()) return
+        broadcastTimesUs.addLast(ptsUs)
+        while (broadcastTimesUs.size > 120) broadcastTimesUs.removeFirst()
+        if (broadcastTimesUs.size >= 2) {
+            val spanUs = broadcastTimesUs.last() - broadcastTimesUs.first()
+            if (spanUs > 0L) broadcastFps = (broadcastTimesUs.size - 1) * 1_000_000.0 / spanUs
         }
     }
 
@@ -492,6 +653,24 @@ class CameraGateGlAnalyzer(
             position(0)
         }
 
+    private fun releaseBroadcastEncoder() {
+        broadcastActive = false
+        if (eglDisplay != EGL14.EGL_NO_DISPLAY && broadcastEglSurface != EGL14.EGL_NO_SURFACE) {
+            runCatching { EGL14.eglDestroySurface(eglDisplay, broadcastEglSurface) }
+        }
+        broadcastEglSurface = EGL14.EGL_NO_SURFACE
+        runCatching { broadcastEncoder?.stop() }
+        runCatching { broadcastEncoder?.release() }
+        broadcastEncoder = null
+        runCatching { broadcastInputSurface?.release() }
+        broadcastInputSurface = null
+        broadcastTimesUs.clear()
+        broadcastFps = 0.0
+        broadcastHandler = null
+        runCatching { broadcastThread?.quitSafely() }
+        broadcastThread = null
+    }
+
     private fun releaseInternal() {
         if (released) return
         released = true
@@ -509,6 +688,8 @@ class CameraGateGlAnalyzer(
         cameraSurface = null
         encodedTimesUs.clear()
         streamFps = 0.0
+
+        releaseBroadcastEncoder()
 
         runCatching { decodedTexture?.setOnFrameAvailableListener(null) }
         runCatching { decoderOutputSurface?.release() }
@@ -551,9 +732,10 @@ class CameraGateGlAnalyzer(
     }
 
     companion object {
-        // 4×96 keeps the motion score stable while cutting synchronous glReadPixels work by ~70%.
         private const val ANALYSIS_W = 4
         private const val ANALYSIS_H = 96
         private const val MAX_PENDING_FRAMES = 10
+        private const val BROADCAST_MIME = "video/avc"
+        private const val BROADCAST_FPS = 30
     }
 }
