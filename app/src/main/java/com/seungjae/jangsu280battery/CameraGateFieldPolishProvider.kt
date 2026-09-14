@@ -21,18 +21,19 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import java.util.WeakHashMap
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
  * Field controls for Camera Gate.
  *
- * The visible field controls are fully independent from the legacy Button views. This prevents the
- * older direction/fullscreen providers from recreating a "방향 <" button over the L/R cell and
- * stealing touches. One glass capsule owns four equal clickable cells: L/R, start/stop, sync, log.
+ * The visible field controls are independent from the legacy Button views. One glass capsule owns
+ * five equal clickable cells: L/R, start/stop, sensitivity, sync and log. The old sensitivity
+ * controls inside the LOG drawer are hidden; the field sensitivity cell opens a compact dropdown.
  * Reverse/unknown crossings never keep the green flash and only an approved timing trigger beeps.
  */
 class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
@@ -88,13 +89,15 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         val right = findTagged(dock, TAG_RIGHT) as? LinearLayout ?: return
 
         removeLegacyDirectionUi(decor)
+        hideLegacySensitivity(activity)
+        restoreSensitivity(activity)
 
         left?.let {
             it.removeAllViews()
             it.visibility = View.GONE
         }
 
-        // Keep the fullscreen dock invisible; only the four-cell capsule is visible.
+        // Keep the fullscreen dock invisible; only the five-cell capsule is visible.
         dock.setBackgroundColor(Color.TRANSPARENT)
         dock.gravity = Gravity.BOTTOM or Gravity.END
         dock.setPadding(dp(activity, 6), dp(activity, 4), dp(activity, 8), dp(activity, 8))
@@ -109,13 +112,10 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         right.gravity = Gravity.BOTTOM or Gravity.END
         right.setPadding(0, 0, 0, 0)
         right.visibility = View.VISIBLE
-
-        // Never reuse the legacy Button objects. They can be re-parented by older providers and can
-        // sit above the new bar. Wipe the right panel and create four fresh, explicit touch targets.
         right.removeAllViews()
 
         val row = LinearLayout(activity).apply {
-            tag = TAG_CONTROL_BAR_V3
+            tag = TAG_CONTROL_BAR_V4
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             isClickable = false
@@ -131,9 +131,9 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         }
 
         val menuWidthPx = minOf(
-            (activity.resources.displayMetrics.widthPixels * 0.76f).roundToInt(),
-            dp(activity, 340)
-        ).coerceAtLeast(dp(activity, 248))
+            (activity.resources.displayMetrics.widthPixels * 0.91f).roundToInt(),
+            dp(activity, 390)
+        ).coerceAtLeast(dp(activity, 300))
         right.addView(
             row,
             LinearLayout.LayoutParams(menuWidthPx, dp(activity, 38)).apply {
@@ -141,14 +141,17 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
             }
         )
 
-        val direction = menuCell(activity, TAG_DIRECTION_CELL_V3)
-        val start = menuCell(activity, TAG_START_CELL_V3)
-        val sync = menuCell(activity, TAG_SYNC_CELL_V3)
-        val log = menuCell(activity, TAG_LOG_CELL_V3)
+        val direction = menuCell(activity, TAG_DIRECTION_CELL_V4)
+        val start = menuCell(activity, TAG_START_CELL_V4)
+        val sensitivity = menuCell(activity, TAG_SENSITIVITY_CELL_V4)
+        val sync = menuCell(activity, TAG_SYNC_CELL_V4)
+        val log = menuCell(activity, TAG_LOG_CELL_V4)
 
         row.addView(direction, equalCellLp())
         row.addView(divider(activity))
         row.addView(start, equalCellLp())
+        row.addView(divider(activity))
+        row.addView(sensitivity, equalCellLp())
         row.addView(divider(activity))
         row.addView(sync, equalCellLp())
         row.addView(divider(activity))
@@ -156,6 +159,7 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
 
         refreshDirectionCell(activity, direction)
         refreshStartCell(activity, start)
+        sensitivity.text = "민감도"
         sync.text = "동기화"
         log.text = "로그"
 
@@ -168,6 +172,9 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         start.setOnClickListener {
             invokePrivate(activity, "toggleArm")
             main.post { refreshStartCell(activity, start) }
+        }
+        sensitivity.setOnClickListener {
+            showSensitivityMenu(activity, sensitivity)
         }
         sync.setOnClickListener {
             invokePrivate(activity, "syncClock")
@@ -217,11 +224,57 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         view.text = if (readBooleanField(activity, "armed")) "중지" else "시작"
     }
 
+    private fun hideLegacySensitivity(activity: CameraGateHighSpeedActivity) {
+        val thresholdText = readField(activity, "thresholdText") as? TextView ?: return
+        val row = thresholdText.parent as? View
+        row?.visibility = View.GONE
+    }
+
+    private fun restoreSensitivity(activity: CameraGateHighSpeedActivity) {
+        val p = prefs(activity)
+        val saved = if (p.contains(KEY_THRESHOLD)) {
+            p.getFloat(KEY_THRESHOLD, DEFAULT_THRESHOLD.toFloat()).toDouble()
+        } else {
+            readDoubleField(activity, "threshold", DEFAULT_THRESHOLD).also {
+                p.edit().putFloat(KEY_THRESHOLD, it.toFloat()).apply()
+            }
+        }
+        applySensitivity(activity, saved)
+    }
+
+    private fun showSensitivityMenu(activity: CameraGateHighSpeedActivity, anchor: TextView) {
+        val current = readDoubleField(activity, "threshold", DEFAULT_THRESHOLD)
+        val popup = PopupMenu(activity, anchor)
+        SENSITIVITY_LEVELS.forEachIndexed { index, level ->
+            val selected = abs(current - level.threshold) < 0.1
+            popup.menu.add(
+                0,
+                index + 1,
+                index,
+                (if (selected) "✓ " else "") + "${level.label} · ${level.threshold.toInt()}"
+            )
+        }
+        popup.setOnMenuItemClickListener { item ->
+            val level = SENSITIVITY_LEVELS.getOrNull(item.itemId - 1) ?: return@setOnMenuItemClickListener false
+            applySensitivity(activity, level.threshold)
+            prefs(activity).edit().putFloat(KEY_THRESHOLD, level.threshold.toFloat()).apply()
+            true
+        }
+        popup.show()
+    }
+
+    private fun applySensitivity(activity: CameraGateHighSpeedActivity, threshold: Double) {
+        writeDoubleField(activity, "threshold", threshold.coerceIn(6.0, 50.0))
+        val thresholdText = readField(activity, "thresholdText") as? TextView
+        thresholdText?.text = "감지 임계값 · ${"%.1f".format(java.util.Locale.US, threshold)}"
+    }
+
     private fun removeLegacyDirectionUi(root: View) {
         val victims = mutableListOf<View>()
         collectTagged(root, victims, TAG_DIRECTION_ROW)
         collectTagged(root, victims, TAG_DIRECTION_TOGGLE_V2)
         collectTagged(root, victims, TAG_COMPACT_ROW_V1)
+        collectTagged(root, victims, TAG_CONTROL_BAR_V3)
         victims.distinct().forEach { view ->
             (view.parent as? ViewGroup)?.removeView(view)
         }
@@ -301,6 +354,16 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         target.javaClass.getDeclaredField(name).apply { isAccessible = true }.getBoolean(target)
     }.getOrDefault(false)
 
+    private fun readDoubleField(target: Any, name: String, fallback: Double): Double = runCatching {
+        target.javaClass.getDeclaredField(name).apply { isAccessible = true }.getDouble(target)
+    }.getOrDefault(fallback)
+
+    private fun writeDoubleField(target: Any, name: String, value: Double) {
+        runCatching {
+            target.javaClass.getDeclaredField(name).apply { isAccessible = true }.setDouble(target, value)
+        }
+    }
+
     private fun findTagged(view: View, tagValue: String): View? {
         if (view.tag == tagValue) return view
         if (view is ViewGroup) {
@@ -339,12 +402,24 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
+    private data class SensitivityLevel(val label: String, val threshold: Double)
+
     companion object {
         private const val PREFS = "camera_gate_test"
         private const val KEY_DIRECTION = "gate_direction_v1"
+        private const val KEY_THRESHOLD = "gate_threshold_v1"
+        private const val DEFAULT_THRESHOLD = 18.0
         private const val DIR_RTL = -1
         private const val DIR_LTR = 1
         private const val BEEP_MS = 700
+
+        private val SENSITIVITY_LEVELS = listOf(
+            SensitivityLevel("매우 민감", 10.0),
+            SensitivityLevel("민감", 14.0),
+            SensitivityLevel("보통", 18.0),
+            SensitivityLevel("둔감", 24.0),
+            SensitivityLevel("매우 둔감", 32.0)
+        )
 
         private const val TAG_DOCK = "camera_gate_fullscreen_dock_v1"
         private const val TAG_LEFT = "camera_gate_fullscreen_left_v1"
@@ -354,11 +429,13 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         private const val TAG_DIRECTION_ROW = "camera_gate_direction_row_v1"
         private const val TAG_DIRECTION_TOGGLE_V2 = "camera_gate_direction_toggle_v2"
         private const val TAG_COMPACT_ROW_V1 = "camera_gate_compact_controls_v1"
-
         private const val TAG_CONTROL_BAR_V3 = "camera_gate_control_bar_v3"
-        private const val TAG_DIRECTION_CELL_V3 = "camera_gate_direction_cell_v3"
-        private const val TAG_START_CELL_V3 = "camera_gate_start_cell_v3"
-        private const val TAG_SYNC_CELL_V3 = "camera_gate_sync_cell_v3"
-        private const val TAG_LOG_CELL_V3 = "camera_gate_log_cell_v3"
+
+        private const val TAG_CONTROL_BAR_V4 = "camera_gate_control_bar_v4"
+        private const val TAG_DIRECTION_CELL_V4 = "camera_gate_direction_cell_v4"
+        private const val TAG_START_CELL_V4 = "camera_gate_start_cell_v4"
+        private const val TAG_SENSITIVITY_CELL_V4 = "camera_gate_sensitivity_cell_v4"
+        private const val TAG_SYNC_CELL_V4 = "camera_gate_sync_cell_v4"
+        private const val TAG_LOG_CELL_V4 = "camera_gate_log_cell_v4"
     }
 }
