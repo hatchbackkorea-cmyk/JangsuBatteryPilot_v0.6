@@ -9,6 +9,7 @@ $pidFile = Join-Path $PSScriptRoot '.timegate_precision_clock.pid'
 $outLog = Join-Path $PSScriptRoot 'timegate_precision_clock.out.log'
 $errLog = Join-Path $PSScriptRoot 'timegate_precision_clock.err.log'
 $port = 8766
+$requiredVersion = 4
 
 if (-not (Test-Path $clockScript)) {
     throw "Clock server not found: $clockScript"
@@ -30,15 +31,28 @@ if (-not $tailscaleExe) {
     throw 'Tailscale CLI was not found. Tailscale must be installed on the active RCC server PC.'
 }
 
-# Reuse a healthy existing clock process when possible.
+function Stop-OldClockProcess {
+    if (Test-Path $pidFile) {
+        $pidText = (Get-Content $pidFile -Raw).Trim()
+        if ($pidText -match '^\d+$') {
+            Stop-Process -Id ([int]$pidText) -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 250
+        }
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Reuse only a fully working current-version clock process.
 $healthy = $false
 try {
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 1
-    $healthy = ($health.ok -eq $true)
+    $clock = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/race/clock?selftest=1" -TimeoutSec 1
+    $healthy = ($health.ok -eq $true -and [int]$health.version -ge $requiredVersion -and [int64]$clock.server_time_ms -gt 1000000000000)
 } catch {}
 
 if (-not $healthy) {
-    Remove-Item $pidFile,$outLog,$errLog -Force -ErrorAction SilentlyContinue
+    Stop-OldClockProcess
+    Remove-Item $outLog,$errLog -Force -ErrorAction SilentlyContinue
 
     $p = Start-Process -FilePath $psExe `
         -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $clockScript + '"'),'-Port',"$port") `
@@ -50,15 +64,20 @@ if (-not $healthy) {
     Set-Content -Path $pidFile -Value $p.Id -Encoding ascii
 
     $ready = $false
-    for ($i = 0; $i -lt 40; $i++) {
+    $clockCheck = $null
+    for ($i = 0; $i -lt 50; $i++) {
         Start-Sleep -Milliseconds 100
         try {
             $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 1
-            if ($health.ok -eq $true) { $ready = $true; break }
+            $clockCheck = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/race/clock?selftest=1" -TimeoutSec 1
+            if ($health.ok -eq $true -and [int]$health.version -ge $requiredVersion -and [int64]$clockCheck.server_time_ms -gt 1000000000000) {
+                $ready = $true
+                break
+            }
         } catch {}
     }
     if (-not $ready) {
-        throw "Clock service failed to start. Check $outLog and $errLog"
+        throw "Clock service failed its real /api/race/clock self-test. Check $outLog and $errLog"
     }
 }
 
@@ -78,8 +97,13 @@ if (-not $serveOk) {
     throw 'Tailscale Serve clock route failed. Existing RCC routes were not reset.'
 }
 
+$clockCheck = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/race/clock?finalcheck=1" -TimeoutSec 2
+
 Write-Host ''
 Write-Host 'TimeGate precision clock is READY.' -ForegroundColor Green
+Write-Host "Clock version: $($clockCheck.version)"
+Write-Host "Server time ms: $($clockCheck.server_time_ms)"
+Write-Host "Processing ms: $($clockCheck.processing_ms)"
 Write-Host "Local:     http://127.0.0.1:$port/api/race/clock"
 Write-Host 'Tailnet:   https://<active-rcc-node>.ts.net/api/race/clock'
 Write-Host ''
