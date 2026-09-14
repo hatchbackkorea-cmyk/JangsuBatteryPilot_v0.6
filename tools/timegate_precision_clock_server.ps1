@@ -8,8 +8,10 @@ $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopba
 $listener.Start()
 Write-Host "[TimeGate Clock] listening on http://127.0.0.1:$Port"
 
+# Compatible with Windows PowerShell 5.1 / older .NET Framework builds.
+$EpochUtc = [DateTime]::SpecifyKind([DateTime]'1970-01-01 00:00:00', [DateTimeKind]::Utc)
 function Now-EpochMs {
-    return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    return [int64][math]::Floor(([DateTime]::UtcNow - $script:EpochUtc).TotalMilliseconds)
 }
 
 function Qpc-Now {
@@ -49,7 +51,7 @@ try {
 
             $status = '200 OK'
             if ($method -eq 'GET' -and $path -eq '/health') {
-                $body = '{"ok":true,"service":"timegate-precision-clock","version":3}'
+                $body = '{"ok":true,"service":"timegate-precision-clock","version":4}'
             }
             elseif ($method -eq 'GET' -and ($path -eq '/' -or $path -eq '/clock' -or $path -eq '/api/race/clock')) {
                 $sendQpc = Qpc-Now
@@ -57,11 +59,11 @@ try {
                 $processingMs = Qpc-ToMs ($sendQpc - $receiveQpc)
                 $payload = [ordered]@{
                     ok = $true
-                    version = 3
+                    version = 4
                     source = 'timegate-race-server-powershell'
-                    server_time_ms = $sendWallMs
-                    server_receive_ms = $receiveWallMs
-                    server_send_ms = $sendWallMs
+                    server_time_ms = [int64]$sendWallMs
+                    server_receive_ms = [int64]$receiveWallMs
+                    server_send_ms = [int64]$sendWallMs
                     server_receive_qpc = [int64]$receiveQpc
                     server_send_qpc = [int64]$sendQpc
                     qpc_frequency = [int64][System.Diagnostics.Stopwatch]::Frequency
@@ -83,7 +85,7 @@ try {
                 'Expires: 0',
                 'Connection: close',
                 "Content-Length: $($bodyBytes.Length)",
-                'X-TimeGate-Clock: v3',
+                'X-TimeGate-Clock: v4',
                 '',
                 ''
             ) -join "`r`n"
