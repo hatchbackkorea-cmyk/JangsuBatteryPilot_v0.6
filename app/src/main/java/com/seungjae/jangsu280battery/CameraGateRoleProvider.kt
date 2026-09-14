@@ -99,6 +99,7 @@ object CameraGateRoleInstaller {
             setPadding(dp(activity, 10), 0, dp(activity, 10), dp(activity, 6))
         }
         val status = TextView(activity).apply {
+            text = "게이트 역할 · 준비 중"
             textSize = 14f
             setTextColor(Color.WHITE)
         }
