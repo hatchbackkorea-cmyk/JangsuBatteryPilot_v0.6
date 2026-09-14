@@ -1,10 +1,10 @@
-# TimeGate precision clock - Windows one-click launcher
-# Starts a localhost-only clock service and mounts ONLY /api/race/clock through Tailscale Serve.
+# TimeGate precision clock - Windows one-click launcher (Node.js NOT required)
+# Starts a localhost-only PowerShell clock service and mounts ONLY /api/race/clock through Tailscale Serve.
 # Existing root RCC Serve routes are not reset.
 
 $ErrorActionPreference = 'Stop'
 
-$clockScript = Join-Path $PSScriptRoot 'timegate_precision_clock_server.js'
+$clockScript = Join-Path $PSScriptRoot 'timegate_precision_clock_server.ps1'
 $pidFile = Join-Path $PSScriptRoot '.timegate_precision_clock.pid'
 $outLog = Join-Path $PSScriptRoot 'timegate_precision_clock.out.log'
 $errLog = Join-Path $PSScriptRoot 'timegate_precision_clock.err.log'
@@ -14,14 +14,20 @@ if (-not (Test-Path $clockScript)) {
     throw "Clock server not found: $clockScript"
 }
 
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) {
-    throw 'Node.js is required. node.exe was not found in PATH.'
-}
+$psExe = (Get-Command powershell.exe -ErrorAction Stop).Source
 
-$tailscale = Get-Command tailscale -ErrorAction SilentlyContinue
-if (-not $tailscale) {
-    throw 'Tailscale CLI was not found in PATH.'
+$tailscaleCmd = Get-Command tailscale.exe -ErrorAction SilentlyContinue
+$tailscaleExe = if ($tailscaleCmd) { $tailscaleCmd.Source } else { $null }
+if (-not $tailscaleExe) {
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Tailscale\tailscale.exe')
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    $tailscaleExe = $candidates | Select-Object -First 1
+}
+if (-not $tailscaleExe) {
+    throw 'Tailscale CLI was not found. Tailscale must be installed on the active RCC server PC.'
 }
 
 # Reuse a healthy existing clock process when possible.
@@ -32,12 +38,10 @@ try {
 } catch {}
 
 if (-not $healthy) {
-    if (Test-Path $pidFile) { Remove-Item $pidFile -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $outLog) { Remove-Item $outLog -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $errLog) { Remove-Item $errLog -Force -ErrorAction SilentlyContinue }
+    Remove-Item $pidFile,$outLog,$errLog -Force -ErrorAction SilentlyContinue
 
-    $p = Start-Process -FilePath $node.Source `
-        -ArgumentList @($clockScript) `
+    $p = Start-Process -FilePath $psExe `
+        -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $clockScript + '"'),'-Port',"$port") `
         -WorkingDirectory $PSScriptRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput $outLog `
@@ -46,7 +50,7 @@ if (-not $healthy) {
     Set-Content -Path $pidFile -Value $p.Id -Encoding ascii
 
     $ready = $false
-    for ($i = 0; $i -lt 30; $i++) {
+    for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 100
         try {
             $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 1
@@ -58,18 +62,26 @@ if (-not $healthy) {
     }
 }
 
-# Add only the clock mount. Do NOT run `tailscale serve reset` here: RCC may already own `/`.
-# The clock server accepts both '/' and '/api/race/clock', so this works whether Serve strips
-# the mounted prefix or forwards it unchanged.
-& $tailscale.Source serve --bg --yes --https=443 --set-path=/api/race/clock "http://127.0.0.1:$port"
-if ($LASTEXITCODE -ne 0) {
-    throw "Tailscale Serve clock route failed (exit $LASTEXITCODE)."
+# Add only the clock mount. Never reset the existing RCC root route.
+$url = "http://127.0.0.1:$port"
+$serveOk = $false
+$variants = @(
+    @('serve','--bg','--yes','--https=443','--set-path=/api/race/clock',$url),
+    @('serve','--bg','--yes','--set-path=/api/race/clock',$url),
+    @('serve','--bg','--set-path=/api/race/clock',$url)
+)
+foreach ($args in $variants) {
+    & $tailscaleExe @args
+    if ($LASTEXITCODE -eq 0) { $serveOk = $true; break }
+}
+if (-not $serveOk) {
+    throw 'Tailscale Serve clock route failed. Existing RCC routes were not reset.'
 }
 
 Write-Host ''
 Write-Host 'TimeGate precision clock is READY.' -ForegroundColor Green
 Write-Host "Local:     http://127.0.0.1:$port/api/race/clock"
-Write-Host 'Tailnet:   https://<this-node>.ts.net/api/race/clock'
+Write-Host 'Tailnet:   https://<active-rcc-node>.ts.net/api/race/clock'
 Write-Host ''
 Write-Host 'Current Tailscale Serve configuration:'
-& $tailscale.Source serve status
+& $tailscaleExe serve status
