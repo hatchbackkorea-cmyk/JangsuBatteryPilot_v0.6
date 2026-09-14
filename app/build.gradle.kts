@@ -84,4 +84,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.kakao.maps.open:android:2.15.1")
+    implementation("com.google.zxing:core:3.5.3")
 }
