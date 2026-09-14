@@ -17,18 +17,19 @@ import android.widget.TextView
 import java.util.Calendar
 import java.util.Locale
 import java.util.WeakHashMap
-import kotlin.math.abs
 
 /**
  * Registers the Camera Gate RACE-home injector and keeps Camera Gate clocks disciplined.
  *
- * v9 keeps the 15-second clock discipline from v8 and automatically relays every Camera Gate
- * trigger to the RACE server. The server can then pair two different phones that saw the same
- * crossing and return the measured phone-to-phone delta in milliseconds.
+ * v10 keeps the v9 trigger relay and adds a runtime high-speed health watchdog. Some phones
+ * advertise a valid Camera2 120 FPS constrained session but their MediaCodec/GL bridge actually
+ * produces almost no frames. In that case the app now detects the stall after startup and invokes
+ * the existing regular-session fallback automatically instead of leaving a black preview.
  */
 class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
     private val autoSyncJobs = WeakHashMap<Activity, Runnable>()
+    private val cameraHealthJobs = WeakHashMap<Activity, Runnable>()
     private val triggerWatchers = WeakHashMap<Activity, TextWatcher>()
     private val lastReportedTrigger = WeakHashMap<Activity, Int>()
 
@@ -45,19 +46,22 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         }
         if (activity is CameraGateHighSpeedActivity) {
             activity.window.decorView.post {
-                markV9(activity.window.decorView)
+                markV10(activity.window.decorView)
                 attachTriggerRelay(activity)
             }
             startClockDiscipline(activity)
+            startCameraHealthWatchdog(activity)
         }
     }
 
     override fun onActivityPaused(activity: Activity) {
         stopClockDiscipline(activity)
+        stopCameraHealthWatchdog(activity)
     }
 
     override fun onActivityDestroyed(activity: Activity) {
         stopClockDiscipline(activity)
+        stopCameraHealthWatchdog(activity)
         triggerWatchers.remove(activity)
         lastReportedTrigger.remove(activity)
         if (activity is RaceActivity) CameraGateRaceUiInstaller.uninstall(activity)
@@ -90,6 +94,80 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
             method.invoke(activity)
         }
     }
+
+    /**
+     * Camera2 support tables are not enough to prove that the encoder/decoder bridge can sustain
+     * the advertised 120 FPS mode. The failing phone we observed opened a 1920x1080 120-120 session
+     * but analysis stayed around 0.1 FPS and the preview remained black. Wait long enough for a
+     * healthy codec to warm up, then fall back to the existing regular 60 FPS path if throughput is
+     * still effectively stalled.
+     */
+    private fun startCameraHealthWatchdog(activity: CameraGateHighSpeedActivity) {
+        stopCameraHealthWatchdog(activity)
+        val job = object : Runnable {
+            var checks = 0
+            override fun run() {
+                if (activity.isFinishing || activity.isDestroyed) {
+                    cameraHealthJobs.remove(activity)
+                    return
+                }
+                checks += 1
+                val highSpeed = readBooleanField(activity, "highSpeedActive")
+                val fallbackStarted = readBooleanField(activity, "highSpeedFallbackStarted")
+                val analysisFps = readDoubleField(activity, "analysisFps")
+                val metadataFps = readDoubleField(activity, "metadataFps")
+
+                if (highSpeed && !fallbackStarted && checks >= HEALTH_WARMUP_CHECKS) {
+                    val stalled = analysisFps < MIN_HEALTHY_ANALYSIS_FPS || metadataFps < MIN_HEALTHY_METADATA_FPS
+                    if (stalled && forceRegularFallback(activity, analysisFps, metadataFps)) {
+                        cameraHealthJobs.remove(activity)
+                        return
+                    }
+                }
+                main.postDelayed(this, HEALTH_CHECK_INTERVAL_MS)
+            }
+        }
+        cameraHealthJobs[activity] = job
+        main.postDelayed(job, HEALTH_CHECK_INTERVAL_MS)
+    }
+
+    private fun stopCameraHealthWatchdog(activity: Activity) {
+        cameraHealthJobs.remove(activity)?.let { main.removeCallbacks(it) }
+    }
+
+    private fun forceRegularFallback(
+        activity: CameraGateHighSpeedActivity,
+        analysisFps: Double,
+        metadataFps: Double
+    ): Boolean = runCatching {
+        val cameraField = CameraGateHighSpeedActivity::class.java.getDeclaredField("cameraDevice").apply {
+            isAccessible = true
+        }
+        val camera = cameraField.get(activity) as? android.hardware.camera2.CameraDevice ?: return@runCatching false
+        val method = CameraGateHighSpeedActivity::class.java.getDeclaredMethod(
+            "fallbackToRegular",
+            android.hardware.camera2.CameraDevice::class.java,
+            String::class.java
+        ).apply { isAccessible = true }
+        val reason = String.format(
+            Locale.US,
+            "120 FPS 호환 실패 · 실제 메타 %.1f / 분석 %.1f FPS → 60 FPS 안전모드",
+            metadataFps,
+            analysisFps
+        )
+        method.invoke(activity, camera, reason)
+        true
+    }.getOrDefault(false)
+
+    private fun readBooleanField(activity: CameraGateHighSpeedActivity, name: String): Boolean = runCatching {
+        CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+            .getBoolean(activity)
+    }.getOrDefault(false)
+
+    private fun readDoubleField(activity: CameraGateHighSpeedActivity, name: String): Double = runCatching {
+        CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+            .getDouble(activity)
+    }.getOrDefault(0.0)
 
     private fun attachTriggerRelay(activity: CameraGateHighSpeedActivity) {
         if (triggerWatchers.containsKey(activity)) return
@@ -206,15 +284,15 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         return null
     }
 
-    private fun markV9(view: View) {
+    private fun markV10(view: View) {
         if (view is TextView) {
             val text = view.text?.toString().orEmpty()
             if (text.contains("CAMERA GATE BETA v")) {
-                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v9")
+                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v10")
             }
         }
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) markV9(view.getChildAt(i))
+            for (i in 0 until view.childCount) markV10(view.getChildAt(i))
         }
     }
 
@@ -231,5 +309,9 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
 
     companion object {
         private const val AUTO_SYNC_INTERVAL_MS = 15_000L
+        private const val HEALTH_CHECK_INTERVAL_MS = 1_000L
+        private const val HEALTH_WARMUP_CHECKS = 4
+        private const val MIN_HEALTHY_ANALYSIS_FPS = 30.0
+        private const val MIN_HEALTHY_METADATA_FPS = 15.0
     }
 }
