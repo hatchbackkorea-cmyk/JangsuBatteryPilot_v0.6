@@ -9,22 +9,28 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import java.util.Calendar
+import java.util.Locale
 import java.util.WeakHashMap
+import kotlin.math.abs
 
 /**
  * Registers the Camera Gate RACE-home injector and keeps Camera Gate clocks disciplined.
  *
- * v8 refreshes the clock every 15 seconds while the Camera Gate screen is visible. The shorter
- * interval gives the drift model more observations before and during a race, while syncClock's own
- * guard prevents overlapping network probes. CameraGateFrameClock v8 handles 60/120 FPS crossing
- * time with a midpoint estimate between consecutive trusted frames.
+ * v9 keeps the 15-second clock discipline from v8 and automatically relays every Camera Gate
+ * trigger to the RACE server. The server can then pair two different phones that saw the same
+ * crossing and return the measured phone-to-phone delta in milliseconds.
  */
 class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
     private val autoSyncJobs = WeakHashMap<Activity, Runnable>()
+    private val triggerWatchers = WeakHashMap<Activity, TextWatcher>()
+    private val lastReportedTrigger = WeakHashMap<Activity, Int>()
 
     override fun onCreate(): Boolean {
         val app = context?.applicationContext as? Application ?: return true
@@ -38,7 +44,10 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
             return
         }
         if (activity is CameraGateHighSpeedActivity) {
-            activity.window.decorView.post { markV8(activity.window.decorView) }
+            activity.window.decorView.post {
+                markV9(activity.window.decorView)
+                attachTriggerRelay(activity)
+            }
             startClockDiscipline(activity)
         }
     }
@@ -49,6 +58,8 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
 
     override fun onActivityDestroyed(activity: Activity) {
         stopClockDiscipline(activity)
+        triggerWatchers.remove(activity)
+        lastReportedTrigger.remove(activity)
         if (activity is RaceActivity) CameraGateRaceUiInstaller.uninstall(activity)
     }
 
@@ -65,7 +76,6 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
             }
         }
         autoSyncJobs[activity] = job
-        // onCreate already performs the first sync; automatic discipline starts 15 s later.
         main.postDelayed(job, AUTO_SYNC_INTERVAL_MS)
     }
 
@@ -81,17 +91,130 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         }
     }
 
-    private fun markV8(view: View) {
+    private fun attachTriggerRelay(activity: CameraGateHighSpeedActivity) {
+        if (triggerWatchers.containsKey(activity)) return
+        val triggerView = findTextView(activity.window.decorView) {
+            it.text?.toString()?.startsWith("TRIGGER") == true
+        } ?: return
+
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                val text = s?.toString().orEmpty()
+                val snapshot = parseTrigger(activity, text) ?: return
+                if (lastReportedTrigger[activity] == snapshot.triggerIndex) return
+                lastReportedTrigger[activity] = snapshot.triggerIndex
+
+                val base = runCatching { RaceServerClient(activity).baseUrl() }.getOrDefault("")
+                CameraGateTriggerReporter.report(activity, base, snapshot) { result ->
+                    activity.runOnUiThread {
+                        if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+                        val current = triggerView.text?.toString().orEmpty()
+                        if (!current.startsWith("TRIGGER #${snapshot.triggerIndex}")) return@runOnUiThread
+                        val clean = current.lineSequence()
+                            .filterNot { it.startsWith("서버 전송") || it.startsWith("서버 비교") }
+                            .joinToString("\n")
+                        val suffix = when {
+                            result == null -> "서버 전송 실패 · 서버 버전/연결 확인"
+                            result.paired -> String.format(
+                                Locale.US,
+                                "서버 비교 · %s · 차이 %+.1f ms · 절대 %.1f ms · 누적 %d쌍(10ms 이내 %d)",
+                                result.peerLabel,
+                                result.deltaMs,
+                                result.absDeltaMs,
+                                result.pairCount,
+                                result.within10msCount
+                            )
+                            else -> "서버 전송 완료 · 다른 폰 트리거 대기 · 누적 ${result.pairCount}쌍"
+                        }
+                        triggerView.text = "$clean\n$suffix"
+                    }
+                }
+            }
+        }
+        triggerView.addTextChangedListener(watcher)
+        triggerWatchers[activity] = watcher
+    }
+
+    private fun parseTrigger(activity: CameraGateHighSpeedActivity, text: String): CameraGateTriggerReporter.Snapshot? {
+        val triggerIndex = Regex("TRIGGER #(\\d+)").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return null
+        val localClock = Regex("폰\\s+(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})").find(text)?.groupValues?.getOrNull(1) ?: return null
+        val correctedClock = Regex("기준보정\\s+(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})").find(text)?.groupValues?.getOrNull(1) ?: return null
+        val offset = Regex("오프셋\\s+([+-]?\\d+(?:\\.\\d+)?) ms").find(text)?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+        val uncertainty = Regex("동기화추정\\s+±([0-9.]+) ms").find(text)?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: Double.NaN
+        val quality = Regex("품질\\s+([^\\s·]+)").find(text)?.groupValues?.getOrNull(1).orEmpty()
+        val now = System.currentTimeMillis()
+        val localMs = clockToEpoch(localClock, now) ?: return null
+        val correctedMs = clockToEpoch(correctedClock, localMs + offset.toLong()) ?: return null
+
+        val fpsText = findTextView(activity.window.decorView) {
+            it.text?.toString()?.contains("녹화스트림") == true && it.text?.toString()?.contains("직접분석") == true
+        }?.text?.toString().orEmpty()
+        val fpsMatch = Regex("메타데이터\\s+([0-9.]+) FPS\\s+·\\s+녹화스트림\\s+([0-9.]+) FPS\\s+·\\s+직접분석\\s+([0-9.]+) FPS")
+            .find(fpsText)
+        val metadataFps = fpsMatch?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+        val streamFps = fpsMatch?.groupValues?.getOrNull(2)?.toDoubleOrNull() ?: 0.0
+        val analysisFps = fpsMatch?.groupValues?.getOrNull(3)?.toDoubleOrNull() ?: 0.0
+        val frameSource = text.lineSequence()
+            .drop(4)
+            .firstOrNull { it.isNotBlank() && !it.startsWith("서버 ") }
+            .orEmpty()
+
+        return CameraGateTriggerReporter.Snapshot(
+            triggerIndex = triggerIndex,
+            localMs = localMs,
+            correctedMs = correctedMs,
+            clockOffsetMs = offset,
+            clockUncertaintyMs = uncertainty,
+            clockQuality = quality,
+            metadataFps = metadataFps,
+            streamFps = streamFps,
+            analysisFps = analysisFps,
+            frameSource = frameSource
+        )
+    }
+
+    private fun clockToEpoch(value: String, nearMs: Long): Long? {
+        val m = Regex("(\\d{2}):(\\d{2}):(\\d{2})\\.(\\d{3})").matchEntire(value) ?: return null
+        val h = m.groupValues[1].toIntOrNull() ?: return null
+        val min = m.groupValues[2].toIntOrNull() ?: return null
+        val sec = m.groupValues[3].toIntOrNull() ?: return null
+        val ms = m.groupValues[4].toIntOrNull() ?: return null
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = nearMs
+            set(Calendar.HOUR_OF_DAY, h)
+            set(Calendar.MINUTE, min)
+            set(Calendar.SECOND, sec)
+            set(Calendar.MILLISECOND, ms)
+        }
+        var candidate = cal.timeInMillis
+        val halfDay = 12L * 60L * 60L * 1000L
+        val day = 24L * 60L * 60L * 1000L
+        if (candidate - nearMs > halfDay) candidate -= day
+        if (nearMs - candidate > halfDay) candidate += day
+        return candidate
+    }
+
+    private fun findTextView(view: View, predicate: (TextView) -> Boolean): TextView? {
+        if (view is TextView && predicate(view)) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findTextView(view.getChildAt(i), predicate)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun markV9(view: View) {
         if (view is TextView) {
             val text = view.text?.toString().orEmpty()
-            if (text.contains("CAMERA GATE BETA v6")) {
-                view.text = text.replace("CAMERA GATE BETA v6", "CAMERA GATE BETA v8")
-            } else if (text.contains("CAMERA GATE BETA v7")) {
-                view.text = text.replace("CAMERA GATE BETA v7", "CAMERA GATE BETA v8")
+            if (text.contains("CAMERA GATE BETA v")) {
+                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v9")
             }
         }
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) markV8(view.getChildAt(i))
+            for (i in 0 until view.childCount) markV9(view.getChildAt(i))
         }
     }
 
