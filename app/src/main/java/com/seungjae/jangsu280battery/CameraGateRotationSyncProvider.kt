@@ -16,16 +16,17 @@ import java.util.WeakHashMap
 /**
  * Keeps the GL camera preview and the timing strip aligned with the current display rotation.
  *
- * CameraGateGlAnalyzer originally builds its preview/analysis texture coordinates from the camera
- * sensor orientation only. That is correct in portrait, but after the timing activity rotates to
- * landscape the gate overlay follows the display while the GL image keeps the old orientation.
+ * The operator preview is intentionally independent from the timing analysis area: the camera can
+ * fill the field screen while timing still watches only a very narrow micro-strip around the red
+ * gate line. This keeps background motion out of the score and restores the sharp response of the
+ * earlier compact preview without shrinking the visible camera image.
  *
  * This provider updates both mutable FloatBuffers used by the analyzer on the camera thread:
  *   - previewCoords: what the operator sees
- *   - stripCoords: the centre timing strip used for motion timing
+ *   - stripCoords: the narrow centre timing strip used for motion timing
  *
- * Updating both is important: rotating only the visible TextureView would make the red gate line
- * disagree with the strip that actually generates the trigger.
+ * Updating both is important after rotation: the red gate line, visible preview and the internal
+ * timing strip must all describe the same physical crossing line.
  */
 class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -92,10 +93,14 @@ class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLi
             if (readField(activity, "glAnalyzer") !== analyzer) return@post
 
             updateLazyFloatBuffer(analyzer, "previewCoords\$delegate", textureCoords(relative, 0f, 1f))
-            updateLazyFloatBuffer(analyzer, "stripCoords\$delegate", textureCoords(relative, 0.485f, 0.515f))
+            updateLazyFloatBuffer(
+                analyzer,
+                "stripCoords\$delegate",
+                textureCoords(relative, TIMING_STRIP_LEFT, TIMING_STRIP_RIGHT)
+            )
 
-            // A 90/180-degree coordinate change produces a huge one-frame image difference.
-            // Forget the pre-rotation sample so rotating the phone can never look like a racer.
+            // A rotation or a strip-coordinate change produces a large one-frame image difference.
+            // Forget the previous sample so changing phone orientation can never look like a racer.
             writeField(activity, "previousSamples", null)
         }
     }
@@ -164,5 +169,9 @@ class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLi
 
     companion object {
         private const val POLL_MS = 120L
+
+        // Fullscreen preview stays untouched. Only the timing engine sees this 1.2%-wide micro-strip.
+        private const val TIMING_STRIP_LEFT = 0.494f
+        private const val TIMING_STRIP_RIGHT = 0.506f
     }
 }
