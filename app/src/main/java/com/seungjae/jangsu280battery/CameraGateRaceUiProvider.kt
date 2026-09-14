@@ -22,13 +22,12 @@ import java.util.Locale
 import java.util.WeakHashMap
 
 /**
- * Registers the Camera Gate RACE-home injector and keeps Camera Gate clocks disciplined.
+ * Camera Gate RACE integration.
  *
- * v11 keeps the v10 high-speed health watchdog, but changes the 120 -> 60 FPS fallback into a
- * full CameraDevice restart. A few Samsung devices advertise 120 FPS correctly yet put Camera2
- * into ERROR_CAMERA_DEVICE(4) when the same device is reused for a regular session after the
- * high-speed codec path stalls. Closing the device, waiting for HAL release, reopening the same
- * camera and starting only the regular session avoids that broken transition.
+ * v12 keeps automatic trigger relay, 15-second clock discipline and the high-speed health watchdog.
+ * The safe fallback is now FPS-agnostic because some phones reopen at 30 FPS rather than 60 FPS.
+ * A full camera restart also resets CameraGateFrameClock before the regular session starts so stale
+ * 120 FPS PTS/calibration samples cannot leak into the 30/60 FPS timing uncertainty estimate.
  */
 class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -50,7 +49,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         }
         if (activity is CameraGateHighSpeedActivity) {
             activity.window.decorView.post {
-                markV11(activity.window.decorView)
+                markV12(activity.window.decorView)
                 attachTriggerRelay(activity)
             }
             startClockDiscipline(activity)
@@ -93,17 +92,12 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
 
     private fun invokeSyncClock(activity: CameraGateHighSpeedActivity) {
         runCatching {
-            val method = CameraGateHighSpeedActivity::class.java.getDeclaredMethod("syncClock")
-            method.isAccessible = true
-            method.invoke(activity)
+            CameraGateHighSpeedActivity::class.java.getDeclaredMethod("syncClock").apply {
+                isAccessible = true
+            }.invoke(activity)
         }
     }
 
-    /**
-     * Camera2 support tables are not enough to prove that the encoder/decoder bridge can sustain
-     * the advertised 120 FPS mode. Wait for codec warm-up, then switch to a fresh regular camera
-     * device when the high-speed analysis path is effectively stalled.
-     */
     private fun startCameraHealthWatchdog(activity: CameraGateHighSpeedActivity) {
         stopCameraHealthWatchdog(activity)
         val job = object : Runnable {
@@ -120,7 +114,8 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
                 val metadataFps = readDoubleField(activity, "metadataFps")
 
                 if (highSpeed && !fallbackStarted && checks >= HEALTH_WARMUP_CHECKS) {
-                    val stalled = analysisFps < MIN_HEALTHY_ANALYSIS_FPS || metadataFps < MIN_HEALTHY_METADATA_FPS
+                    val stalled = analysisFps < MIN_HEALTHY_ANALYSIS_FPS ||
+                        metadataFps < MIN_HEALTHY_METADATA_FPS
                     if (stalled && forceRegularFallback(activity, analysisFps, metadataFps)) {
                         cameraHealthJobs.remove(activity)
                         return
@@ -138,10 +133,9 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
     }
 
     /**
-     * Do not call CameraGateHighSpeedActivity.fallbackToRegular() here. That method reuses the
-     * current CameraDevice and is exactly what produced camera error 4 on the affected phone.
-     * Instead, tear the camera down completely on its own handler, wait for the HAL to release it,
-     * reopen the same camera and invoke createRegularSession() directly.
+     * A stalled constrained-high-speed session must be torn down completely on affected devices.
+     * Reusing that CameraDevice caused ERROR_CAMERA_DEVICE(4), so reopen a fresh device and start
+     * only the regular session. The actual regular FPS can be 60 or 30 depending on the phone.
      */
     private fun forceRegularFallback(
         activity: CameraGateHighSpeedActivity,
@@ -150,7 +144,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
     ): Boolean = runCatching {
         val reason = String.format(
             Locale.US,
-            "120 FPS 호환 실패 · 실제 메타 %.1f / 분석 %.1f FPS → 60 FPS 안전모드",
+            "120 FPS 호환 실패 · 실제 메타 %.1f / 분석 %.1f FPS → 일반 FPS 안전모드",
             metadataFps,
             analysisFps
         )
@@ -163,14 +157,13 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         handler.post {
             if (activity.isFinishing || activity.isDestroyed) return@post
             runCatching {
-                val close = CameraGateHighSpeedActivity::class.java.getDeclaredMethod("closeCamera").apply {
+                CameraGateHighSpeedActivity::class.java.getDeclaredMethod("closeCamera").apply {
                     isAccessible = true
-                }
-                close.invoke(activity)
+                }.invoke(activity)
             }
             writeBooleanField(activity, "highSpeedFallbackStarted", true)
             writeStringField(activity, "fallbackReason", reason)
-            setStateText(activity, "$reason\n카메라 해제 완료 · 60 FPS로 재오픈 대기 중…")
+            setStateText(activity, "$reason\n카메라 해제 완료 · 일반 FPS로 재오픈 대기 중…")
             handler.postDelayed({
                 openRegularOnly(activity, handler, reason, attempt = 0)
             }, CAMERA_REOPEN_DELAY_MS)
@@ -187,13 +180,14 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         if (activity.isFinishing || activity.isDestroyed) return
         val cameraId = readStringField(activity, "cameraId")
         if (cameraId.isBlank()) {
-            setStateText(activity, "60 FPS 안전모드 재오픈 실패 · 카메라 ID 없음")
+            setStateText(activity, "일반 FPS 안전모드 재오픈 실패 · 카메라 ID 없음")
             return
         }
+
         val manager = activity.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         setStateText(
             activity,
-            if (attempt == 0) "$reason\n60 FPS 일반 카메라를 새로 여는 중…"
+            if (attempt == 0) "$reason\n일반 카메라를 새로 여는 중…"
             else "$reason\n카메라 재오픈 1회 재시도 중…"
         )
 
@@ -204,53 +198,67 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
                         camera.close()
                         return
                     }
+
                     writeObjectField(activity, "cameraDevice", camera)
                     writeBooleanField(activity, "highSpeedFallbackStarted", true)
                     writeStringField(activity, "fallbackReason", reason)
-                    setStateText(activity, "$reason\n카메라 재오픈 성공 · 60 FPS 일반세션 구성 중…")
+
+                    // The new regular stream has a different frame period. Forget every PTS sample
+                    // learned from the failed high-speed stream before measuring 30/60 FPS timing.
+                    resetFrameClockForRegularSession(activity)
+
+                    setStateText(activity, "$reason\n카메라 재오픈 성공 · 일반세션 구성 중…")
                     val started = runCatching {
-                        val method = CameraGateHighSpeedActivity::class.java.getDeclaredMethod(
+                        CameraGateHighSpeedActivity::class.java.getDeclaredMethod(
                             "createRegularSession",
                             CameraDevice::class.java
-                        ).apply { isAccessible = true }
-                        method.invoke(activity, camera)
+                        ).apply { isAccessible = true }.invoke(activity, camera)
                         true
                     }.getOrDefault(false)
+
                     if (!started) {
                         runCatching { camera.close() }
                         writeObjectField(activity, "cameraDevice", null)
-                        setStateText(activity, "60 FPS 일반세션 시작 호출 실패")
+                        setStateText(activity, "일반 FPS 세션 시작 호출 실패")
                     }
                 }
 
                 override fun onDisconnected(camera: CameraDevice) {
                     runCatching { camera.close() }
                     writeObjectField(activity, "cameraDevice", null)
-                    setStateText(activity, "60 FPS 안전모드 · 카메라 연결 끊김")
+                    setStateText(activity, "일반 FPS 안전모드 · 카메라 연결 끊김")
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
                     runCatching { camera.close() }
                     writeObjectField(activity, "cameraDevice", null)
                     if (attempt < MAX_CAMERA_REOPEN_RETRY) {
-                        setStateText(activity, "60 FPS 재오픈 오류 · $error · 잠시 후 한 번 더 시도합니다…")
+                        setStateText(activity, "일반 FPS 재오픈 오류 · $error · 잠시 후 한 번 더 시도합니다…")
                         handler.postDelayed({
                             openRegularOnly(activity, handler, reason, attempt + 1)
                         }, CAMERA_RETRY_DELAY_MS)
                     } else {
-                        setStateText(activity, "60 FPS 안전모드 재오픈 실패 · 카메라 오류 $error")
+                        setStateText(activity, "일반 FPS 안전모드 재오픈 실패 · 카메라 오류 $error")
                     }
                 }
             }, handler)
         } catch (e: Throwable) {
             if (attempt < MAX_CAMERA_REOPEN_RETRY) {
-                setStateText(activity, "60 FPS 재오픈 예외 · ${e.message ?: e.javaClass.simpleName} · 재시도 중…")
+                setStateText(activity, "일반 FPS 재오픈 예외 · ${e.message ?: e.javaClass.simpleName} · 재시도 중…")
                 handler.postDelayed({
                     openRegularOnly(activity, handler, reason, attempt + 1)
                 }, CAMERA_RETRY_DELAY_MS)
             } else {
-                setStateText(activity, "60 FPS 안전모드 재오픈 실패 · ${e.message ?: e.javaClass.simpleName}")
+                setStateText(activity, "일반 FPS 안전모드 재오픈 실패 · ${e.message ?: e.javaClass.simpleName}")
             }
+        }
+    }
+
+    private fun resetFrameClockForRegularSession(activity: CameraGateHighSpeedActivity) {
+        runCatching {
+            val frameClock = readObjectField(activity, "frameClock") as? CameraGateFrameClock ?: return@runCatching
+            val timestampRealtime = readBooleanField(activity, "timestampRealtime")
+            frameClock.reset(timestampRealtime)
         }
     }
 
@@ -316,6 +324,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
             override fun afterTextChanged(s: Editable?) {
                 val text = s?.toString().orEmpty()
                 val snapshot = parseTrigger(activity, text) ?: return
@@ -353,7 +362,10 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         triggerWatchers[activity] = watcher
     }
 
-    private fun parseTrigger(activity: CameraGateHighSpeedActivity, text: String): CameraGateTriggerReporter.Snapshot? {
+    private fun parseTrigger(
+        activity: CameraGateHighSpeedActivity,
+        text: String
+    ): CameraGateTriggerReporter.Snapshot? {
         val triggerIndex = Regex("TRIGGER #(\\d+)").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return null
         val localClock = Regex("폰\\s+(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})").find(text)?.groupValues?.getOrNull(1) ?: return null
         val correctedClock = Regex("기준보정\\s+(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})").find(text)?.groupValues?.getOrNull(1) ?: return null
@@ -365,10 +377,12 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         val correctedMs = clockToEpoch(correctedClock, localMs + offset.toLong()) ?: return null
 
         val fpsText = findTextView(activity.window.decorView) {
-            it.text?.toString()?.contains("녹화스트림") == true && it.text?.toString()?.contains("직접분석") == true
+            it.text?.toString()?.contains("녹화스트림") == true &&
+                it.text?.toString()?.contains("직접분석") == true
         }?.text?.toString().orEmpty()
-        val fpsMatch = Regex("메타데이터\\s+([0-9.]+) FPS\\s+·\\s+녹화스트림\\s+([0-9.]+) FPS\\s+·\\s+직접분석\\s+([0-9.]+) FPS")
-            .find(fpsText)
+        val fpsMatch = Regex(
+            "메타데이터\\s+([0-9.]+) FPS\\s+·\\s+녹화스트림\\s+([0-9.]+) FPS\\s+·\\s+직접분석\\s+([0-9.]+) FPS"
+        ).find(fpsText)
         val metadataFps = fpsMatch?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: 0.0
         val streamFps = fpsMatch?.groupValues?.getOrNull(2)?.toDoubleOrNull() ?: 0.0
         val analysisFps = fpsMatch?.groupValues?.getOrNull(3)?.toDoubleOrNull() ?: 0.0
@@ -422,15 +436,15 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         return null
     }
 
-    private fun markV11(view: View) {
+    private fun markV12(view: View) {
         if (view is TextView) {
             val text = view.text?.toString().orEmpty()
             if (text.contains("CAMERA GATE BETA v")) {
-                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v11")
+                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v12")
             }
         }
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) markV11(view.getChildAt(i))
+            for (i in 0 until view.childCount) markV12(view.getChildAt(i))
         }
     }
 
@@ -439,7 +453,14 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
-    override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor? = null
+
     override fun getType(uri: Uri): String? = null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
