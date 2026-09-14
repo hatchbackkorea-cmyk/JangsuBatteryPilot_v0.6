@@ -23,12 +23,23 @@ object TimingOperatorStoreCore {
     private const val KEY_DEVICE_ID="device_id"
     private const val CAMERA_PREFS="camera_gate_test"
     private const val CAMERA_ROLE_KEY="gate_role_v16"
+    private const val CAMERA_INSTALL_ID="install_id"
     val ROLES=listOf("START","CP1","CP2","CP3","CP4","CP5","FINISH")
 
+    /** Use the exact same id as CameraGateRoleInstaller so admin registration and triggers identify one phone. */
     fun deviceId(context:Context):String {
-        val p=context.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
-        val old=p.getString(KEY_DEVICE_ID,"").orEmpty(); if(old.isNotBlank()) return old
-        val created=UUID.randomUUID().toString().replace("-","").take(16);p.edit().putString(KEY_DEVICE_ID,created).apply();return created
+        val app=context.applicationContext
+        val camera=app.getSharedPreferences(CAMERA_PREFS,Context.MODE_PRIVATE)
+        val cameraId=camera.getString(CAMERA_INSTALL_ID,"").orEmpty()
+        if(cameraId.isNotBlank()) {
+            app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(KEY_DEVICE_ID,cameraId).apply()
+            return cameraId
+        }
+        val own=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(KEY_DEVICE_ID,"").orEmpty()
+        val created=(own.ifBlank { UUID.randomUUID().toString().replace("-","").take(12) })
+        camera.edit().putString(CAMERA_INSTALL_ID,created).apply()
+        app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(KEY_DEVICE_ID,created).apply()
+        return created
     }
     fun deviceLabel(context:Context)="${Build.MANUFACTURER} ${Build.MODEL} · ${deviceId(context).takeLast(4)}"
 
@@ -38,10 +49,10 @@ object TimingOperatorStoreCore {
         if(!a.isValid(nowMs)){if(a.eventCode.isNotBlank()||a.token.isNotBlank())clear(context);return null};return a
     }
     fun save(context:Context,a:Assignment){require(a.isValid());val app=context.applicationContext
-        app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(KEY_EVENT,a.eventCode.uppercase(Locale.US)).putString(KEY_ROLE,a.role.uppercase(Locale.US)).putString(KEY_TOKEN,a.token).putLong(KEY_EXPIRES,a.expiresAtMs).putString(KEY_SERVER,a.serverUrl.trim().trimEnd('/')).apply()
+        app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(KEY_EVENT,a.eventCode.uppercase(Locale.US)).putString(KEY_ROLE,a.role.uppercase(Locale.US)).putString(KEY_TOKEN,a.token).putLong(KEY_EXPIRES,a.expiresAtMs).putString(KEY_SERVER,a.serverUrl.trim().trimEnd('/')).putString(KEY_DEVICE_ID,deviceId(context)).apply()
         app.getSharedPreferences(CAMERA_PREFS,Context.MODE_PRIVATE).edit().putString(CAMERA_ROLE_KEY,a.role.uppercase(Locale.US)).apply()
     }
-    fun clear(context:Context){val app=context.applicationContext;val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE);val id=p.getString(KEY_DEVICE_ID,"").orEmpty();p.edit().clear().putString(KEY_DEVICE_ID,id).apply();app.getSharedPreferences(CAMERA_PREFS,Context.MODE_PRIVATE).edit().putString(CAMERA_ROLE_KEY,"AUTO").apply()}
+    fun clear(context:Context){val app=context.applicationContext;val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE);val id=deviceId(context);p.edit().clear().putString(KEY_DEVICE_ID,id).apply();app.getSharedPreferences(CAMERA_PREFS,Context.MODE_PRIVATE).edit().putString(CAMERA_ROLE_KEY,"AUTO").apply()}
 
     fun buildLink(a:Assignment):String=Uri.Builder().scheme("jangsubatterypilot").authority("timing").appendPath("enroll").appendQueryParameter("event",a.eventCode.uppercase(Locale.US)).appendQueryParameter("role",a.role.uppercase(Locale.US)).appendQueryParameter("token",a.token).appendQueryParameter("exp",a.expiresAtMs.toString()).apply{if(a.serverUrl.isNotBlank())appendQueryParameter("server",a.serverUrl.trim().trimEnd('/'))}.build().toString()
     fun buildHandoffLink(h:Handoff):String=Uri.Builder().scheme("jangsubatterypilot").authority("timing").appendPath("enroll").appendQueryParameter("event",h.eventCode.uppercase(Locale.US)).appendQueryParameter("role",h.role.uppercase(Locale.US)).appendQueryParameter("token",h.token).appendQueryParameter("exp",h.expiresAtMs.toString()).appendQueryParameter("server",h.serverUrl.trim().trimEnd('/')).appendQueryParameter("handoff","1").build().toString()
