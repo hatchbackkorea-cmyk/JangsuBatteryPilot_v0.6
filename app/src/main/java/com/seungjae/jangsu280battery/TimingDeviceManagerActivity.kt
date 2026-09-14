@@ -176,7 +176,7 @@ class TimingDeviceManagerActivity : Activity() {
         val link = TimingOperatorStore.buildLink(assignment)
         currentLink = link
         val expires = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(assignment.expiresAtMs))
-        selectedText.text = "$event · $role · $expires까지 유효"
+        selectedText.text = "$event · $role · ${expires}까지 유효"
         linkText.text = link
         qrView.setImageBitmap(makeQr(link, 900))
     }
