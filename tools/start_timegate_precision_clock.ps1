@@ -6,7 +6,8 @@ $ErrorActionPreference = 'Stop'
 
 $clockScript = Join-Path $PSScriptRoot 'timegate_precision_clock_server.js'
 $pidFile = Join-Path $PSScriptRoot '.timegate_precision_clock.pid'
-$logFile = Join-Path $PSScriptRoot 'timegate_precision_clock.log'
+$outLog = Join-Path $PSScriptRoot 'timegate_precision_clock.out.log'
+$errLog = Join-Path $PSScriptRoot 'timegate_precision_clock.err.log'
 $port = 8766
 
 if (-not (Test-Path $clockScript)) {
@@ -32,14 +33,15 @@ try {
 
 if (-not $healthy) {
     if (Test-Path $pidFile) { Remove-Item $pidFile -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $logFile) { Remove-Item $logFile -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $outLog) { Remove-Item $outLog -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $errLog) { Remove-Item $errLog -Force -ErrorAction SilentlyContinue }
 
     $p = Start-Process -FilePath $node.Source `
         -ArgumentList @($clockScript) `
         -WorkingDirectory $PSScriptRoot `
         -WindowStyle Hidden `
-        -RedirectStandardOutput $logFile `
-        -RedirectStandardError $logFile `
+        -RedirectStandardOutput $outLog `
+        -RedirectStandardError $errLog `
         -PassThru
     Set-Content -Path $pidFile -Value $p.Id -Encoding ascii
 
@@ -52,11 +54,13 @@ if (-not $healthy) {
         } catch {}
     }
     if (-not $ready) {
-        throw "Clock service failed to start. Check $logFile"
+        throw "Clock service failed to start. Check $outLog and $errLog"
     }
 }
 
 # Add only the clock mount. Do NOT run `tailscale serve reset` here: RCC may already own `/`.
+# The clock server accepts both '/' and '/api/race/clock', so this works whether Serve strips
+# the mounted prefix or forwards it unchanged.
 & $tailscale.Source serve --bg --yes --https=443 --set-path=/api/race/clock "http://127.0.0.1:$port"
 if ($LASTEXITCODE -ne 0) {
     throw "Tailscale Serve clock route failed (exit $LASTEXITCODE)."
