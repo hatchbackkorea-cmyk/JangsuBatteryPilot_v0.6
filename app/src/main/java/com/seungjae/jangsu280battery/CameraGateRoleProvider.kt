@@ -146,7 +146,7 @@ object CameraGateRoleInstaller {
             ROLE_AUTO -> {
                 val assigned = autoAssignedRole[activity] ?: "배정 대기"
                 val count = autoPhoneCount[activity]
-                val countText = count?.let { " · 연결 $it대" }.orEmpty()
+                val countText = count?.let { " · 연결 ${it}대" }.orEmpty()
                 "게이트 역할 · 자동 → $assigned$countText"
             }
             ROLE_COMPARE -> "게이트 역할 · 비교 모드 · 기존 두 폰 오차 검증"
