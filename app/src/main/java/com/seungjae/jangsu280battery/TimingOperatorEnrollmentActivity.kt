@@ -15,33 +15,53 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Receives a short-lived operator QR deep link and opens the non-exported Camera Gate screen. */
+/** Receives a timing-role QR, registers this phone on the server, then opens Camera Gate. */
 class TimingOperatorEnrollmentActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        render()
+        registerFromIntent()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        render()
+        registerFromIntent()
     }
 
-    private fun render() {
-        val assignment = TimingOperatorStore.parse(intent?.data)
-        if (assignment == null) {
-            showInvalid()
+    private fun registerFromIntent() {
+        val candidate = TimingOperatorStore.parse(intent?.data)
+        if (candidate == null) {
+            showInvalid("QR이 만료되었거나 올바른 TimeGate 계측기 QR이 아닙니다.")
             return
         }
-
-        runCatching { TimingOperatorStore.save(this, assignment) }
-            .onFailure {
-                Toast.makeText(this, "계측기 등록 실패 · ${it.message}", Toast.LENGTH_LONG).show()
-                finish()
-                return
+        val server = candidate.serverUrl.ifBlank { runCatching { RaceServerClient(this).baseUrl() }.getOrDefault("") }
+        if (!server.startsWith("http://") && !server.startsWith("https://")) {
+            showInvalid("QR에 서버 주소가 없고 앱의 RACE 서버도 연결되어 있지 않습니다.")
+            return
+        }
+        showRegistering(candidate)
+        Thread {
+            val result = runCatching {
+                val claimed = TimingDeviceClient.claim(this, server, candidate.eventCode, candidate.role, candidate.token)
+                TimingOperatorStore.Assignment(
+                    eventCode = candidate.eventCode,
+                    role = candidate.role,
+                    token = claimed.leaseToken,
+                    expiresAtMs = claimed.leaseExpiresAtMs,
+                    serverUrl = server
+                )
             }
+            runOnUiThread {
+                result.onSuccess { assignment ->
+                    runCatching { TimingOperatorStore.save(this, assignment) }
+                        .onSuccess { showRegistered(assignment) }
+                        .onFailure { showInvalid("계측기 저장 실패 · ${it.message}") }
+                }.onFailure { showInvalid("계측기 등록 실패 · ${it.message ?: "서버 연결 확인"}") }
+            }
+        }.start()
+    }
 
+    private fun baseRoot(): Pair<ScrollView, LinearLayout> {
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -49,7 +69,31 @@ class TimingOperatorEnrollmentActivity : Activity() {
             setBackgroundColor(Color.rgb(14, 18, 24))
         }
         scroll.addView(root)
+        return scroll to root
+    }
 
+    private fun showRegistering(a: TimingOperatorStore.Assignment) {
+        val (scroll, root) = baseRoot()
+        root.gravity = Gravity.CENTER_HORIZONTAL
+        root.addView(TextView(this).apply {
+            text = "${a.role} 계측폰 등록 중…"
+            textSize = 27f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        })
+        root.addView(TextView(this).apply {
+            text = "${a.eventCode} · 서버에서 이 휴대폰을 계측기 목록에 추가하고 있습니다."
+            textSize = 15f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(14), 0, 0)
+        })
+        setContentView(scroll)
+    }
+
+    private fun showRegistered(assignment: TimingOperatorStore.Assignment) {
+        val (scroll, root) = baseRoot()
         root.addView(TextView(this).apply {
             text = "TIMEGATE OFFICIAL TIMING"
             textSize = 15f
@@ -57,8 +101,8 @@ class TimingOperatorEnrollmentActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "${assignment.role} 계측기 등록"
-            textSize = 31f
+            text = "${assignment.role} 계측기 등록 완료"
+            textSize = 29f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             setPadding(0, dp(8), 0, dp(22))
@@ -67,10 +111,11 @@ class TimingOperatorEnrollmentActivity : Activity() {
         val expires = SimpleDateFormat("MM월 dd일 HH:mm", Locale.KOREA).format(Date(assignment.expiresAtMs))
         root.addView(info("대회", assignment.eventCode))
         root.addView(info("역할", assignment.role))
+        root.addView(info("기기", TimingOperatorStore.deviceLabel(this)))
         root.addView(info("권한 만료", expires))
 
         root.addView(TextView(this).apply {
-            text = "이 휴대폰은 QR에 지정된 역할로만 현장 계측에 사용됩니다. 역할 변경 메뉴는 운영 모드에서 잠깁니다."
+            text = "같은 역할에 여러 휴대폰을 등록할 수 있습니다. 관리자 운영툴의 ‘확인’을 누르면 이 화면에 5초 확인 팝업이 표시되고, ‘해제’를 누르면 이 휴대폰의 공식 계측 권한이 종료됩니다."
             textSize = 15f
             setTextColor(Color.LTGRAY)
             setPadding(0, dp(24), 0, dp(22))
@@ -88,19 +133,18 @@ class TimingOperatorEnrollmentActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, dp(62)))
 
         root.addView(Button(this).apply {
-            text = "등록 해제"
+            text = "이 폰의 로컬 등록 해제"
             isAllCaps = false
             setOnClickListener {
                 TimingOperatorStore.clear(this@TimingOperatorEnrollmentActivity)
-                Toast.makeText(this@TimingOperatorEnrollmentActivity, "계측기 등록을 해제했습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@TimingOperatorEnrollmentActivity, "이 폰의 로컬 계측기 등록을 해제했습니다.", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(12) })
-
         setContentView(scroll)
     }
 
-    private fun showInvalid() {
+    private fun showInvalid(message: String) {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -115,7 +159,7 @@ class TimingOperatorEnrollmentActivity : Activity() {
             gravity = Gravity.CENTER
         })
         root.addView(TextView(this).apply {
-            text = "QR이 만료되었거나 올바른 TimeGate 운영자 QR이 아닙니다. 관리자폰에서 새 QR을 발급해 주세요."
+            text = message
             textSize = 15f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
