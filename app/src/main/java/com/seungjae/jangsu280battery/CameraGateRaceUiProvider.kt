@@ -69,7 +69,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
     }
 
     private fun stopClockDiscipline(activity: Activity) {
-        autoSyncJobs.remove(activity)?.let(main::removeCallbacks)
+        autoSyncJobs.remove(activity)?.let { main.removeCallbacks(it) }
     }
 
     private fun invokeSyncClock(activity: CameraGateHighSpeedActivity) {
