@@ -7,6 +7,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.media.ToneGenerator
@@ -20,21 +21,19 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
 
 /**
- * Final field polish for Camera Gate.
+ * Field controls for Camera Gate.
  *
- * - One compact lower-right glass control bar split into four equal cells.
- * - Direction cell shows only L/R and toggles the selected travel direction.
- * - Start/stop, sync and log occupy the remaining three equal cells.
- * - Old direction/status UI at lower-left is removed completely.
- * - Reverse/unknown crossings never show the green gate flash.
- * - A loud alarm-stream beep is played only for a direction-approved timing trigger.
+ * The visible field controls are fully independent from the legacy Button views. This prevents the
+ * older direction/fullscreen providers from recreating a "방향 <" button over the L/R cell and
+ * stealing touches. One glass capsule owns four equal clickable cells: L/R, start/stop, sync, log.
+ * Reverse/unknown crossings never keep the green flash and only an approved timing trigger beeps.
  */
 class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -53,7 +52,7 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         if (activity !is CameraGateHighSpeedActivity) return
         cancelInstall(activity)
         val jobs = mutableListOf<Runnable>()
-        for (delay in longArrayOf(120L, 320L, 700L, 1_300L, 2_100L)) {
+        for (delay in longArrayOf(120L, 320L, 700L, 1_300L, 2_100L, 2_700L)) {
             val job = Runnable {
                 if (!activity.isFinishing && !activity.isDestroyed) {
                     polishDock(activity)
@@ -87,26 +86,19 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         val dock = findTagged(decor, TAG_DOCK) as? LinearLayout ?: return
         val left = findTagged(dock, TAG_LEFT) as? LinearLayout
         val right = findTagged(dock, TAG_RIGHT) as? LinearLayout ?: return
-        val arm = readField(activity, "armButton") as? Button ?: return
-        val sync = findButton(decor) {
-            it.text?.toString()?.contains("재동기화") == true || it.text?.toString() == "동기화"
-        } ?: return
-        val log = findTagged(dock, TAG_LOG_BUTTON) as? Button ?: return
 
-        // Delete the old lower-left direction/status block completely. The detector itself continues
-        // to use the same shared preference, so no timing logic is lost.
-        findTagged(decor, TAG_DIRECTION_ROW)?.let { old ->
-            (old.parent as? ViewGroup)?.removeView(old)
-        }
+        removeLegacyDirectionUi(decor)
+
         left?.let {
             it.removeAllViews()
             it.visibility = View.GONE
         }
 
-        // The fullscreen dock itself must not look like a bar. Only the compact four-cell capsule is visible.
+        // Keep the fullscreen dock invisible; only the four-cell capsule is visible.
         dock.setBackgroundColor(Color.TRANSPARENT)
         dock.gravity = Gravity.BOTTOM or Gravity.END
         dock.setPadding(dp(activity, 6), dp(activity, 4), dp(activity, 8), dp(activity, 8))
+        dock.isClickable = false
 
         val rightLp = right.layoutParams as? LinearLayout.LayoutParams
         if (rightLp != null) {
@@ -116,90 +108,97 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         }
         right.gravity = Gravity.BOTTOM or Gravity.END
         right.setPadding(0, 0, 0, 0)
+        right.visibility = View.VISIBLE
 
-        var row = findTagged(right, TAG_COMPACT_ROW) as? LinearLayout
-        if (row == null) {
-            row = LinearLayout(activity).apply {
-                tag = TAG_COMPACT_ROW
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                clipToOutline = true
+        // Never reuse the legacy Button objects. They can be re-parented by older providers and can
+        // sit above the new bar. Wipe the right panel and create four fresh, explicit touch targets.
+        right.removeAllViews()
+
+        val row = LinearLayout(activity).apply {
+            tag = TAG_CONTROL_BAR_V3
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = false
+            isFocusable = false
+            clipToOutline = true
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(Color.argb(128, 14, 14, 16))
+                cornerRadius = dp(activity, 11).toFloat()
+                setStroke(dp(activity, 1), Color.argb(90, 255, 255, 255))
             }
-            right.removeAllViews()
-            right.addView(row)
+            elevation = dp(activity, 3).toFloat()
         }
 
         val menuWidthPx = minOf(
             (activity.resources.displayMetrics.widthPixels * 0.76f).roundToInt(),
             dp(activity, 340)
         ).coerceAtLeast(dp(activity, 248))
-        row.layoutParams = LinearLayout.LayoutParams(menuWidthPx, dp(activity, 36))
-        row.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(Color.argb(128, 14, 14, 16))
-            cornerRadius = dp(activity, 11).toFloat()
-            setStroke(dp(activity, 1), Color.argb(90, 255, 255, 255))
-        }
-        row.elevation = dp(activity, 2).toFloat()
-
-        var direction = findTagged(row, TAG_DIRECTION_TOGGLE) as? Button
-        if (direction == null) {
-            direction = Button(activity).apply {
-                tag = TAG_DIRECTION_TOGGLE
-                isAllCaps = false
-                setOnClickListener {
-                    val next = if (selectedDirection(activity) == DIR_LTR) DIR_RTL else DIR_LTR
-                    prefs(activity).edit().putInt(KEY_DIRECTION, next).apply()
-                    refreshDirectionButton(activity, this)
-                    resetDirectionDetector(activity)
-                }
+        right.addView(
+            row,
+            LinearLayout.LayoutParams(menuWidthPx, dp(activity, 38)).apply {
+                gravity = Gravity.END
             }
-        }
+        )
 
-        // Re-home the existing functional buttons, preserving their original sync/log behavior.
-        for (button in listOf(direction, arm, sync, log)) {
-            (button.parent as? ViewGroup)?.removeView(button)
-        }
-        row.removeAllViews()
-
-        styleCell(direction)
-        styleCell(arm)
-        styleCell(sync)
-        styleCell(log)
+        val direction = menuCell(activity, TAG_DIRECTION_CELL_V3)
+        val start = menuCell(activity, TAG_START_CELL_V3)
+        val sync = menuCell(activity, TAG_SYNC_CELL_V3)
+        val log = menuCell(activity, TAG_LOG_CELL_V3)
 
         row.addView(direction, equalCellLp())
         row.addView(divider(activity))
-        row.addView(arm, equalCellLp())
+        row.addView(start, equalCellLp())
         row.addView(divider(activity))
         row.addView(sync, equalCellLp())
         row.addView(divider(activity))
         row.addView(log, equalCellLp())
 
-        refreshDirectionButton(activity, direction)
-        arm.text = if (readBooleanField(activity, "armed")) "중지" else "시작"
-        arm.setOnClickListener {
-            invokePrivate(activity, "toggleArm")
-            arm.text = if (readBooleanField(activity, "armed")) "중지" else "시작"
-        }
+        refreshDirectionCell(activity, direction)
+        refreshStartCell(activity, start)
         sync.text = "동기화"
         log.text = "로그"
 
-        // Remove only the field-screen close button. The close button inside the LOG drawer stays.
-        removeBottomCloseButtons(dock)
+        direction.setOnClickListener {
+            val next = if (selectedDirection(activity) == DIR_LTR) DIR_RTL else DIR_LTR
+            prefs(activity).edit().putInt(KEY_DIRECTION, next).apply()
+            refreshDirectionCell(activity, direction)
+            clearDirectionDetectorVisuals(activity)
+        }
+        start.setOnClickListener {
+            invokePrivate(activity, "toggleArm")
+            main.post { refreshStartCell(activity, start) }
+        }
+        sync.setOnClickListener {
+            invokePrivate(activity, "syncClock")
+        }
+        log.setOnClickListener {
+            val panel = findTagged(activity.window.decorView, TAG_LOG_PANEL)
+            if (panel != null) {
+                panel.visibility = View.VISIBLE
+                panel.bringToFront()
+            }
+        }
+
+        row.bringToFront()
+        dock.bringToFront()
     }
 
-    private fun styleCell(button: Button) {
-        button.textSize = 12f
-        button.minHeight = 0
-        button.minWidth = 0
-        button.setTextColor(Color.WHITE)
-        button.setPadding(0, 0, 0, 0)
-        button.setBackgroundColor(Color.TRANSPARENT)
-        button.elevation = 0f
-        button.gravity = Gravity.CENTER
+    private fun menuCell(activity: Activity, tagValue: String): TextView = TextView(activity).apply {
+        tag = tagValue
+        textSize = 12f
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        setPadding(0, 0, 0, 0)
+        background = null
+        isClickable = true
+        isFocusable = true
+        isLongClickable = false
     }
 
-    private fun equalCellLp() = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+    private fun equalCellLp() =
+        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
 
     private fun divider(activity: Activity) = View(activity).apply {
         setBackgroundColor(Color.argb(62, 255, 255, 255))
@@ -209,15 +208,27 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         }
     }
 
-    private fun refreshDirectionButton(activity: Activity, button: Button) {
-        // L means race travel toward screen-left; R means race travel toward screen-right.
-        button.text = if (selectedDirection(activity) == DIR_LTR) "R" else "L"
+    private fun refreshDirectionCell(activity: Activity, view: TextView) {
+        // L = travel toward screen-left (right -> left), R = travel toward screen-right (left -> right).
+        view.text = if (selectedDirection(activity) == DIR_LTR) "R" else "L"
     }
 
-    private fun removeBottomCloseButtons(dock: ViewGroup) {
+    private fun refreshStartCell(activity: CameraGateHighSpeedActivity, view: TextView) {
+        view.text = if (readBooleanField(activity, "armed")) "중지" else "시작"
+    }
+
+    private fun removeLegacyDirectionUi(root: View) {
         val victims = mutableListOf<View>()
-        collectButtons(dock, victims) { it.text?.toString() == "닫기" }
-        victims.forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        collectTagged(root, victims, TAG_DIRECTION_ROW)
+        collectTagged(root, victims, TAG_DIRECTION_TOGGLE_V2)
+        collectTagged(root, victims, TAG_COMPACT_ROW_V1)
+        victims.distinct().forEach { view ->
+            (view.parent as? ViewGroup)?.removeView(view)
+        }
+    }
+
+    private fun clearDirectionDetectorVisuals(activity: CameraGateHighSpeedActivity) {
+        removeLegacyDirectionUi(activity.window.decorView)
     }
 
     private fun attachFeedbackGuard(activity: CameraGateHighSpeedActivity) {
@@ -230,8 +241,6 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
             override fun afterTextChanged(s: Editable?) {
                 val snapshot = s?.toString().orEmpty()
                 if (snapshot.startsWith("역방향") || snapshot.startsWith("방향 판정 불명")) {
-                    // Base trigger code may already have scheduled a green flash. Clear it before the
-                    // next frame is drawn, so rejected travel stays red on screen.
                     main.post { clearGateFlash(activity) }
                     return
                 }
@@ -273,14 +282,6 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         runCatching { tone.startTone(ToneGenerator.TONE_PROP_BEEP, BEEP_MS) }
     }
 
-    private fun resetDirectionDetector(activity: CameraGateHighSpeedActivity) {
-        // Stale approach direction expires in under one second in the existing direction detector.
-        // The old visual row intentionally stays removed.
-        findTagged(activity.window.decorView, TAG_DIRECTION_ROW)?.let { old ->
-            (old.parent as? ViewGroup)?.removeView(old)
-        }
-    }
-
     private fun selectedDirection(context: Context): Int =
         prefs(context).getInt(KEY_DIRECTION, DIR_RTL).let { if (it == DIR_LTR) DIR_LTR else DIR_RTL }
 
@@ -300,26 +301,20 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         target.javaClass.getDeclaredField(name).apply { isAccessible = true }.getBoolean(target)
     }.getOrDefault(false)
 
-    private fun findTagged(view: View, tag: String): View? {
-        if (view.tag == tag) return view
+    private fun findTagged(view: View, tagValue: String): View? {
+        if (view.tag == tagValue) return view
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) findTagged(view.getChildAt(i), tag)?.let { return it }
+            for (i in 0 until view.childCount) {
+                findTagged(view.getChildAt(i), tagValue)?.let { return it }
+            }
         }
         return null
     }
 
-    private fun findButton(view: View, predicate: (Button) -> Boolean): Button? {
-        if (view is Button && predicate(view)) return view
+    private fun collectTagged(view: View, out: MutableList<View>, tagValue: String) {
+        if (view.tag == tagValue) out += view
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) findButton(view.getChildAt(i), predicate)?.let { return it }
-        }
-        return null
-    }
-
-    private fun collectButtons(view: View, out: MutableList<View>, predicate: (Button) -> Boolean) {
-        if (view is Button && predicate(view)) out += view
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) collectButtons(view.getChildAt(i), out, predicate)
+            for (i in 0 until view.childCount) collectTagged(view.getChildAt(i), out, tagValue)
         }
     }
 
@@ -354,9 +349,16 @@ class CameraGateFieldPolishProvider : ContentProvider(), Application.ActivityLif
         private const val TAG_DOCK = "camera_gate_fullscreen_dock_v1"
         private const val TAG_LEFT = "camera_gate_fullscreen_left_v1"
         private const val TAG_RIGHT = "camera_gate_fullscreen_right_v1"
-        private const val TAG_LOG_BUTTON = "camera_gate_fullscreen_log_button_v1"
+        private const val TAG_LOG_PANEL = "camera_gate_fullscreen_log_panel_v1"
+
         private const val TAG_DIRECTION_ROW = "camera_gate_direction_row_v1"
-        private const val TAG_COMPACT_ROW = "camera_gate_compact_controls_v1"
-        private const val TAG_DIRECTION_TOGGLE = "camera_gate_direction_toggle_v2"
+        private const val TAG_DIRECTION_TOGGLE_V2 = "camera_gate_direction_toggle_v2"
+        private const val TAG_COMPACT_ROW_V1 = "camera_gate_compact_controls_v1"
+
+        private const val TAG_CONTROL_BAR_V3 = "camera_gate_control_bar_v3"
+        private const val TAG_DIRECTION_CELL_V3 = "camera_gate_direction_cell_v3"
+        private const val TAG_START_CELL_V3 = "camera_gate_start_cell_v3"
+        private const val TAG_SYNC_CELL_V3 = "camera_gate_sync_cell_v3"
+        private const val TAG_LOG_CELL_V3 = "camera_gate_log_cell_v3"
     }
 }
