@@ -4,7 +4,10 @@ import android.app.Activity
 import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.database.Cursor
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -21,10 +24,11 @@ import java.util.WeakHashMap
 /**
  * Registers the Camera Gate RACE-home injector and keeps Camera Gate clocks disciplined.
  *
- * v10 keeps the v9 trigger relay and adds a runtime high-speed health watchdog. Some phones
- * advertise a valid Camera2 120 FPS constrained session but their MediaCodec/GL bridge actually
- * produces almost no frames. In that case the app now detects the stall after startup and invokes
- * the existing regular-session fallback automatically instead of leaving a black preview.
+ * v11 keeps the v10 high-speed health watchdog, but changes the 120 -> 60 FPS fallback into a
+ * full CameraDevice restart. A few Samsung devices advertise 120 FPS correctly yet put Camera2
+ * into ERROR_CAMERA_DEVICE(4) when the same device is reused for a regular session after the
+ * high-speed codec path stalls. Closing the device, waiting for HAL release, reopening the same
+ * camera and starting only the regular session avoids that broken transition.
  */
 class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -46,7 +50,7 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         }
         if (activity is CameraGateHighSpeedActivity) {
             activity.window.decorView.post {
-                markV10(activity.window.decorView)
+                markV11(activity.window.decorView)
                 attachTriggerRelay(activity)
             }
             startClockDiscipline(activity)
@@ -97,10 +101,8 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
 
     /**
      * Camera2 support tables are not enough to prove that the encoder/decoder bridge can sustain
-     * the advertised 120 FPS mode. The failing phone we observed opened a 1920x1080 120-120 session
-     * but analysis stayed around 0.1 FPS and the preview remained black. Wait long enough for a
-     * healthy codec to warm up, then fall back to the existing regular 60 FPS path if throughput is
-     * still effectively stalled.
+     * the advertised 120 FPS mode. Wait for codec warm-up, then switch to a fresh regular camera
+     * device when the high-speed analysis path is effectively stalled.
      */
     private fun startCameraHealthWatchdog(activity: CameraGateHighSpeedActivity) {
         stopCameraHealthWatchdog(activity)
@@ -135,29 +137,134 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         cameraHealthJobs.remove(activity)?.let { main.removeCallbacks(it) }
     }
 
+    /**
+     * Do not call CameraGateHighSpeedActivity.fallbackToRegular() here. That method reuses the
+     * current CameraDevice and is exactly what produced camera error 4 on the affected phone.
+     * Instead, tear the camera down completely on its own handler, wait for the HAL to release it,
+     * reopen the same camera and invoke createRegularSession() directly.
+     */
     private fun forceRegularFallback(
         activity: CameraGateHighSpeedActivity,
         analysisFps: Double,
         metadataFps: Double
     ): Boolean = runCatching {
-        val cameraField = CameraGateHighSpeedActivity::class.java.getDeclaredField("cameraDevice").apply {
-            isAccessible = true
-        }
-        val camera = cameraField.get(activity) as? android.hardware.camera2.CameraDevice ?: return@runCatching false
-        val method = CameraGateHighSpeedActivity::class.java.getDeclaredMethod(
-            "fallbackToRegular",
-            android.hardware.camera2.CameraDevice::class.java,
-            String::class.java
-        ).apply { isAccessible = true }
         val reason = String.format(
             Locale.US,
             "120 FPS 호환 실패 · 실제 메타 %.1f / 분석 %.1f FPS → 60 FPS 안전모드",
             metadataFps,
             analysisFps
         )
-        method.invoke(activity, camera, reason)
+        val handler = readObjectField(activity, "cameraHandler") as? Handler ?: return@runCatching false
+
+        writeBooleanField(activity, "highSpeedFallbackStarted", true)
+        writeStringField(activity, "fallbackReason", reason)
+        setStateText(activity, "$reason\n카메라 장치를 완전히 재시작합니다…")
+
+        handler.post {
+            if (activity.isFinishing || activity.isDestroyed) return@post
+            runCatching {
+                val close = CameraGateHighSpeedActivity::class.java.getDeclaredMethod("closeCamera").apply {
+                    isAccessible = true
+                }
+                close.invoke(activity)
+            }
+            writeBooleanField(activity, "highSpeedFallbackStarted", true)
+            writeStringField(activity, "fallbackReason", reason)
+            setStateText(activity, "$reason\n카메라 해제 완료 · 60 FPS로 재오픈 대기 중…")
+            handler.postDelayed({
+                openRegularOnly(activity, handler, reason, attempt = 0)
+            }, CAMERA_REOPEN_DELAY_MS)
+        }
         true
     }.getOrDefault(false)
+
+    private fun openRegularOnly(
+        activity: CameraGateHighSpeedActivity,
+        handler: Handler,
+        reason: String,
+        attempt: Int
+    ) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        val cameraId = readStringField(activity, "cameraId")
+        if (cameraId.isBlank()) {
+            setStateText(activity, "60 FPS 안전모드 재오픈 실패 · 카메라 ID 없음")
+            return
+        }
+        val manager = activity.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        setStateText(
+            activity,
+            if (attempt == 0) "$reason\n60 FPS 일반 카메라를 새로 여는 중…"
+            else "$reason\n카메라 재오픈 1회 재시도 중…"
+        )
+
+        try {
+            manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    if (activity.isFinishing || activity.isDestroyed) {
+                        camera.close()
+                        return
+                    }
+                    writeObjectField(activity, "cameraDevice", camera)
+                    writeBooleanField(activity, "highSpeedFallbackStarted", true)
+                    writeStringField(activity, "fallbackReason", reason)
+                    setStateText(activity, "$reason\n카메라 재오픈 성공 · 60 FPS 일반세션 구성 중…")
+                    val started = runCatching {
+                        val method = CameraGateHighSpeedActivity::class.java.getDeclaredMethod(
+                            "createRegularSession",
+                            CameraDevice::class.java
+                        ).apply { isAccessible = true }
+                        method.invoke(activity, camera)
+                        true
+                    }.getOrDefault(false)
+                    if (!started) {
+                        runCatching { camera.close() }
+                        writeObjectField(activity, "cameraDevice", null)
+                        setStateText(activity, "60 FPS 일반세션 시작 호출 실패")
+                    }
+                }
+
+                override fun onDisconnected(camera: CameraDevice) {
+                    runCatching { camera.close() }
+                    writeObjectField(activity, "cameraDevice", null)
+                    setStateText(activity, "60 FPS 안전모드 · 카메라 연결 끊김")
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+                    runCatching { camera.close() }
+                    writeObjectField(activity, "cameraDevice", null)
+                    if (attempt < MAX_CAMERA_REOPEN_RETRY) {
+                        setStateText(activity, "60 FPS 재오픈 오류 · $error · 잠시 후 한 번 더 시도합니다…")
+                        handler.postDelayed({
+                            openRegularOnly(activity, handler, reason, attempt + 1)
+                        }, CAMERA_RETRY_DELAY_MS)
+                    } else {
+                        setStateText(activity, "60 FPS 안전모드 재오픈 실패 · 카메라 오류 $error")
+                    }
+                }
+            }, handler)
+        } catch (e: Throwable) {
+            if (attempt < MAX_CAMERA_REOPEN_RETRY) {
+                setStateText(activity, "60 FPS 재오픈 예외 · ${e.message ?: e.javaClass.simpleName} · 재시도 중…")
+                handler.postDelayed({
+                    openRegularOnly(activity, handler, reason, attempt + 1)
+                }, CAMERA_RETRY_DELAY_MS)
+            } else {
+                setStateText(activity, "60 FPS 안전모드 재오픈 실패 · ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    private fun setStateText(activity: CameraGateHighSpeedActivity, value: String) {
+        main.post {
+            if (activity.isFinishing || activity.isDestroyed) return@post
+            runCatching {
+                val field = CameraGateHighSpeedActivity::class.java.getDeclaredField("stateText").apply {
+                    isAccessible = true
+                }
+                (field.get(activity) as? TextView)?.text = value
+            }
+        }
+    }
 
     private fun readBooleanField(activity: CameraGateHighSpeedActivity, name: String): Boolean = runCatching {
         CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
@@ -168,6 +275,37 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
             .getDouble(activity)
     }.getOrDefault(0.0)
+
+    private fun readStringField(activity: CameraGateHighSpeedActivity, name: String): String = runCatching {
+        CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+            .get(activity)?.toString().orEmpty()
+    }.getOrDefault("")
+
+    private fun readObjectField(activity: CameraGateHighSpeedActivity, name: String): Any? = runCatching {
+        CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+            .get(activity)
+    }.getOrNull()
+
+    private fun writeBooleanField(activity: CameraGateHighSpeedActivity, name: String, value: Boolean) {
+        runCatching {
+            CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+                .setBoolean(activity, value)
+        }
+    }
+
+    private fun writeStringField(activity: CameraGateHighSpeedActivity, name: String, value: String) {
+        runCatching {
+            CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+                .set(activity, value)
+        }
+    }
+
+    private fun writeObjectField(activity: CameraGateHighSpeedActivity, name: String, value: Any?) {
+        runCatching {
+            CameraGateHighSpeedActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+                .set(activity, value)
+        }
+    }
 
     private fun attachTriggerRelay(activity: CameraGateHighSpeedActivity) {
         if (triggerWatchers.containsKey(activity)) return
@@ -284,15 +422,15 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         return null
     }
 
-    private fun markV10(view: View) {
+    private fun markV11(view: View) {
         if (view is TextView) {
             val text = view.text?.toString().orEmpty()
             if (text.contains("CAMERA GATE BETA v")) {
-                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v10")
+                view.text = text.replace(Regex("CAMERA GATE BETA v\\d+"), "CAMERA GATE BETA v11")
             }
         }
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) markV10(view.getChildAt(i))
+            for (i in 0 until view.childCount) markV11(view.getChildAt(i))
         }
     }
 
@@ -313,5 +451,8 @@ class CameraGateRaceUiProvider : ContentProvider(), Application.ActivityLifecycl
         private const val HEALTH_WARMUP_CHECKS = 4
         private const val MIN_HEALTHY_ANALYSIS_FPS = 30.0
         private const val MIN_HEALTHY_METADATA_FPS = 15.0
+        private const val CAMERA_REOPEN_DELAY_MS = 900L
+        private const val CAMERA_RETRY_DELAY_MS = 1_200L
+        private const val MAX_CAMERA_REOPEN_RETRY = 1
     }
 }
