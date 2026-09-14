@@ -125,7 +125,7 @@ class RaceBroadcastCameraProvider : ContentProvider(), Application.ActivityLifec
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(activity, 4), 0, 0)
         }
-        scroller.addView(tabs, HorizontalScrollView.LayoutParams(-2, dp(activity, 40)))
+        scroller.addView(tabs, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 40)))
         container.addView(scroller, LinearLayout.LayoutParams(-1, dp(activity, 44)))
 
         root.addView(container, index, LinearLayout.LayoutParams(-1, dp(activity, 266)))
