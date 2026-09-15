@@ -36,9 +36,8 @@ class UsbH264ChaseService : Service() {
         }
 
         fun stop(context: Context) {
-            context.applicationContext.startService(
+            context.applicationContext.stopService(
                 Intent(context.applicationContext, UsbH264ChaseService::class.java)
-                    .setAction(ACTION_STOP)
             )
         }
     }
