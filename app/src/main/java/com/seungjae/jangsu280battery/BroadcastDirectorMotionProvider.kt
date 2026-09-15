@@ -6,6 +6,7 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
 import android.graphics.Bitmap
+import android.media.MediaCodec
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -76,6 +77,11 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
             )
         }.getOrNull() ?: return
         monitors[activity] = monitor
+
+        // Warm-standby promotion can request an IDR without exposing CameraGateGlAnalyzer publicly.
+        // The request is posted onto the analyzer's own codec handler and never touches timing state.
+        CameraGateBroadcastBridge.bindKeyFrameRequester { requestBroadcastKeyFrame(activity) }
+
         activate(monitor)
         schedule(monitor)
     }
@@ -193,6 +199,24 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         return if (usable == 0) 0.0 else changed * 100.0 / usable
     }
 
+    /** Ask only the secondary 720p broadcast encoder for a fresh IDR frame. */
+    private fun requestBroadcastKeyFrame(activity: CameraGateHighSpeedActivity) {
+        val analyzer = runCatching { field(activity, "glAnalyzer").get(activity) }.getOrNull() ?: return
+        val handler = runCatching {
+            analyzer.javaClass.getDeclaredField("broadcastHandler").apply { isAccessible = true }.get(analyzer) as? Handler
+        }.getOrNull() ?: return
+        handler.post {
+            val encoder = runCatching {
+                analyzer.javaClass.getDeclaredField("broadcastEncoder").apply { isAccessible = true }.get(analyzer) as? MediaCodec
+            }.getOrNull() ?: return@post
+            runCatching {
+                encoder.setParameters(Bundle().apply {
+                    putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+                })
+            }
+        }
+    }
+
     private fun activate(m: Monitor) {
         m.lastActivateMs = SystemClock.elapsedRealtime()
         network.execute {
@@ -233,6 +257,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         runCatching { m.bitmap?.recycle() }
         m.bitmap = null
         m.previousLuma = null
+        CameraGateBroadcastBridge.bindKeyFrameRequester(null)
     }
 
     private fun field(activity: Activity, name: String): Field =
@@ -246,6 +271,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
     override fun shutdown() {
         main.removeCallbacksAndMessages(null)
         network.shutdownNow()
+        CameraGateBroadcastBridge.bindKeyFrameRequester(null)
         super.shutdown()
     }
 
