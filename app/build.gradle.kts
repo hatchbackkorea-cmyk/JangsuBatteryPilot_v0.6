@@ -22,6 +22,7 @@ val kakaoNativeAppKey = (project.findProperty("kakaoNativeAppKey")?.toString()
 android {
     namespace = "com.seungjae.jangsu280battery"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.seungjae.jangsu280battery"
@@ -39,6 +40,11 @@ android {
         buildConfigField("String", "KAKAO_REST_API_KEY", "\"$escapedKakao\"")
         val escapedKakaoNative = kakaoNativeAppKey.replace("\\", "\\\\").replace("\"", "\\\"")
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$escapedKakaoNative\"")
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+            }
+        }
     }
 
     signingConfigs {
@@ -74,6 +80,12 @@ android {
         buildConfig = true
         aidl = true
     }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 dependencies {
@@ -86,4 +98,5 @@ dependencies {
     implementation("com.kakao.maps.open:android:2.15.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.github.webrtc-sdk:android:150.7871.01")
+    implementation("com.herohan:UVCAndroid:1.0.13")
 }
