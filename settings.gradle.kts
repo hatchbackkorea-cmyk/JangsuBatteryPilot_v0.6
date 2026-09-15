@@ -12,6 +12,8 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven(url = "https://devrepo.kakao.com/nexus/repository/kakaomap-releases/")
+        // Maintained AndroidUSBCamera/AUSBC fork used by the experimental USB CHASE camera path.
+        maven(url = "https://jitpack.io")
     }
 }
 
