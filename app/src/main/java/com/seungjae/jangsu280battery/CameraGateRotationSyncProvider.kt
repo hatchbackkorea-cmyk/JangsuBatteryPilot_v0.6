@@ -14,24 +14,18 @@ import java.nio.FloatBuffer
 import java.util.WeakHashMap
 
 /**
- * Keeps the GL camera preview and the timing strip aligned with the current display rotation.
+ * Keeps the GL camera preview and the timing strip aligned with display rotation for timing phones.
  *
- * The operator preview is intentionally independent from the timing analysis area: the camera can
- * fill the field screen while timing still watches only a very narrow micro-strip around the red
- * gate line. This keeps background motion out of the score and restores the sharp response of the
- * earlier compact preview without shrinking the visible camera image.
- *
- * This provider updates both mutable FloatBuffers used by the analyzer on the camera thread:
- *   - previewCoords: what the operator sees
- *   - stripCoords: the narrow centre timing strip used for motion timing
- *
- * Updating both is important after rotation: the red gate line, visible preview and the internal
- * timing strip must all describe the same physical crossing line.
+ * Broadcast-only CAM phones are intentionally different: their preview/broadcast orientation is
+ * frozen to the first landscape orientation for the session. If an operator physically turns the
+ * phone upright, the camera image therefore looks sideways instead of auto-correcting. This makes
+ * the intended landscape shooting posture obvious while keeping the activity itself landscape-only.
  */
 class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
     private val jobs = WeakHashMap<Activity, Runnable>()
     private val applied = WeakHashMap<Activity, AppliedState>()
+    private val fixedBroadcastRelative = WeakHashMap<Activity, Int>()
 
     private data class AppliedState(
         val analyzerIdentity: Int,
@@ -67,6 +61,7 @@ class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLi
     override fun onActivityDestroyed(activity: Activity) {
         stop(activity)
         applied.remove(activity)
+        fixedBroadcastRelative.remove(activity)
     }
 
     private fun stop(activity: Activity) {
@@ -82,7 +77,17 @@ class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLi
             Surface.ROTATION_270 -> 270
             else -> 0
         }
-        val relative = normalize(sensorOrientation - displayDegrees)
+        val measuredRelative = normalize(sensorOrientation - displayDegrees)
+        val isBroadcast = TimingOperatorStore.current(activity)?.role
+            ?.let(TimingOperatorStore::isBroadcastRole) == true
+        val relative = if (isBroadcast) {
+            fixedBroadcastRelative[activity] ?: measuredRelative.also {
+                fixedBroadcastRelative[activity] = it
+            }
+        } else {
+            measuredRelative
+        }
+
         val next = AppliedState(System.identityHashCode(analyzer), relative)
         if (applied[activity] == next) return
 
@@ -100,7 +105,8 @@ class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLi
             )
 
             // A rotation or a strip-coordinate change produces a large one-frame image difference.
-            // Forget the previous sample so changing phone orientation can never look like a racer.
+            // Timing phones forget the previous sample so orientation changes can never look like a
+            // racer. Broadcast CAMs stay fixed, so this only runs when their camera/analyzer restarts.
             writeField(activity, "previousSamples", null)
         }
     }
@@ -169,8 +175,6 @@ class CameraGateRotationSyncProvider : ContentProvider(), Application.ActivityLi
 
     companion object {
         private const val POLL_MS = 120L
-
-        // Fullscreen preview stays untouched. Only the timing engine sees this 1.2%-wide micro-strip.
         private const val TIMING_STRIP_LEFT = 0.494f
         private const val TIMING_STRIP_RIGHT = 0.506f
     }
