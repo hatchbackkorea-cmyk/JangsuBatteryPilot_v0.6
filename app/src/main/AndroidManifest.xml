@@ -20,6 +20,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
         <package android:name="com.avinox.ride" />
@@ -34,6 +35,7 @@
         <activity android:name=".CameraGateTestActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateTestActivityV2" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateHighSpeedActivity" android:exported="false" android:screenOrientation="landscape" />
+        <activity android:name=".UsbChaseCameraActivity" android:exported="false" android:screenOrientation="landscape" />
         <activity android:name=".RaceLapHistoryActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RaceSpectatorActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RaceBroadcastActivity" android:exported="false" android:screenOrientation="portrait" />
