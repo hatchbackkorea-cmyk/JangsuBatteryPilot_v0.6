@@ -48,18 +48,31 @@ object BroadcastCameraClient {
             put("accuracy_m", if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0)
         }
         val json = post(base, "/api/race/broadcast-camera/register", body)
-        return RegisterResult(
-            eventCode = json.optString("event_code", canonicalCode).trim().uppercase(Locale.US),
-            role = json.getString("role").trim().uppercase(Locale.US),
-            leaseToken = json.getString("lease_token"),
-            expiresAtMs = json.getLong("lease_expires_at_ms"),
-            routeM = json.optDouble("route_m", 0.0),
-            nearestM = json.optDouble("nearest_m", 0.0),
-            accuracyM = json.optDouble("accuracy_m", 0.0),
-        )
+        return parseRegister(json, canonicalCode)
+    }
+
+    /** CHASE is a moving default feed, so registration intentionally has no fixed GPX position. */
+    fun registerChase(context: Context, eventCode: String): RegisterResult {
+        val base = baseUrl(context, "")
+        val canonicalCode = eventCode.trim().uppercase(Locale.US)
+        require(canonicalCode.isNotBlank()) { "경기코드를 입력해 주세요." }
+        val body = JSONObject().apply {
+            put("event_code", canonicalCode)
+            put("device_id", TimingOperatorStore.deviceId(context))
+            put("device_label", TimingOperatorStore.deviceLabel(context))
+        }
+        val json = post(base, "/api/race/broadcast-director/chase/register", body)
+        return parseRegister(json, canonicalCode)
     }
 
     fun heartbeat(context: Context, assignment: TimingOperatorStore.Assignment, location: Location): HeartbeatResult {
+        if (assignment.role.trim().uppercase(Locale.US) == "CHASE") {
+            // CHASE online/offline video state comes from the live WebRTC publisher connection.
+            // Refresh V2 activation here as well so a server process restart cannot silently put an
+            // already-running CHASE phone back under the legacy GPS AUTO director.
+            runCatching { BroadcastDirectorClient.activate(context, assignment) }
+            return HeartbeatResult(assignment.eventCode, "CHASE", 0.0, 0.0)
+        }
         val base = baseUrl(context, assignment.serverUrl)
         val body = JSONObject().apply {
             put("event_code", assignment.eventCode.trim().uppercase(Locale.US))
@@ -79,6 +92,16 @@ object BroadcastCameraClient {
             nearestM = json.optDouble("nearest_m", 0.0),
         )
     }
+
+    private fun parseRegister(json: JSONObject, canonicalCode: String) = RegisterResult(
+        eventCode = json.optString("event_code", canonicalCode).trim().uppercase(Locale.US),
+        role = json.getString("role").trim().uppercase(Locale.US),
+        leaseToken = json.getString("lease_token"),
+        expiresAtMs = json.getLong("lease_expires_at_ms"),
+        routeM = json.optDouble("route_m", 0.0),
+        nearestM = json.optDouble("nearest_m", 0.0),
+        accuracyM = json.optDouble("accuracy_m", 0.0),
+    )
 
     private fun baseUrl(context: Context, preferred: String): String {
         val base = preferred.trim().trimEnd('/').ifBlank {

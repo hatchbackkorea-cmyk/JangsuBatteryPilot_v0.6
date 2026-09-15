@@ -32,9 +32,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * normally travels phone <-> operator PC directly over WebRTC/UDP. No frame queue is maintained:
  * when SCTP starts backing up, delta frames are dropped and playback resumes at the next key frame.
  *
- * A viewer marked as preview receives only one independently decodable IDR roughly every two
- * seconds. The same 720p encoder is reused, so there is no second camera/encoder cost on the phone,
- * while the 9-up camera wall uses only a small fraction of the normal uplink bandwidth.
+ * Warm Standby: a preview viewer keeps the PeerConnection/DataChannel negotiated while receiving
+ * sparse IDR frames. Broadcast Director V2 can send viewer_mode(preview=false) on that same peer;
+ * the phone immediately switches it to full packet flow without another SDP/ICE handshake.
  */
 class CameraGateWebRtcStreamer(
     context: Context,
@@ -63,7 +63,7 @@ class CameraGateWebRtcStreamer(
         val id: String,
         val connection: PeerConnection,
         val channel: DataChannel,
-        val preview: Boolean = false,
+        @Volatile var preview: Boolean = false,
         @Volatile var waitingForKeyFrame: Boolean = true,
         @Volatile var opened: Boolean = false,
         @Volatile var lastPreviewKeyPtsUs: Long = 0L,
@@ -200,6 +200,23 @@ class CameraGateWebRtcStreamer(
         when (type) {
             "viewer_join" -> if (viewerId.isNotBlank()) createPeer(viewerId, msg.optBoolean("preview", false))
             "viewer_leave" -> if (viewerId.isNotBlank()) closePeer(viewerId)
+            "viewer_mode" -> if (viewerId.isNotBlank()) {
+                val peer = peers[viewerId] ?: return
+                val nextPreview = msg.optBoolean("preview", false)
+                if (peer.preview != nextPreview) {
+                    peer.preview = nextPreview
+                    peer.waitingForKeyFrame = true
+                    peer.lastPreviewKeyPtsUs = 0L
+                    if (!nextPreview && peer.opened) {
+                        latestMeta?.let { sendText(peer.channel, it) }
+                        latestCsd0?.let { sendBinary(peer.channel, it) }
+                        latestCsd1?.let { sendBinary(peer.channel, it) }
+                        // Promotion already has an established P2P path. Ask the encoder for an IDR
+                        // so live motion begins on the next frame rather than waiting for cadence.
+                        CameraGateBroadcastBridge.requestKeyFrame()
+                    }
+                }
+            }
             "answer" -> peers[viewerId]?.connection?.setRemoteDescription(
                 EmptySdpObserver,
                 SessionDescription(SessionDescription.Type.ANSWER, msg.optString("sdp"))
@@ -213,9 +230,8 @@ class CameraGateWebRtcStreamer(
                 }
             }
             "fallback_request" -> {
-                // Preview viewers never ask for fallback. Keeping this global fallback behavior for
-                // the full-quality viewer preserves the proven Camera Gate field path.
-                onFallbackRequested()
+                val peer = peers[viewerId]
+                if (peer == null || !peer.preview) onFallbackRequested()
             }
         }
     }
@@ -231,7 +247,8 @@ class CameraGateWebRtcStreamer(
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(newState: PeerConnection.SignalingState?) = Unit
             override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
-                if (!preview && (
+                val currentPreview = peers[viewerId]?.preview ?: preview
+                if (!currentPreview && (
                         newState == PeerConnection.IceConnectionState.FAILED ||
                             newState == PeerConnection.IceConnectionState.DISCONNECTED
                         )
@@ -292,12 +309,17 @@ class CameraGateWebRtcStreamer(
                 })
             }
             override fun onSetSuccess() = Unit
-            override fun onCreateFailure(error: String?) { if (!preview) onFallbackRequested() }
-            override fun onSetFailure(error: String?) { if (!preview) onFallbackRequested() }
+            override fun onCreateFailure(error: String?) {
+                if (peers[viewerId]?.preview != true) onFallbackRequested()
+            }
+            override fun onSetFailure(error: String?) {
+                if (peers[viewerId]?.preview != true) onFallbackRequested()
+            }
         }, MediaConstraints())
 
         scheduler.schedule({
-            if (!preview && !closed.get() && peers[viewerId]?.opened != true) onFallbackRequested()
+            val p = peers[viewerId]
+            if (p != null && !p.preview && !closed.get() && !p.opened) onFallbackRequested()
         }, PEER_OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     }
 

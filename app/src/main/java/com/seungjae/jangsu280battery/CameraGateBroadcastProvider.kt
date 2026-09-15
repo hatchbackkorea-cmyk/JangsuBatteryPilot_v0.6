@@ -14,6 +14,7 @@ object CameraGateBroadcastBridge {
     @Volatile private var fallbackStreamer: CameraGateBroadcastStreamer? = null
     @Volatile private var webRtcStreamer: CameraGateWebRtcStreamer? = null
     @Volatile private var localSink: CameraGateBroadcastPacketSink? = null
+    @Volatile private var keyFrameRequester: (() -> Unit)? = null
     @Volatile private var latestCsd0: CameraGateBroadcastPacket? = null
     @Volatile private var latestCsd1: CameraGateBroadcastPacket? = null
 
@@ -31,6 +32,15 @@ object CameraGateBroadcastBridge {
             latestCsd0?.let(value::offer)
             latestCsd1?.let(value::offer)
         }
+    }
+
+    /** Warm-standby viewer promotion asks the existing encoder for an IDR immediately. */
+    fun bindKeyFrameRequester(value: (() -> Unit)?) {
+        keyFrameRequester = value
+    }
+
+    fun requestKeyFrame() {
+        runCatching { keyFrameRequester?.invoke() }
     }
 
     fun offer(packet: CameraGateBroadcastPacket) {
@@ -110,6 +120,7 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
             CameraGateBroadcastBridge.bindFallback(null)
             CameraGateBroadcastBridge.bindWebRtc(null)
             CameraGateBroadcastBridge.bindLocalSink(null)
+            CameraGateBroadcastBridge.bindKeyFrameRequester(null)
         }
     }
 
