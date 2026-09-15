@@ -64,7 +64,6 @@ object CameraGateBroadcastBridge {
         externalSourceRequired = required
         latestCsd0 = null
         latestCsd1 = null
-        UsbH264LocalPreviewBridge.reset()
         if (!required) {
             externalAvailable = false
             publisherAvailabilityController?.invoke(true)
@@ -88,9 +87,6 @@ object CameraGateBroadcastBridge {
     /** Pre-encoded UVC H.264 path. No decode or re-encode occurs here. */
     fun offerExternal(packet: CameraGateBroadcastPacket) {
         if (!externalSourceRequired) return
-        // Mirror the packet reference to the on-screen preview decoder without touching the
-        // official broadcast path or changing the encoded bytes.
-        UsbH264LocalPreviewBridge.offer(packet)
         offerAccepted(packet)
     }
 
