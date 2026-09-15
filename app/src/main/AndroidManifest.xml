@@ -73,6 +73,7 @@
         <provider android:name=".CameraGateFullscreenUiProvider" android:authorities="${applicationId}.camera-gate-fullscreen-ui" android:exported="false" android:initOrder="70" />
         <provider android:name=".CameraGateFieldPolishProvider" android:authorities="${applicationId}.camera-gate-field-polish" android:exported="false" android:initOrder="60" />
         <provider android:name=".RaceBroadcastCameraProvider" android:authorities="${applicationId}.race-broadcast-camera" android:exported="false" android:initOrder="55" />
+        <provider android:name=".BroadcastCameraAppProvider" android:authorities="${applicationId}.broadcast-camera-app" android:exported="false" android:initOrder="52" />
         <provider android:name=".BroadcastCameraCleanUiProvider" android:authorities="${applicationId}.broadcast-camera-clean-ui" android:exported="false" android:initOrder="50" />
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" /></provider>
