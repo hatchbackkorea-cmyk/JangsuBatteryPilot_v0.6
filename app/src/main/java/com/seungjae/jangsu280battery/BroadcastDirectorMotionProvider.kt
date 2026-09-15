@@ -26,10 +26,11 @@ import kotlin.math.abs
  * narrow timing strip. This provider samples only a tiny 48x27 copy of the already-visible camera
  * preview at ~12 Hz, on the phone, to notice broad scene motion before a rider reaches the timing
  * line. No preview image, pixel data, rider GPS, route position, speed or rank is sent to server.
- * The server receives only REQUEST / RELEASE events.
+ * The server receives only ACTIVATE / REQUEST / RELEASE events.
  *
  * Continued local motion refreshes the short broadcast-token lease, so several riders arriving a
- * metre apart stay on the same point camera. A quiet tail releases back to CHASE.
+ * metre apart stay on the same point camera. A quiet tail releases back to CHASE. CHASE itself does
+ * not run motion detection; it only keeps V2 activation alive and remains the default feed.
  */
 class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -41,6 +42,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         val assignment: TimingOperatorStore.Assignment,
         val textureField: Field,
         val armedField: Field,
+        val chase: Boolean,
         var previousLuma: IntArray? = null,
         var bitmap: Bitmap? = null,
         var active: Boolean = false,
@@ -62,7 +64,6 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         if (activity !is CameraGateHighSpeedActivity) return
         val assignment = TimingOperatorStore.current(activity) ?: return
         val role = assignment.role.trim().uppercase(Locale.US)
-        if (role == "CHASE") return
         if (role !in TimingOperatorStore.ROLES) return
 
         val monitor = runCatching {
@@ -71,6 +72,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
                 assignment = assignment,
                 textureField = field(activity, "textureView"),
                 armedField = field(activity, "armed"),
+                chase = role == "CHASE",
             )
         }.getOrNull() ?: return
         monitors[activity] = monitor
@@ -94,16 +96,17 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
                     return
                 }
                 tick(m)
-                main.postDelayed(this, SAMPLE_MS)
+                main.postDelayed(this, if (m.chase) CHASE_TICK_MS else SAMPLE_MS)
             }
         }
         m.job = job
-        main.postDelayed(job, SAMPLE_MS)
+        main.postDelayed(job, if (m.chase) CHASE_TICK_MS else SAMPLE_MS)
     }
 
     private fun tick(m: Monitor) {
         val now = SystemClock.elapsedRealtime()
         if (now - m.lastActivateMs >= ACTIVATE_REFRESH_MS) activate(m)
+        if (m.chase) return
 
         val role = m.assignment.role.trim().uppercase(Locale.US)
         val isBroadcastOnly = TimingOperatorStore.isBroadcastRole(role)
@@ -258,6 +261,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         private const val SAMPLE_W = 48
         private const val SAMPLE_H = 27
         private const val SAMPLE_MS = 80L
+        private const val CHASE_TICK_MS = 1_000L
         private const val EDGE_X = 2
         private const val EDGE_Y = 1
         private const val PIXEL_DELTA_THRESHOLD = 20
