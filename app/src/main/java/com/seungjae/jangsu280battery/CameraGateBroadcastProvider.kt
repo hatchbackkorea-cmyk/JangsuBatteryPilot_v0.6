@@ -9,7 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import java.util.WeakHashMap
 
-/** Lightweight handoff between the GL camera thread and the active network/local transports. */
+/** Lightweight handoff between the camera source and the active network/local transports. */
 object CameraGateBroadcastBridge {
     @Volatile private var fallbackStreamer: CameraGateBroadcastStreamer? = null
     @Volatile private var webRtcStreamer: CameraGateWebRtcStreamer? = null
@@ -34,7 +34,7 @@ object CameraGateBroadcastBridge {
         }
     }
 
-    /** Warm-standby viewer promotion asks the existing encoder for an IDR immediately. */
+    /** Warm-standby viewer promotion asks the existing encoder for an IDR immediately when supported. */
     fun bindKeyFrameRequester(value: (() -> Unit)?) {
         keyFrameRequester = value
     }
@@ -55,11 +55,11 @@ object CameraGateBroadcastBridge {
 }
 
 /**
- * Creates a P2P WebRTC publisher for a QR-assigned timing phone.
+ * Creates a P2P WebRTC publisher for the active TimeGate camera source.
  *
- * The older WebSocket video publisher is not started during normal operation. It is created only
- * when a WebRTC viewer explicitly requests fallback or P2P establishment times out, avoiding the
- * previous duplicate upload and keeping the phone's uplink focused on the direct P2P stream.
+ * CameraGateHighSpeedActivity is the original phone-camera source. UsbChaseCameraActivity is an
+ * experimental UVC source that already emits H.264 into CameraGateBroadcastBridge. Both therefore
+ * share exactly the same WebRTC/fallback transports.
  */
 class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val fallbackStreamers = WeakHashMap<Activity, CameraGateBroadcastStreamer>()
@@ -72,8 +72,11 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         return true
     }
 
+    private fun isCameraSource(activity: Activity): Boolean =
+        activity is CameraGateHighSpeedActivity || activity is UsbChaseCameraActivity
+
     override fun onActivityResumed(activity: Activity) {
-        if (activity !is CameraGateHighSpeedActivity) return
+        if (!isCameraSource(activity)) return
         val assignment = TimingOperatorStore.current(activity)
         if (assignment == null) {
             CameraGateBroadcastBridge.bindFallback(null)
@@ -107,7 +110,7 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
     }
 
     override fun onActivityPaused(activity: Activity) {
-        if (activity !is CameraGateHighSpeedActivity) return
+        if (!isCameraSource(activity)) return
         CameraGateBroadcastBridge.bindWebRtc(webRtcStreamers[activity])
         CameraGateBroadcastBridge.bindFallback(fallbackStreamers[activity])
     }
@@ -116,7 +119,7 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         fallbackStreamers.remove(activity)?.close()
         webRtcStreamers.remove(activity)?.close()
         assignments.remove(activity)
-        if (activity is CameraGateHighSpeedActivity) {
+        if (isCameraSource(activity)) {
             CameraGateBroadcastBridge.bindFallback(null)
             CameraGateBroadcastBridge.bindWebRtc(null)
             CameraGateBroadcastBridge.bindLocalSink(null)
