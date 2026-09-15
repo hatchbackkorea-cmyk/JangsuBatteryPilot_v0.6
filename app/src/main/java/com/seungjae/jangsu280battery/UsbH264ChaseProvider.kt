@@ -27,7 +27,7 @@ import java.util.WeakHashMap
 class UsbH264ChaseProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private data class UiSnapshot(
         val view: View,
-        val visibility: Int,
+        val visibility: Int = view.visibility,
         val text: CharSequence? = (view as? TextView)?.text,
     )
 
