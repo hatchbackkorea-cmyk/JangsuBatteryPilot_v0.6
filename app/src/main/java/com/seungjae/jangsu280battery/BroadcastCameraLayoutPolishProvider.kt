@@ -27,17 +27,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.Locale
 import java.util.WeakHashMap
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Final field-layout pass for broadcast-only CAM phones.
+ * Final camera-app polish for broadcast-only CAM phones.
  *
- * It intentionally does not replace the camera/broadcast implementation. Instead it keeps the
- * existing working click handlers and moves those views into one compact right-side vertical rail:
- * role, LIVE status, 1x/2x/3x, photo, quality, REC and exit.
- *
- * It also keeps the displayed megapixel value derived from the same Camera2 JPEG size selection
- * rule used by BroadcastCameraAppProvider and hard-locks the activity to landscape at runtime.
+ * The working camera/broadcast implementation is left untouched. This provider only owns the
+ * field presentation: a right-side control rail, a clean centred LIVE label, explicit selected
+ * states for zoom/recording, a large camera-style shutter, synced megapixel display, and a hard
+ * landscape lock.
  */
 class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -86,6 +85,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     }
 
     override fun onActivityPaused(activity: Activity) = stop(activity)
+
     override fun onActivityDestroyed(activity: Activity) {
         stop(activity)
         animatedViews.keys.removeIf { it.context === activity }
@@ -113,15 +113,22 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         if (rail == null) {
             rail = buildRail(activity, cameraBox, appUi) ?: return
         }
+        val live = findTagged(appUi, TAG_LIVE_CENTER) as? TextView
 
         for (i in 0 until appUi.childCount) {
             val child = appUi.getChildAt(i)
-            child.visibility = if (child === rail) View.VISIBLE else View.GONE
+            child.visibility = if (child === rail || child === live) View.VISIBLE else View.GONE
         }
         rail.visibility = View.VISIBLE
         rail.bringToFront()
+        live?.apply {
+            visibility = View.VISIBLE
+            bringToFront()
+        }
 
         refreshQualityMp(activity, rail)
+        refreshZoomSelection(appUi, rail)
+        refreshRecSelection(activity, rail)
         normalizeCells(activity, rail)
     }
 
@@ -136,14 +143,26 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         val zoom2 = findTagged(appUi, "broadcast_camera_zoom_2") as? TextView
         val zoom3 = findTagged(appUi, "broadcast_camera_zoom_3") as? TextView
         val quality = findText(appUi) {
-            it.startsWith("사진화질") || it.startsWith("표준") || it.startsWith("고화질") || it.startsWith("최고")
+            it.startsWith("사진화질") || it.startsWith("표준") || it.startsWith("고화질") || it.startsWith("최고") || MP_ONLY.matches(it.trim())
         }
         val rec = findText(appUi) { it.contains("REC") || it.contains("STOP") }
         val exit = findText(appUi) { it.trim() == "나가기" }
-        val shutter = findText(appUi) { it.trim() == "●" }
+        val shutter = findText(appUi) { it.trim() == "●" || it.trim() == "사진" }
 
         if (zoom1 == null || zoom2 == null || zoom3 == null || quality == null || rec == null || exit == null || shutter == null) {
             return null
+        }
+
+        live?.let {
+            (it.parent as? ViewGroup)?.removeView(it)
+            it.tag = TAG_LIVE_CENTER
+            styleLive(it)
+            appUi.addView(
+                it,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, LIVE_H_DP), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                    topMargin = dp(activity, LIVE_TOP_DP)
+                }
+            )
         }
 
         val rail = LinearLayout(activity).apply {
@@ -167,10 +186,6 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             moveIntoRail(it, rail)
             styleStatus(activity, it)
         }
-        live?.let {
-            moveIntoRail(it, rail)
-            styleStatus(activity, it)
-        }
 
         listOf(zoom1, zoom2, zoom3).forEach { button ->
             moveIntoRail(button, rail)
@@ -178,15 +193,16 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             installZoomPressAnimation(button)
         }
 
-        shutter.text = "사진"
-        shutter.textSize = 13f
+        shutter.tag = TAG_SHUTTER_CELL
+        shutter.text = ""
         moveIntoRail(shutter, rail)
-        styleButton(activity, shutter)
+        styleShutter(activity, shutter)
 
         quality.tag = TAG_QUALITY_CELL
         moveIntoRail(quality, rail)
         styleButton(activity, quality)
 
+        rec.tag = TAG_REC_CELL
         moveIntoRail(rec, rail)
         styleButton(activity, rec)
 
@@ -194,7 +210,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         styleButton(activity, exit)
 
         findAllText(appUi)
-            .filter { it.parent !== rail && ZOOM_READOUT.matches(it.text?.toString().orEmpty().trim()) }
+            .filter { it.parent !== rail && DECIMAL_ZOOM_READOUT.matches(it.text?.toString().orEmpty().trim()) }
             .forEach { it.visibility = View.GONE }
 
         return rail
@@ -210,13 +226,39 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     private fun normalizeCells(activity: Activity, rail: LinearLayout) {
         for (i in 0 until rail.childCount) {
             val view = rail.getChildAt(i) as? TextView ?: continue
-            val status = view.tag == TAG_ROLE_LABEL || view.text?.toString()?.startsWith("LIVE") == true
-            val height = if (status) STATUS_H_DP else CELL_H_DP
-            view.layoutParams = LinearLayout.LayoutParams(dp(activity, CELL_W_DP), dp(activity, height)).apply {
-                bottomMargin = dp(activity, CELL_GAP_DP)
+            when (view.tag) {
+                TAG_SHUTTER_CELL -> {
+                    view.layoutParams = LinearLayout.LayoutParams(dp(activity, SHUTTER_DP), dp(activity, SHUTTER_DP)).apply {
+                        gravity = Gravity.CENTER_HORIZONTAL
+                        bottomMargin = dp(activity, SHUTTER_GAP_DP)
+                    }
+                }
+                TAG_ROLE_LABEL -> {
+                    view.layoutParams = LinearLayout.LayoutParams(dp(activity, CELL_W_DP), dp(activity, STATUS_H_DP)).apply {
+                        bottomMargin = dp(activity, CELL_GAP_DP)
+                    }
+                }
+                else -> {
+                    view.layoutParams = LinearLayout.LayoutParams(dp(activity, CELL_W_DP), dp(activity, CELL_H_DP)).apply {
+                        bottomMargin = dp(activity, CELL_GAP_DP)
+                    }
+                }
             }
             view.gravity = Gravity.CENTER
         }
+    }
+
+    private fun styleLive(view: TextView) {
+        view.text = "LIVE · 720p24"
+        view.textSize = 14f
+        view.setTextColor(Color.WHITE)
+        view.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        view.gravity = Gravity.CENTER
+        view.setPadding(0, 0, 0, 0)
+        view.background = null
+        view.isClickable = false
+        view.isFocusable = false
+        view.setShadowLayer(3f, 0f, 1f, Color.argb(190, 0, 0, 0))
     }
 
     private fun styleStatus(activity: Activity, view: TextView) {
@@ -240,11 +282,38 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         view.isFocusable = true
     }
 
+    private fun styleShutter(activity: Activity, view: TextView) {
+        view.text = ""
+        view.setPadding(0, 0, 0, 0)
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.WHITE)
+            setStroke(dp(activity, 3), Color.argb(205, 255, 255, 255))
+        }
+        view.elevation = dp(activity, 3).toFloat()
+        view.isClickable = true
+        view.isFocusable = true
+    }
+
     private fun cellBackground(activity: Activity, alpha: Int, strokeAlpha: Int) = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         setColor(Color.argb(alpha, 14, 14, 16))
         cornerRadius = dp(activity, 10).toFloat()
         setStroke(dp(activity, 1), Color.argb(strokeAlpha, 255, 255, 255))
+    }
+
+    private fun selectedBackground(activity: Activity) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(Color.WHITE)
+        cornerRadius = dp(activity, 10).toFloat()
+        setStroke(dp(activity, 1), Color.WHITE)
+    }
+
+    private fun recActiveBackground(activity: Activity) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(Color.rgb(225, 45, 52))
+        cornerRadius = dp(activity, 10).toFloat()
+        setStroke(dp(activity, 1), Color.rgb(255, 118, 124))
     }
 
     private fun installZoomPressAnimation(view: TextView) {
@@ -255,23 +324,70 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
                 MotionEvent.ACTION_DOWN -> {
                     touched.animate().cancel()
                     touched.animate()
-                        .scaleX(1.14f)
-                        .scaleY(1.14f)
-                        .alpha(0.76f)
-                        .setDuration(70L)
+                        .scaleX(0.80f)
+                        .scaleY(0.80f)
+                        .alpha(0.55f)
+                        .setDuration(55L)
                         .start()
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                MotionEvent.ACTION_UP -> {
+                    touched.animate().cancel()
+                    touched.animate()
+                        .scaleX(1.24f)
+                        .scaleY(1.24f)
+                        .alpha(1f)
+                        .setDuration(90L)
+                        .withEndAction {
+                            touched.animate()
+                                .scaleX(1f)
+                                .scaleY(1f)
+                                .setDuration(150L)
+                                .start()
+                        }
+                        .start()
+                }
+                MotionEvent.ACTION_CANCEL -> {
                     touched.animate().cancel()
                     touched.animate()
                         .scaleX(1f)
                         .scaleY(1f)
                         .alpha(1f)
-                        .setDuration(150L)
+                        .setDuration(120L)
                         .start()
                 }
             }
             false
+        }
+    }
+
+    private fun refreshZoomSelection(appUi: FrameLayout, rail: LinearLayout) {
+        val readout = findAllText(appUi)
+            .firstOrNull { DECIMAL_ZOOM_READOUT.matches(it.text?.toString().orEmpty().trim()) }
+            ?.text?.toString()?.trim()?.removeSuffix("x")?.toFloatOrNull()
+            ?: return
+
+        listOf(1, 2, 3).forEach { z ->
+            val button = findTagged(rail, "broadcast_camera_zoom_$z") as? TextView ?: return@forEach
+            val selected = abs(readout - z.toFloat()) < 0.08f
+            if (selected) {
+                button.setTextColor(Color.BLACK)
+                button.background = selectedBackground(button.context as Activity)
+            } else {
+                button.setTextColor(Color.WHITE)
+                button.background = cellBackground(button.context as Activity, alpha = 154, strokeAlpha = 92)
+            }
+        }
+    }
+
+    private fun refreshRecSelection(activity: Activity, rail: LinearLayout) {
+        val rec = findTagged(rail, TAG_REC_CELL) as? TextView ?: return
+        val active = rec.text?.toString()?.contains("STOP") == true
+        if (active) {
+            rec.setTextColor(Color.WHITE)
+            rec.background = recActiveBackground(activity)
+        } else {
+            rec.setTextColor(Color.BLACK)
+            rec.background = selectedBackground(activity)
         }
     }
 
@@ -291,12 +407,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             .getInt(KEY_QUALITY, QUALITY_HIGH)
         val selected = choosePhotoSize(quality, sizes)
         val mp = selected.width.toLong() * selected.height.toLong() / 1_000_000.0
-        val label = when (quality) {
-            QUALITY_STANDARD -> "표준"
-            QUALITY_HIGH -> "고화질"
-            else -> "최고"
-        }
-        val expected = "$label\n${String.format(Locale.US, "%.1f", mp)}MP"
+        val expected = "${String.format(Locale.US, "%.1f", mp)}MP"
         if (qualityView.text?.toString() != expected) qualityView.text = expected
     }
 
@@ -353,9 +464,12 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     companion object {
-        private const val TAG_RIGHT_RAIL = "broadcast_camera_right_rail_v2"
+        private const val TAG_RIGHT_RAIL = "broadcast_camera_right_rail_v3"
         private const val TAG_ROLE_LABEL = "camera_gate_actual_role_label_v1"
-        private const val TAG_QUALITY_CELL = "broadcast_camera_quality_cell_v2"
+        private const val TAG_LIVE_CENTER = "broadcast_camera_live_center_v1"
+        private const val TAG_SHUTTER_CELL = "broadcast_camera_shutter_cell_v1"
+        private const val TAG_QUALITY_CELL = "broadcast_camera_quality_cell_v3"
+        private const val TAG_REC_CELL = "broadcast_camera_rec_cell_v1"
 
         private const val PREFS = "broadcast_camera_app"
         private const val KEY_QUALITY = "photo_quality"
@@ -364,13 +478,18 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         private const val QUALITY_MAX = 2
 
         private const val CELL_W_DP = 92
-        private const val CELL_H_DP = 36
+        private const val CELL_H_DP = 38
         private const val STATUS_H_DP = 32
-        private const val CELL_GAP_DP = 4
+        private const val SHUTTER_DP = 68
+        private const val SHUTTER_GAP_DP = 7
+        private const val CELL_GAP_DP = 5
         private const val RAIL_TOP_DP = 8
         private const val RAIL_RIGHT_DP = 10
+        private const val LIVE_H_DP = 34
+        private const val LIVE_TOP_DP = 10
         private const val POLL_MS = 90L
 
-        private val ZOOM_READOUT = Regex("^\\d+(?:\\.\\d+)?x$")
+        private val DECIMAL_ZOOM_READOUT = Regex("^\\d+\\.\\d+x$")
+        private val MP_ONLY = Regex("^\\d+(?:\\.\\d+)?MP$", RegexOption.IGNORE_CASE)
     }
 }
