@@ -7,6 +7,9 @@ object TimingOperatorStore {
     data class Assignment(val eventCode:String,val role:String,val token:String,val expiresAtMs:Long,val serverUrl:String="")
     data class Handoff(val eventCode:String,val role:String,val token:String,val expiresAtMs:Long,val serverUrl:String)
     val ROLES get()=TimingOperatorStoreCore.ROLES
+    val TIMING_ROLES get()=TimingOperatorStoreCore.TIMING_ROLES
+    val BROADCAST_ROLES get()=TimingOperatorStoreCore.BROADCAST_ROLES
+    fun isBroadcastRole(role:String)=TimingOperatorStoreCore.isBroadcastRole(role)
     fun deviceId(context:Context)=TimingOperatorStoreCore.deviceId(context)
     fun deviceLabel(context:Context)=TimingOperatorStoreCore.deviceLabel(context)
     fun current(context:Context,nowMs:Long=System.currentTimeMillis())=TimingOperatorStoreCore.current(context,nowMs)?.let{Assignment(it.eventCode,it.role,it.token,it.expiresAtMs,it.serverUrl)}
