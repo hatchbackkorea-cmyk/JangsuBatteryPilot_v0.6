@@ -67,8 +67,10 @@ object BroadcastCameraClient {
 
     fun heartbeat(context: Context, assignment: TimingOperatorStore.Assignment, location: Location): HeartbeatResult {
         if (assignment.role.trim().uppercase(Locale.US) == "CHASE") {
-            // CHASE online/offline state comes from the live WebRTC publisher connection. It has no
-            // fixed course position, therefore the legacy fixed-camera GPS heartbeat is skipped.
+            // CHASE online/offline video state comes from the live WebRTC publisher connection.
+            // Refresh V2 activation here as well so a server process restart cannot silently put an
+            // already-running CHASE phone back under the legacy GPS AUTO director.
+            runCatching { BroadcastDirectorClient.activate(context, assignment) }
             return HeartbeatResult(assignment.eventCode, "CHASE", 0.0, 0.0)
         }
         val base = baseUrl(context, assignment.serverUrl)
