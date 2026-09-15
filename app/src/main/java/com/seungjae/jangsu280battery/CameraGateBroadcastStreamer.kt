@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Encoded packet emitted by the secondary 30 FPS broadcast encoder. */
+/** Encoded packet emitted by the secondary 24 FPS broadcast encoder. */
 data class CameraGateBroadcastPacket(
     val kind: Int,
     val ptsUs: Long,
@@ -33,8 +33,9 @@ data class CameraGateBroadcastPacket(
  * Non-blocking HD publisher for an official Camera Gate phone.
  *
  * The camera/timing thread only performs a bounded queue offer. Network writes happen on a
- * dedicated worker so a slow Wi-Fi/LTE path can never delay the timing trigger path. When the
- * queue fills we discard inter frames and resume at the next key frame with fresh codec config.
+ * dedicated worker so a slow Wi-Fi/LTE path can never delay the timing trigger path. At most three
+ * live video frames are retained. When the network falls behind, stale video is discarded and the
+ * stream resumes from the next key frame with fresh codec config.
  */
 class CameraGateBroadcastStreamer(
     context: Context,
@@ -48,7 +49,7 @@ class CameraGateBroadcastStreamer(
         .pingInterval(5, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
-    private val queue = ArrayBlockingQueue<Outbound>(18)
+    private val queue = ArrayBlockingQueue<Outbound>(MAX_VIDEO_QUEUE + 3)
     private val worker = Executors.newSingleThreadExecutor()
     private val closed = AtomicBoolean(false)
     @Volatile private var socket: WebSocket? = null
@@ -109,9 +110,30 @@ class CameraGateBroadcastStreamer(
         client.connectionPool.evictAll()
     }
 
+    private fun queuedVideoFrames(): Int = queue.count { it is Outbound.Binary && !it.config }
+
+    private fun collapseToBootstrap() {
+        val retained = ArrayList<Outbound>(queue.size)
+        queue.drainTo(retained)
+        retained.forEach { item ->
+            when (item) {
+                is Outbound.Text -> queue.offer(item)
+                is Outbound.Binary -> if (item.config) queue.offer(item)
+            }
+        }
+        waitingForKeyFrame = true
+    }
+
     private fun enqueue(item: Outbound) {
+        if (item is Outbound.Binary && !item.config && queuedVideoFrames() >= MAX_VIDEO_QUEUE) {
+            collapseToBootstrap()
+            if (!item.keyFrame) return
+            waitingForKeyFrame = false
+        }
         if (queue.offer(item)) return
-        // Broadcast congestion must never become timing congestion.
+
+        // Broadcast congestion must never become timing congestion. Keep only bootstrap state and
+        // jump to the newest independently decodable key frame instead of replaying stale video.
         queue.clear()
         waitingForKeyFrame = true
         latestMeta?.let { queue.offer(Outbound.Text(it)) }
@@ -120,7 +142,7 @@ class CameraGateBroadcastStreamer(
         when (item) {
             is Outbound.Text -> queue.offer(item)
             is Outbound.Binary -> if (item.config || item.keyFrame) {
-                waitingForKeyFrame = !item.config && !item.keyFrame
+                if (!item.config) waitingForKeyFrame = false
                 queue.offer(item)
             }
         }
@@ -130,34 +152,46 @@ class CameraGateBroadcastStreamer(
         while (!closed.get()) {
             try {
                 if (!connected && System.currentTimeMillis() >= reconnectAfterMs) connect()
-                val item = queue.poll(250, TimeUnit.MILLISECONDS) ?: continue
+                val item = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 val ws = socket
                 if (!connected || ws == null) {
-                    // Keep only bootstrap state while disconnected. Live P frames are intentionally
-                    // discarded; the next key frame will restart the viewer cleanly.
                     if (item is Outbound.Binary && !item.config) waitingForKeyFrame = true
                     continue
                 }
+
+                // OkHttp has its own WebSocket send buffer. If that hidden buffer starts building,
+                // reconnect immediately instead of allowing old video to accumulate behind TCP.
+                if (ws.queueSize() > MAX_SOCKET_BACKLOG_BYTES) {
+                    runCatching { ws.cancel() }
+                    connected = false
+                    waitingForKeyFrame = true
+                    collapseToBootstrap()
+                    reconnectAfterMs = System.currentTimeMillis() + 100L
+                    continue
+                }
+
                 val ok = when (item) {
                     is Outbound.Text -> ws.send(item.value)
                     is Outbound.Binary -> ws.send(ByteString.of(*item.bytes))
                 }
                 if (!ok) {
                     connected = false
-                    reconnectAfterMs = System.currentTimeMillis() + 1000L
+                    waitingForKeyFrame = true
+                    reconnectAfterMs = System.currentTimeMillis() + 250L
                 }
             } catch (_: InterruptedException) {
                 return
             } catch (_: Throwable) {
                 connected = false
-                reconnectAfterMs = System.currentTimeMillis() + 1200L
+                waitingForKeyFrame = true
+                reconnectAfterMs = System.currentTimeMillis() + 350L
             }
         }
     }
 
     private fun connect() {
         if (closed.get()) return
-        reconnectAfterMs = System.currentTimeMillis() + 1500L
+        reconnectAfterMs = System.currentTimeMillis() + 700L
         val base = assignment.serverUrl.trim().trimEnd('/').ifBlank {
             runCatching { RaceServerClient(app).baseUrl() }.getOrDefault("").trim().trimEnd('/')
         }
@@ -184,12 +218,14 @@ class CameraGateBroadcastStreamer(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 connected = false
-                if (!closed.get()) reconnectAfterMs = System.currentTimeMillis() + 800L
+                waitingForKeyFrame = true
+                if (!closed.get()) reconnectAfterMs = System.currentTimeMillis() + 200L
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 connected = false
-                if (!closed.get()) reconnectAfterMs = System.currentTimeMillis() + 1200L
+                waitingForKeyFrame = true
+                if (!closed.get()) reconnectAfterMs = System.currentTimeMillis() + 350L
             }
         })
     }
@@ -213,5 +249,7 @@ class CameraGateBroadcastStreamer(
         const val KIND_CSD1 = 2
         const val KIND_FRAME = 3
         const val KEY_FRAME_FLAG = 1
+        private const val MAX_VIDEO_QUEUE = 3
+        private const val MAX_SOCKET_BACKLOG_BYTES = 256L * 1024L
     }
 }
