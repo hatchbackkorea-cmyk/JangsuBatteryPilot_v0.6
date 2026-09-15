@@ -12,6 +12,7 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -29,7 +30,7 @@ import java.util.concurrent.TimeUnit
  *
  * Camera2 writes the real 60/120 FPS timing stream into the primary MediaCodec surface. The stream
  * is decoded into one GL texture for the narrow timing strip and operator preview. A completely
- * separate H.264 encoder receives only every Nth decoded frame (target 30 FPS) for HD broadcast.
+ * separate H.264 encoder receives paced 24 FPS frames for low-latency HD broadcast.
  * If that secondary encoder is unavailable, timing continues unchanged.
  */
 class CameraGateGlAnalyzer(
@@ -68,7 +69,8 @@ class CameraGateGlAnalyzer(
     private var broadcastWidth = 0
     private var broadcastHeight = 0
     private var broadcastBitrate = 0
-    private var broadcastEvery = 4
+    private var nextBroadcastTimestampNs = 0L
+    private var lastKeyFrameRequestNs = 0L
     private val broadcastTimesUs = ArrayDeque<Long>()
 
     @Volatile var streamFps: Double = 0.0
@@ -117,7 +119,8 @@ class CameraGateGlAnalyzer(
         releaseInternal()
         released = false
         previewEvery = if (targetFps >= 100) 6 else 2
-        broadcastEvery = (targetFps / BROADCAST_FPS).coerceAtLeast(1)
+        nextBroadcastTimestampNs = 0L
+        lastKeyFrameRequestNs = 0L
         streamFps = 0.0
         broadcastFps = 0.0
         broadcastActive = false
@@ -247,14 +250,17 @@ class CameraGateGlAnalyzer(
     /** Start a second AVC encoder. Any failure disables broadcast only. */
     private fun startBroadcastEncoderSafely(sourceSize: Size) {
         runCatching {
-            val outSize = when {
-                sourceSize.width >= 1920 && sourceSize.height >= 1080 -> Size(1920, 1080)
-                sourceSize.width >= 1280 && sourceSize.height >= 720 -> Size(1280, 720)
-                else -> sourceSize
+            val landscape = sourceSize.width >= sourceSize.height
+            val outSize = if (sourceSize.width * sourceSize.height >= 1280 * 720) {
+                if (landscape) Size(1280, 720) else Size(720, 1280)
+            } else {
+                sourceSize
             }
             broadcastWidth = outSize.width
             broadcastHeight = outSize.height
-            broadcastBitrate = if (outSize.width >= 1920) 8_000_000 else 5_000_000
+            broadcastBitrate = BROADCAST_BITRATE
+            nextBroadcastTimestampNs = 0L
+            lastKeyFrameRequestNs = 0L
 
             val thread = HandlerThread("CameraGateBroadcastCodec").apply { start() }
             broadcastThread = thread
@@ -465,19 +471,31 @@ class CameraGateGlAnalyzer(
 
             frameCounter++
 
-            // Broadcast draw is intentionally independent from timing. At 120 FPS this runs every
-            // fourth decoded frame; at 60 FPS every second frame. No glReadPixels is used here.
+            // Broadcast pacing is timestamp-based so both 60 FPS and 120 FPS timing sources stay
+            // close to 24 FPS without changing the timing path. No glReadPixels is used here.
             if (
                 broadcastActive &&
                 broadcastEglSurface != EGL14.EGL_NO_SURFACE &&
                 timestamp > 0L &&
-                frameCounter % broadcastEvery == 0
+                (nextBroadcastTimestampNs == 0L || timestamp >= nextBroadcastTimestampNs)
             ) {
                 runCatching {
+                    if (lastKeyFrameRequestNs == 0L || timestamp - lastKeyFrameRequestNs >= KEY_FRAME_REQUEST_INTERVAL_NS) {
+                        broadcastEncoder?.setParameters(Bundle().apply {
+                            putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+                        })
+                        lastKeyFrameRequestNs = timestamp
+                    }
+
                     draw(previewCoords, broadcastEglSurface, broadcastWidth, broadcastHeight)
                     EGLExt.eglPresentationTimeANDROID(eglDisplay, broadcastEglSurface, timestamp)
                     if (!EGL14.eglSwapBuffers(eglDisplay, broadcastEglSurface)) {
                         broadcastActive = false
+                    } else {
+                        if (nextBroadcastTimestampNs == 0L) nextBroadcastTimestampNs = timestamp
+                        do {
+                            nextBroadcastTimestampNs += BROADCAST_FRAME_INTERVAL_NS
+                        } while (nextBroadcastTimestampNs <= timestamp)
                     }
                 }.onFailure { broadcastActive = false }
             }
@@ -666,6 +684,8 @@ class CameraGateGlAnalyzer(
         broadcastInputSurface = null
         broadcastTimesUs.clear()
         broadcastFps = 0.0
+        nextBroadcastTimestampNs = 0L
+        lastKeyFrameRequestNs = 0L
         broadcastHandler = null
         runCatching { broadcastThread?.quitSafely() }
         broadcastThread = null
@@ -736,6 +756,9 @@ class CameraGateGlAnalyzer(
         private const val ANALYSIS_H = 96
         private const val MAX_PENDING_FRAMES = 10
         private const val BROADCAST_MIME = "video/avc"
-        private const val BROADCAST_FPS = 30
+        private const val BROADCAST_FPS = 24
+        private const val BROADCAST_BITRATE = 3_000_000
+        private const val BROADCAST_FRAME_INTERVAL_NS = 1_000_000_000L / BROADCAST_FPS
+        private const val KEY_FRAME_REQUEST_INTERVAL_NS = 500_000_000L
     }
 }
