@@ -17,9 +17,9 @@ import java.util.WeakHashMap
  * RACE home field controls.
  *
  * - Admin phones keep the timing-device QR manager.
- * - Any phone that successfully scanned an official timing QR gets a direct measurement menu for
- *   the lifetime of its stored 12-hour assignment, even after the app is restarted.
- * - Once that assignment expires, the measurement menu is removed automatically.
+ * - Any phone that successfully scanned an official timing or broadcast-camera QR gets a direct
+ *   field menu for the lifetime of its stored 12-hour assignment, even after app restart.
+ * - Once that assignment expires, the field menu is removed automatically.
  */
 object CameraGateRaceUiInstaller {
     private const val TAG_CAMERA_BUTTON = "camera_gate_beta_race_home_v6"
@@ -83,7 +83,12 @@ object CameraGateRaceUiInstaller {
                     })
                 }
             }
-            button.text = "📷 ${assignment.role} 계측 시작\n${assignment.eventCode} · QR 운영권한 활성"
+            val broadcast = TimingOperatorStore.isBroadcastRole(assignment.role)
+            button.text = if (broadcast) {
+                "🎥 ${assignment.role} 중계 카메라 시작\n${assignment.eventCode} · 12시간 영상권한 활성"
+            } else {
+                "📷 ${assignment.role} 계측 시작\n${assignment.eventCode} · 12시간 계측권한 활성"
+            }
             if (button.parent == null) {
                 val insertIndex = fieldControlInsertIndex(body, start)
                 body.addView(button, insertIndex, LinearLayout.LayoutParams(-1, dp(72)).apply {
