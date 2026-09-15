@@ -2,6 +2,7 @@ package com.seungjae.jangsu280battery
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -128,7 +129,11 @@ class BroadcastCameraEnrollmentActivity : Activity() {
             setOnClickListener {
                 val current = TimingOperatorStore.current(this@BroadcastCameraEnrollmentActivity)
                 if (current != null && TimingOperatorStore.isBroadcastRole(current.role)) {
-                    startActivity(Intent(this@BroadcastCameraEnrollmentActivity, CameraGateHighSpeedActivity::class.java))
+                    if (current.role.trim().uppercase(Locale.US) == "CHASE") {
+                        openChaseSourcePicker(finishEnrollment = false)
+                    } else {
+                        startActivity(Intent(this@BroadcastCameraEnrollmentActivity, CameraGateHighSpeedActivity::class.java))
+                    }
                 } else {
                     status.text = "유효한 중계 카메라 연결이 없습니다. 경기코드를 입력해 주세요."
                 }
@@ -274,16 +279,34 @@ class BroadcastCameraEnrollmentActivity : Activity() {
         )
         codeInput.setText(registered.eventCode)
         status.text = if (chase) {
-            "연결 완료 · ${registered.eventCode} · CHASE\n이 카메라가 기본 라이브 화면입니다. 포인트 방송이 끝나면 자동으로 CHASE로 복귀합니다."
+            "연결 완료 · ${registered.eventCode} · CHASE\n영상 입력을 선택하세요. USB 액션캠은 현재 실험 기능입니다."
         } else {
             "연결 완료 · ${registered.eventCode} · ${registered.role}\n코스 ${(registered.routeM / 1000.0).format2()} km · GPS ±${registered.accuracyM.roundToInt()}m · 코스에서 ${registered.nearestM.roundToInt()}m"
         }
         main.postDelayed({
             if (!isFinishing && !isDestroyed) {
-                startActivity(Intent(this, CameraGateHighSpeedActivity::class.java))
-                finish()
+                if (chase) {
+                    openChaseSourcePicker(finishEnrollment = true)
+                } else {
+                    startActivity(Intent(this, CameraGateHighSpeedActivity::class.java))
+                    finish()
+                }
             }
-        }, 650L)
+        }, 450L)
+    }
+
+    private fun openChaseSourcePicker(finishEnrollment: Boolean) {
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this)
+            .setTitle("CHASE 영상 입력")
+            .setMessage("체이스 중계에 사용할 카메라를 선택하세요.")
+            .setItems(arrayOf("📱 휴대폰 카메라", "🎥 USB 액션캠 · DJI Action 5 Pro")) { _, which ->
+                val target = if (which == 1) UsbChaseCameraActivity::class.java else CameraGateHighSpeedActivity::class.java
+                startActivity(Intent(this, target))
+                if (finishEnrollment) finish()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun setButtonsEnabled(enabled: Boolean) {
