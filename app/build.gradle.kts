@@ -98,5 +98,4 @@ dependencies {
     implementation("com.kakao.maps.open:android:2.15.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.github.webrtc-sdk:android:150.7871.01")
-    implementation("com.herohan:UVCAndroid:1.0.13")
 }
