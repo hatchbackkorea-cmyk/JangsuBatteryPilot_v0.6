@@ -27,7 +27,10 @@ object TimingOperatorStoreCore {
     private const val CAMERA_INSTALL_ID="install_id"
     private const val ACCESS_TTL_MS=12L*60L*60L*1000L
     private const val LEGACY_LEASE_TTL_MS=36L*60L*60L*1000L
-    val ROLES=listOf("START","CP1","CP2","CP3","CP4","CP5","FINISH")
+    val TIMING_ROLES=listOf("START","CP1","CP2","CP3","CP4","CP5","FINISH")
+    val BROADCAST_ROLES=(1..12).map { "CAM$it" }
+    val ROLES=TIMING_ROLES+BROADCAST_ROLES
+    fun isBroadcastRole(role:String)=role.trim().uppercase(Locale.US) in BROADCAST_ROLES
 
     /** Use the exact same id as CameraGateRoleInstaller so admin registration and triggers identify one phone. */
     fun deviceId(context:Context):String {
@@ -88,7 +91,10 @@ object TimingOperatorStoreCore {
             .putString(KEY_SERVER,a.serverUrl.trim().trimEnd('/'))
             .putString(KEY_DEVICE_ID,deviceId(context))
             .apply()
-        app.getSharedPreferences(CAMERA_PREFS,Context.MODE_PRIVATE).edit().putString(CAMERA_ROLE_KEY,a.role.uppercase(Locale.US)).apply()
+        // Official timing roles keep the Camera Gate relay role. Broadcast-only roles force the
+        // legacy trigger relay into COMPARE mode so no START/CP/FINISH timing post can be emitted.
+        val cameraMode=if(isBroadcastRole(a.role))"COMPARE" else a.role.uppercase(Locale.US)
+        app.getSharedPreferences(CAMERA_PREFS,Context.MODE_PRIVATE).edit().putString(CAMERA_ROLE_KEY,cameraMode).apply()
     }
     fun clear(context:Context){
         val app=context.applicationContext
