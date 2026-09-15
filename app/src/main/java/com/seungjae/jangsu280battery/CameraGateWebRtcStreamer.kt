@@ -28,9 +28,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Direct Camera Gate transport using an unreliable/unordered WebRTC DataChannel.
  *
  * We intentionally transport the already encoded H.264 packets produced by CameraGateGlAnalyzer
- * instead of opening a second camera.  Signaling goes through RiderControlCenter, while live video
- * normally travels phone <-> operator PC directly over WebRTC/UDP.  No frame queue is maintained:
+ * instead of opening a second camera. Signaling goes through RiderControlCenter, while live video
+ * normally travels phone <-> operator PC directly over WebRTC/UDP. No frame queue is maintained:
  * when SCTP starts backing up, delta frames are dropped and playback resumes at the next key frame.
+ *
+ * A viewer marked as preview receives only one independently decodable IDR roughly every two
+ * seconds. The same 720p encoder is reused, so there is no second camera/encoder cost on the phone,
+ * while the 9-up camera wall uses only a small fraction of the normal uplink bandwidth.
  */
 class CameraGateWebRtcStreamer(
     context: Context,
@@ -59,8 +63,10 @@ class CameraGateWebRtcStreamer(
         val id: String,
         val connection: PeerConnection,
         val channel: DataChannel,
+        val preview: Boolean = false,
         @Volatile var waitingForKeyFrame: Boolean = true,
         @Volatile var opened: Boolean = false,
+        @Volatile var lastPreviewKeyPtsUs: Long = 0L,
     )
 
     init {
@@ -98,6 +104,26 @@ class CameraGateWebRtcStreamer(
         peers.values.forEach { peer ->
             val channel = peer.channel
             if (!peer.opened || channel.state() != DataChannel.State.OPEN) return@forEach
+
+            if (peer.preview) {
+                if (isConfig) return@forEach
+                if (!isKey) return@forEach
+                if (peer.lastPreviewKeyPtsUs > 0L &&
+                    packet.ptsUs - peer.lastPreviewKeyPtsUs < PREVIEW_KEY_INTERVAL_US
+                ) return@forEach
+                if (channel.bufferedAmount() > PREVIEW_MAX_BUFFERED_BYTES) return@forEach
+
+                latestCsd0?.let { sendBinary(channel, it) }
+                latestCsd1?.let { sendBinary(channel, it) }
+                if (sendBinary(channel, framed)) {
+                    peer.lastPreviewKeyPtsUs = packet.ptsUs
+                    peer.waitingForKeyFrame = false
+                } else {
+                    peer.waitingForKeyFrame = true
+                }
+                return@forEach
+            }
+
             if (channel.bufferedAmount() > MAX_BUFFERED_BYTES) {
                 peer.waitingForKeyFrame = true
                 return@forEach
@@ -172,7 +198,7 @@ class CameraGateWebRtcStreamer(
         val type = msg.optString("type")
         val viewerId = msg.optString("viewer_id")
         when (type) {
-            "viewer_join" -> if (viewerId.isNotBlank()) createPeer(viewerId)
+            "viewer_join" -> if (viewerId.isNotBlank()) createPeer(viewerId, msg.optBoolean("preview", false))
             "viewer_leave" -> if (viewerId.isNotBlank()) closePeer(viewerId)
             "answer" -> peers[viewerId]?.connection?.setRemoteDescription(
                 EmptySdpObserver,
@@ -186,11 +212,15 @@ class CameraGateWebRtcStreamer(
                     )
                 }
             }
-            "fallback_request" -> onFallbackRequested()
+            "fallback_request" -> {
+                // Preview viewers never ask for fallback. Keeping this global fallback behavior for
+                // the full-quality viewer preserves the proven Camera Gate field path.
+                onFallbackRequested()
+            }
         }
     }
 
-    private fun createPeer(viewerId: String) {
+    private fun createPeer(viewerId: String, preview: Boolean) {
         closePeer(viewerId)
         val config = PeerConnection.RTCConfiguration(
             listOf(
@@ -201,8 +231,10 @@ class CameraGateWebRtcStreamer(
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(newState: PeerConnection.SignalingState?) = Unit
             override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
-                if (newState == PeerConnection.IceConnectionState.FAILED ||
-                    newState == PeerConnection.IceConnectionState.DISCONNECTED
+                if (!preview && (
+                        newState == PeerConnection.IceConnectionState.FAILED ||
+                            newState == PeerConnection.IceConnectionState.DISCONNECTED
+                        )
                 ) onFallbackRequested()
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
@@ -225,15 +257,15 @@ class CameraGateWebRtcStreamer(
             override fun onAddTrack(receiver: RtpReceiver?, mediaStreams: Array<out MediaStream>?) = Unit
         }
         val pc = factory.createPeerConnection(config, observer) ?: run {
-            onFallbackRequested()
+            if (!preview) onFallbackRequested()
             return
         }
         val init = DataChannel.Init().apply {
             ordered = false
             maxRetransmits = 0
         }
-        val channel = pc.createDataChannel("timegate-video", init)
-        val peer = Peer(viewerId, pc, channel)
+        val channel = pc.createDataChannel(if (preview) "timegate-preview" else "timegate-video", init)
+        val peer = Peer(viewerId, pc, channel, preview = preview)
         peers[viewerId] = peer
         channel.registerObserver(object : DataChannel.Observer {
             override fun onBufferedAmountChange(previousAmount: Long) = Unit
@@ -260,12 +292,12 @@ class CameraGateWebRtcStreamer(
                 })
             }
             override fun onSetSuccess() = Unit
-            override fun onCreateFailure(error: String?) { onFallbackRequested() }
-            override fun onSetFailure(error: String?) { onFallbackRequested() }
+            override fun onCreateFailure(error: String?) { if (!preview) onFallbackRequested() }
+            override fun onSetFailure(error: String?) { if (!preview) onFallbackRequested() }
         }, MediaConstraints())
 
         scheduler.schedule({
-            if (!closed.get() && peers[viewerId]?.opened != true) onFallbackRequested()
+            if (!preview && !closed.get() && peers[viewerId]?.opened != true) onFallbackRequested()
         }, PEER_OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     }
 
@@ -340,6 +372,8 @@ class CameraGateWebRtcStreamer(
 
     companion object {
         private const val MAX_BUFFERED_BYTES = 160L * 1024L
+        private const val PREVIEW_MAX_BUFFERED_BYTES = 96L * 1024L
+        private const val PREVIEW_KEY_INTERVAL_US = 1_800_000L
         private const val PEER_OPEN_TIMEOUT_MS = 2200L
     }
 }
