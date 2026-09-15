@@ -43,6 +43,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         var consecutiveMotion: Int = 0,
         var lastMotionMs: Long = 0L,
         var lastRequestMs: Long = 0L,
+        var lastActivateMs: Long = 0L,
         val networkBusy: AtomicBoolean = AtomicBoolean(false),
         var job: Runnable? = null,
     )
@@ -70,6 +71,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
             )
         }.getOrNull() ?: return
         monitors[activity] = monitor
+        activate(monitor)
         schedule(monitor)
     }
 
@@ -98,6 +100,7 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
 
     private fun tick(m: Monitor) {
         val now = SystemClock.elapsedRealtime()
+        if (now - m.lastActivateMs >= ACTIVATE_REFRESH_MS) activate(m)
         val role = m.assignment.role.trim().uppercase(Locale.US)
         val isBroadcastOnly = TimingOperatorStore.isBroadcastRole(role)
         val armed = if (isBroadcastOnly) true else readBoolean(m.armedField, m.activity)
@@ -133,6 +136,14 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
                 // Keep the token alive through tiny gaps between riders in a close pack.
                 request(m, "group-gap-hold")
             }
+        }
+    }
+
+    private fun activate(m: Monitor) {
+        val now = SystemClock.elapsedRealtime()
+        m.lastActivateMs = now
+        network.execute {
+            runCatching { BroadcastDirectorClient.activate(m.activity.applicationContext, m.assignment) }
         }
     }
 
@@ -201,5 +212,6 @@ class BroadcastDirectorMotionProvider : ContentProvider(), Application.ActivityL
         private const val MIN_APPROACH_SCORE = 5.0
         private const val REFRESH_MS = 900L
         private const val QUIET_RELEASE_MS = 1_650L
+        private const val ACTIVATE_REFRESH_MS = 30_000L
     }
 }
