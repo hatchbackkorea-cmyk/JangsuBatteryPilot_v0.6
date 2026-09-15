@@ -33,7 +33,7 @@
         <activity android:name=".BroadcastCameraEnrollmentActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateTestActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateTestActivityV2" android:exported="false" android:screenOrientation="portrait" />
-        <activity android:name=".CameraGateHighSpeedActivity" android:exported="false" android:screenOrientation="fullSensor" />
+        <activity android:name=".CameraGateHighSpeedActivity" android:exported="false" android:screenOrientation="landscape" />
         <activity android:name=".RaceLapHistoryActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RaceSpectatorActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".RaceBroadcastActivity" android:exported="false" android:screenOrientation="portrait" />
