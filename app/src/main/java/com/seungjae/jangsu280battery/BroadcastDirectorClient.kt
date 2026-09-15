@@ -36,9 +36,12 @@ object BroadcastDirectorClient {
     }
 
     private fun eligible(assignment: TimingOperatorStore.Assignment): Boolean {
-        if (!assignment.isValid()) return false
         val role = assignment.role.trim().uppercase(Locale.US)
-        return role != "CHASE" && role in TimingOperatorStore.ROLES
+        if (assignment.eventCode.isBlank()) return false
+        if (role !in TimingOperatorStore.ROLES || role == "CHASE") return false
+        if (assignment.token.length < 20) return false
+        if (assignment.expiresAtMs <= System.currentTimeMillis()) return false
+        return true
     }
 
     private fun post(context: Context, assignment: TimingOperatorStore.Assignment, action: String, reason: String) {
