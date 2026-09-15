@@ -56,7 +56,12 @@ class TimingOperatorLockProvider : ContentProvider(), Application.ActivityLifecy
         if (activity.isFinishing || activity.isDestroyed) return
         val assignment = TimingOperatorStore.current(activity) ?: return
         val status = findText(activity.window.decorView as? ViewGroup) ?: return
-        status.text = "게이트 역할 · 🔒 ${assignment.role} · ${assignment.eventCode} · 공식 계측폰"
+        val broadcast = TimingOperatorStore.isBroadcastRole(assignment.role)
+        status.text = if (broadcast) {
+            "중계 카메라 · 🔒 ${assignment.role} · ${assignment.eventCode} · 영상전용"
+        } else {
+            "게이트 역할 · 🔒 ${assignment.role} · ${assignment.eventCode} · 공식 계측폰"
+        }
         val parent = status.parent as? ViewGroup
         if (parent != null) {
             for (i in 0 until parent.childCount) {
@@ -88,8 +93,13 @@ class TimingOperatorLockProvider : ContentProvider(), Application.ActivityLifecy
                         if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
                         if (result != null) {
                             if (!result.active) {
+                                val broadcast = TimingOperatorStore.isBroadcastRole(assignment.role)
                                 TimingOperatorStore.clear(activity)
-                                Toast.makeText(activity, "이 계측폰은 관리자 운영툴에서 해제되었습니다.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    activity,
+                                    if (broadcast) "이 중계카메라의 12시간 영상권한이 종료되었습니다." else "이 계측폰의 12시간 계측권한이 종료되었습니다.",
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 activity.finish()
                                 return@runOnUiThread
                             }
@@ -114,6 +124,7 @@ class TimingOperatorLockProvider : ContentProvider(), Application.ActivityLifecy
 
     private fun showIdentifyPopup(activity: Activity, assignment: TimingOperatorStore.Assignment) {
         dialogs.remove(activity)?.dismiss()
+        val broadcast = TimingOperatorStore.isBroadcastRole(assignment.role)
         val body = TextView(activity).apply {
             text = "${assignment.role}\n이 기기입니다\n\n${TimingOperatorStore.deviceLabel(activity)}"
             textSize = 31f
@@ -122,7 +133,7 @@ class TimingOperatorLockProvider : ContentProvider(), Application.ActivityLifecy
             setPadding(dp(activity, 24), dp(activity, 36), dp(activity, 24), dp(activity, 36))
         }
         val dialog = AlertDialog.Builder(activity)
-            .setTitle("계측폰 확인")
+            .setTitle(if (broadcast) "중계카메라 확인" else "계측폰 확인")
             .setView(body)
             .create()
         dialogs[activity] = dialog
@@ -135,7 +146,10 @@ class TimingOperatorLockProvider : ContentProvider(), Application.ActivityLifecy
         if (root == null) return null
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
-            if (child is TextView && child.text?.toString()?.startsWith("게이트 역할 ·") == true) return child
+            if (child is TextView && (
+                    child.text?.toString()?.startsWith("게이트 역할 ·") == true ||
+                    child.text?.toString()?.startsWith("중계 카메라 ·") == true
+                )) return child
             if (child is ViewGroup) findText(child)?.let { return it }
         }
         return null
