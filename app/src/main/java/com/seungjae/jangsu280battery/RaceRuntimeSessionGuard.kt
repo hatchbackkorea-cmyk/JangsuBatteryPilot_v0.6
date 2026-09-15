@@ -84,60 +84,66 @@ private object RaceRuntimeUiCallbacks : Application.ActivityLifecycleCallbacks {
 /**
  * Live-screen cleanup requested for the field UI:
  * - hide the old coloured GPX banner and replace it with plain "fileName · 다운로드 완료" text;
- * - force the grey header's ARMED/RUNNING/FINISH identity text to white;
  * - put DNF inside the bottom GPS/status strip as a text action, only while RUNNING.
+ *
+ * RaceActivity already owns the 10 Hz live renderer. This helper intentionally avoids scanning and
+ * restyling the whole view tree every 100 ms; structural work is performed once per content root
+ * and later ticks only react to actual GPX/DNF state changes.
  */
 object RaceRuntimeLiveUiInstaller {
     private const val TAG_PLAIN_GPX = "timegate_plain_gpx_status_v03473"
     private const val TAG_FOOTER_ROW = "timegate_live_footer_row_v03473"
     private const val TAG_DNF = "timegate_dnf_text_v03473"
+    private const val REFRESH_MS = 250L
 
-    private data class State(val handler: Handler, val runnable: Runnable)
+    private class State(val handler: Handler) {
+        lateinit var runnable: Runnable
+        var root: ViewGroup? = null
+        var legacyBannerHidden = false
+        var footerPrepared = false
+        var lastGpxKey = ""
+        var lastRunning: Boolean? = null
+    }
+
     private val states = WeakHashMap<RaceActivity, State>()
 
     fun install(activity: RaceActivity) {
         if (states.containsKey(activity)) return
-        val handler = Handler(Looper.getMainLooper())
-        lateinit var runner: Runnable
-        runner = Runnable {
+        val state = State(Handler(Looper.getMainLooper()))
+        state.runnable = Runnable {
             if (activity.isFinishing || activity.isDestroyed) return@Runnable
-            update(activity)
-            handler.postDelayed(runner, 100L)
+            update(activity, state)
+            state.handler.postDelayed(state.runnable, REFRESH_MS)
         }
-        states[activity] = State(handler, runner)
-        handler.post(runner)
+        states[activity] = state
+        state.handler.post(state.runnable)
     }
 
     fun uninstall(activity: RaceActivity) {
         states.remove(activity)?.let { it.handler.removeCallbacks(it.runnable) }
     }
 
-    private fun update(activity: RaceActivity) {
+    private fun update(activity: RaceActivity, state: State) {
         val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-        val snapshot = RaceDataStore(activity).snapshot()
-
-        forceLiveHeaderWhite(content)
-        updatePlainGpxStatus(activity, content)
-        installFooterDnf(activity, content, snapshot)
-    }
-
-    private fun forceLiveHeaderWhite(root: View) {
-        walkText(root) { tv ->
-            val t = tv.text?.toString().orEmpty()
-            if (
-                t.startsWith("ARMED ·") ||
-                t.startsWith("RUNNING ·") ||
-                t.startsWith("FINISH ·") ||
-                t.startsWith("READY ·")
-            ) {
-                tv.setTextColor(Color.WHITE)
-            }
+        if (state.root !== content) {
+            state.root = content
+            state.legacyBannerHidden = false
+            state.footerPrepared = false
+            state.lastGpxKey = ""
+            state.lastRunning = null
         }
+
+        if (!state.legacyBannerHidden) {
+            hideLegacyGpxStatus(content)
+            state.legacyBannerHidden = true
+        }
+
+        updatePlainGpxStatus(activity, content, state)
+        state.footerPrepared = installFooterDnf(activity, content, state, state.footerPrepared)
     }
 
-    private fun updatePlainGpxStatus(activity: RaceActivity, content: ViewGroup) {
-        // Hide the legacy coloured overlay. Its own refresher never forces visibility back on.
-        walkText(content) { tv ->
+    private fun hideLegacyGpxStatus(root: View) {
+        walkText(root) { tv ->
             val t = tv.text?.toString().orEmpty()
             if (
                 t.startsWith("✓ GPX 다운로드 완료") ||
@@ -150,67 +156,85 @@ object RaceRuntimeLiveUiInstaller {
                 tv.visibility = View.GONE
             }
         }
+    }
 
+    private fun updatePlainGpxStatus(activity: RaceActivity, content: ViewGroup, state: State) {
         val info = RaceGpxDownloadStatus.read(activity)
         val joined = RaceDataStore(activity).lastJoined()
         val showCompleted = joined != null &&
             info.eventCode.equals(joined.config.eventCode, ignoreCase = true) &&
             info.state in setOf("DOWNLOADED", "COMPLETED")
+        val fileName = info.serverFileName.trim().ifBlank { "GPX 파일" }
+        val nextKey = "${showCompleted}|${info.eventCode}|${info.state}|$fileName"
 
-        val existing = content.findViewWithTag<TextView>(TAG_PLAIN_GPX)
+        var view = content.findViewWithTag<TextView>(TAG_PLAIN_GPX)
+        if (state.lastGpxKey == nextKey && view != null) return
+        state.lastGpxKey = nextKey
+
         if (!showCompleted) {
-            existing?.visibility = View.GONE
+            if (view?.visibility != View.GONE) view?.visibility = View.GONE
             return
         }
 
-        val fileName = info.serverFileName.trim().ifBlank { "GPX 파일" }
-        val view = existing ?: TextView(activity).apply {
-            tag = TAG_PLAIN_GPX
-            gravity = Gravity.CENTER
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 8), dp(activity, 3))
-            background = null
-            elevation = dp(activity, 8).toFloat()
-        }.also { tv ->
+        if (view == null) {
+            view = TextView(activity).apply {
+                tag = TAG_PLAIN_GPX
+                gravity = Gravity.CENTER
+                textSize = 12f
+                setTextColor(Color.WHITE)
+                setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 8), dp(activity, 3))
+                background = null
+                elevation = dp(activity, 8).toFloat()
+            }
             val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 28)).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 marginStart = dp(activity, 10)
                 marginEnd = dp(activity, 10)
                 topMargin = dp(activity, 58)
             }
-            content.addView(tv, lp)
+            content.addView(view, lp)
         }
-        view.text = "$fileName · 다운로드 완료"
-        view.visibility = View.VISIBLE
+
+        val nextText = "$fileName · 다운로드 완료"
+        if (view.text?.toString() != nextText) view.text = nextText
+        if (view.visibility != View.VISIBLE) view.visibility = View.VISIBLE
         view.bringToFront()
     }
 
-    private fun installFooterDnf(activity: RaceActivity, content: ViewGroup, snapshot: RaceDataStore.Snapshot) {
-        val footer = findFooter(content) ?: return
-        var row = footer.parent as? LinearLayout
+    private fun installFooterDnf(
+        activity: RaceActivity,
+        content: ViewGroup,
+        state: State,
+        alreadyPrepared: Boolean
+    ): Boolean {
+        var row = content.findViewWithTag<LinearLayout>(TAG_FOOTER_ROW)
 
-        if (row?.tag != TAG_FOOTER_ROW) {
-            val parent = footer.parent as? LinearLayout ?: return
-            val index = parent.indexOfChild(footer)
-            if (index < 0) return
-            parent.removeView(footer)
+        if (!alreadyPrepared || row == null) {
+            val footer = findFooter(content) ?: return false
+            row = footer.parent as? LinearLayout
 
-            row = LinearLayout(activity).apply {
-                tag = TAG_FOOTER_ROW
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setBackgroundColor(Color.rgb(28, 28, 28))
+            if (row?.tag != TAG_FOOTER_ROW) {
+                val parent = footer.parent as? LinearLayout ?: return false
+                val index = parent.indexOfChild(footer)
+                if (index < 0) return false
+                parent.removeView(footer)
+
+                row = LinearLayout(activity).apply {
+                    tag = TAG_FOOTER_ROW
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setBackgroundColor(Color.rgb(28, 28, 28))
+                }
+                footer.setBackgroundColor(Color.TRANSPARENT)
+                footer.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                footer.setTextColor(Color.LTGRAY)
+                footer.setPadding(dp(activity, 8), 0, dp(activity, 4), 0)
+                row.addView(footer, LinearLayout.LayoutParams(0, dp(activity, 38), 1f))
+                parent.addView(row, index, LinearLayout.LayoutParams(-1, dp(activity, 38)))
             }
-            footer.setBackgroundColor(Color.TRANSPARENT)
-            footer.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            footer.setTextColor(Color.LTGRAY)
-            footer.setPadding(dp(activity, 8), 0, dp(activity, 4), 0)
-            row.addView(footer, LinearLayout.LayoutParams(0, dp(activity, 38), 1f))
-            parent.addView(row, index, LinearLayout.LayoutParams(-1, dp(activity, 38)))
         }
 
-        val targetRow = row ?: return
+        val targetRow = row ?: return false
         val dnf = targetRow.findViewWithTag<TextView>(TAG_DNF) ?: TextView(activity).apply {
             tag = TAG_DNF
             text = "DNF"
@@ -223,9 +247,13 @@ object RaceRuntimeLiveUiInstaller {
             targetRow.addView(tv, LinearLayout.LayoutParams(dp(activity, 62), dp(activity, 38)))
         }
 
-        val running = snapshot.state == "RUNNING"
-        dnf.visibility = if (running) View.VISIBLE else View.GONE
-        dnf.isEnabled = running
+        val running = RaceDataStore(activity).snapshot().state == "RUNNING"
+        if (state.lastRunning != running) {
+            dnf.visibility = if (running) View.VISIBLE else View.GONE
+            dnf.isEnabled = running
+            state.lastRunning = running
+        }
+        return true
     }
 
     private fun confirmDnf(activity: RaceActivity) {
