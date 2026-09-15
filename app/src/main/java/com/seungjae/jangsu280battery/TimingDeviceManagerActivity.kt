@@ -89,7 +89,7 @@ class TimingDeviceManagerActivity : Activity() {
             setPadding(0, dp(18), 0, dp(8))
         })
 
-        val roles = TimingOperatorStore.ROLES
+        val roles = TimingOperatorStore.TIMING_ROLES
         var index = 0
         while (index < roles.size) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
