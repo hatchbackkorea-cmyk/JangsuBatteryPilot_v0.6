@@ -20,6 +20,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
         <package android:name="com.avinox.ride" />
@@ -66,6 +67,7 @@
         <provider android:name=".CameraGateRaceUiProvider" android:authorities="${applicationId}.camera-gate-race-ui" android:exported="false" android:initOrder="80" />
         <provider android:name=".CameraGateRegularFpsProvider" android:authorities="${applicationId}.camera-gate-regular-fps" android:exported="false" android:initOrder="79" />
         <provider android:name=".TimingOperatorLockProvider" android:authorities="${applicationId}.timing-operator-lock" android:exported="false" android:initOrder="78" />
+        <provider android:name=".UsbH264ChaseProvider" android:authorities="${applicationId}.usb-h264-chase" android:exported="false" android:initOrder="76" />
         <provider android:name=".CameraGateRoleLabelProvider" android:authorities="${applicationId}.camera-gate-role-label" android:exported="false" android:initOrder="75" />
         <provider android:name=".CameraGateBroadcastProvider" android:authorities="${applicationId}.camera-gate-broadcast" android:exported="false" android:initOrder="74" />
         <provider android:name=".BroadcastCameraHeartbeatProvider" android:authorities="${applicationId}.broadcast-camera-heartbeat" android:exported="false" android:initOrder="73" />
