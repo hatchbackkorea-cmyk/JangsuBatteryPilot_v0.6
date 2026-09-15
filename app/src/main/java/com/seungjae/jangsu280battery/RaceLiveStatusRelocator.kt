@@ -22,6 +22,11 @@ import java.util.WeakHashMap
 /**
  * Keeps the blue lap-timer screen uncluttered by moving the live state/identity line out of the
  * grey top bar and into the bottom GPS/status strip.
+ *
+ * Rendering note:
+ * RaceActivity already refreshes live timing at 10 Hz. This helper must therefore avoid repeatedly
+ * rebuilding or restyling the same views. Structural work is performed once per content root and
+ * only the footer state text is changed afterwards, and only when its value actually changes.
  */
 class RaceLiveStatusRelocatorProvider : ContentProvider() {
     override fun onCreate(): Boolean {
@@ -59,33 +64,52 @@ object RaceLiveStatusRelocator {
     private const val TAG_HISTORY = "timegate_lap_history_v03444"
     private const val STATUS_WIDTH_DP = 152
     private const val STATUS_TEXT_SP = 10f
+    private const val REFRESH_MS = 250L
 
-    private data class State(val handler: Handler, val runnable: Runnable)
+    private class State(val handler: Handler) {
+        lateinit var runnable: Runnable
+        var root: ViewGroup? = null
+        var topStateHidden = false
+        var topBarPrepared = false
+        var lastFooterText = ""
+    }
+
     private val states = WeakHashMap<RaceActivity, State>()
 
     fun install(activity: RaceActivity) {
         if (states.containsKey(activity)) return
-        val handler = Handler(Looper.getMainLooper())
-        lateinit var runner: Runnable
-        runner = Runnable {
+        val state = State(Handler(Looper.getMainLooper()))
+        state.runnable = Runnable {
             if (activity.isFinishing || activity.isDestroyed) return@Runnable
-            apply(activity)
-            handler.postDelayed(runner, 100L)
+            apply(activity, state)
+            state.handler.postDelayed(state.runnable, REFRESH_MS)
         }
-        states[activity] = State(handler, runner)
-        handler.post(runner)
+        states[activity] = state
+        state.handler.post(state.runnable)
     }
 
     fun uninstall(activity: RaceActivity) {
         states.remove(activity)?.let { it.handler.removeCallbacks(it.runnable) }
     }
 
-    private fun apply(activity: RaceActivity) {
+    private fun apply(activity: RaceActivity, state: State) {
         val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-        val snapshot = RaceDataStore(activity).snapshot()
+        if (state.root !== root) {
+            state.root = root
+            state.topStateHidden = false
+            state.topBarPrepared = false
+            state.lastFooterText = ""
+        }
 
-        hideTopStateText(root)
-        tidyTopBar(activity, root)
+        // These are structural operations. Do them once for the current content tree instead of
+        // fighting RaceActivity's own 10 Hz renderer every frame.
+        if (!state.topStateHidden) {
+            hideTopStateText(root)
+            state.topStateHidden = true
+        }
+        if (!state.topBarPrepared) {
+            state.topBarPrepared = tidyTopBar(activity, root)
+        }
 
         // RaceRuntimeLiveUiInstaller owns the GPS/DNF row. Wait until it has wrapped the footer,
         // then add the moved state text as the first item in that same bottom row.
@@ -103,29 +127,33 @@ object RaceLiveStatusRelocator {
             row.addView(view, 0, LinearLayout.LayoutParams(dp(activity, STATUS_WIDTH_DP), dp(activity, 38)))
         }
 
-        status.text = footerState(snapshot)
-        status.visibility = View.VISIBLE
-        status.setTextColor(Color.WHITE)
-        status.textSize = STATUS_TEXT_SP
+        val nextText = footerState(RaceDataStore(activity).snapshot())
+        if (state.lastFooterText != nextText || status.text?.toString() != nextText) {
+            status.text = nextText
+            state.lastFooterText = nextText
+        }
+        if (status.visibility != View.VISIBLE) status.visibility = View.VISIBLE
     }
 
     /** Top bar = back arrow on the left, lap history on the far right. No LIVE/state text. */
-    private fun tidyTopBar(activity: RaceActivity, root: ViewGroup) {
-        val history = root.findViewWithTag<Button>(TAG_HISTORY) ?: return
-        val row = history.parent as? LinearLayout ?: return
+    private fun tidyTopBar(activity: RaceActivity, root: ViewGroup): Boolean {
+        val history = root.findViewWithTag<Button>(TAG_HISTORY) ?: return false
+        val row = history.parent as? LinearLayout ?: return false
         val back = findButton(row) {
             val t = it.text?.toString()?.trim().orEmpty()
             t.contains("Live", ignoreCase = true) || t == "‹"
-        } ?: return
+        } ?: return false
 
-        back.text = "‹"
+        if (back.text?.toString() != "‹") back.text = "‹"
         back.textSize = 26f
         back.layoutParams = LinearLayout.LayoutParams(dp(activity, 56), dp(activity, 56))
 
         // The weighted liveHeader remains only as an invisible spacer so 랩 기록 stays right-aligned.
         for (i in 0 until row.childCount) {
             val child = row.getChildAt(i)
-            if (child is TextView && child !is Button) child.visibility = View.INVISIBLE
+            if (child is TextView && child !is Button && child.visibility != View.INVISIBLE) {
+                child.visibility = View.INVISIBLE
+            }
         }
 
         if (row.indexOfChild(history) != row.childCount - 1) {
@@ -138,6 +166,7 @@ object RaceLiveStatusRelocator {
                 marginEnd = dp(activity, 6)
             }
         }
+        return true
     }
 
     private fun footerState(s: RaceDataStore.Snapshot): String {
