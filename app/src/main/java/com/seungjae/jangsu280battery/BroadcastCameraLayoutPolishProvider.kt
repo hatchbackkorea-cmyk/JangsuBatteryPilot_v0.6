@@ -42,6 +42,7 @@ import kotlin.math.roundToInt
 class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
     private val jobs = WeakHashMap<Activity, Runnable>()
+    private val animatedViews = WeakHashMap<View, Boolean>()
 
     override fun onCreate(): Boolean {
         val app = context?.applicationContext as? Application ?: return true
@@ -85,7 +86,10 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     }
 
     override fun onActivityPaused(activity: Activity) = stop(activity)
-    override fun onActivityDestroyed(activity: Activity) = stop(activity)
+    override fun onActivityDestroyed(activity: Activity) {
+        stop(activity)
+        animatedViews.keys.removeIf { it.context === activity }
+    }
 
     private fun stop(activity: Activity) {
         jobs.remove(activity)?.let(main::removeCallbacks)
@@ -110,7 +114,6 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             rail = buildRail(activity, cameraBox, appUi) ?: return
         }
 
-        // Old horizontal/bottom containers must never reappear behind the new camera-style rail.
         for (i in 0 until appUi.childCount) {
             val child = appUi.getChildAt(i)
             child.visibility = if (child === rail) View.VISIBLE else View.GONE
@@ -137,7 +140,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         }
         val rec = findText(appUi) { it.contains("REC") || it.contains("STOP") }
         val exit = findText(appUi) { it.trim() == "나가기" }
-        val shutter = findText(appUi) { it.trim() == "●" && it.textSize >= 30f }
+        val shutter = findText(appUi) { it.trim() == "●" }
 
         if (zoom1 == null || zoom2 == null || zoom3 == null || quality == null || rec == null || exit == null || shutter == null) {
             return null
@@ -190,7 +193,6 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         moveIntoRail(exit, rail)
         styleButton(activity, exit)
 
-        // Any old zoom readout such as "1.0x" is redundant once the buttons are stacked vertically.
         findAllText(appUi)
             .filter { it.parent !== rail && ZOOM_READOUT.matches(it.text?.toString().orEmpty().trim()) }
             .forEach { it.visibility = View.GONE }
@@ -208,7 +210,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     private fun normalizeCells(activity: Activity, rail: LinearLayout) {
         for (i in 0 until rail.childCount) {
             val view = rail.getChildAt(i) as? TextView ?: continue
-            val status = i < 2 && (view.tag == TAG_ROLE_LABEL || view.text?.toString()?.startsWith("LIVE") == true)
+            val status = view.tag == TAG_ROLE_LABEL || view.text?.toString()?.startsWith("LIVE") == true
             val height = if (status) STATUS_H_DP else CELL_H_DP
             view.layoutParams = LinearLayout.LayoutParams(dp(activity, CELL_W_DP), dp(activity, height)).apply {
                 bottomMargin = dp(activity, CELL_GAP_DP)
@@ -246,8 +248,8 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     }
 
     private fun installZoomPressAnimation(view: TextView) {
-        if (view.getTag(TAG_ANIMATION_MARKER_ID) == true) return
-        view.setTag(TAG_ANIMATION_MARKER_ID, true)
+        if (animatedViews[view] == true) return
+        animatedViews[view] = true
         view.setOnTouchListener { touched, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -354,9 +356,6 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         private const val TAG_RIGHT_RAIL = "broadcast_camera_right_rail_v2"
         private const val TAG_ROLE_LABEL = "camera_gate_actual_role_label_v1"
         private const val TAG_QUALITY_CELL = "broadcast_camera_quality_cell_v2"
-
-        // setTag(int, Any) needs an application-resource id; android.R.id.custom is stable and unused here.
-        private const val TAG_ANIMATION_MARKER_ID = android.R.id.custom
 
         private const val PREFS = "broadcast_camera_app"
         private const val KEY_QUALITY = "photo_quality"
