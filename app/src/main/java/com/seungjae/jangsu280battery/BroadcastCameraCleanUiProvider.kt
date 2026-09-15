@@ -16,16 +16,8 @@ import android.widget.LinearLayout
 import java.util.WeakHashMap
 
 /**
- * Broadcast-only CAM phones reuse the proven Camera Gate capture/encoder pipeline, but the field
- * screen must contain video only. Timing phones keep the full timing UI.
- *
- * For CAM1..CAM12 this provider repeatedly enforces a strict allow-list:
- *  - keep the TextureView camera preview,
- *  - keep the actual-role label (CAM1..CAM12),
- *  - hide the GateOverlay / detection line,
- *  - hide/remove every fullscreen timing dock, ARM/sync/sensitivity/log widget and telemetry panel,
- *  - make the camera fill the activity.
- *
+ * Broadcast-only CAM phones keep only the camera preview, actual role badge, and the dedicated
+ * camera-app controls. Every timing-only overlay/menu remains suppressed.
  * START/CP/FINISH assignments are untouched.
  */
 class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
@@ -79,25 +71,21 @@ class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLi
         val cameraBox = texture.parent as? FrameLayout ?: return
         val root = cameraBox.parent as? LinearLayout ?: return
 
-        // Broadcast-only means VIDEO ONLY. Fullscreen/field-polish providers may create their own
-        // timing dock inside cameraBox, so hiding only the original root controls is not enough.
-        // Keep exactly the preview and the role badge; everything else in cameraBox is suppressed.
         for (i in 0 until cameraBox.childCount) {
             val child = cameraBox.getChildAt(i)
-            val keep = child === texture || child.tag == TAG_ROLE_LABEL
+            val keep = child === texture ||
+                child.tag == TAG_ROLE_LABEL ||
+                child.tag == BroadcastCameraAppProvider.TAG_CAMERA_APP_UI
             child.visibility = if (keep) View.VISIBLE else View.GONE
         }
         overlay?.visibility = View.GONE
 
-        // Remove known timing panels outright so they cannot reserve layout space or receive taps.
         TIMING_TAGS.forEach { tag ->
             findTagged(cameraBox, tag)?.let { victim ->
                 (victim.parent as? ViewGroup)?.removeView(victim)
             }
         }
 
-        // The original Activity places ARM/sync and telemetry below the camera. Hide every sibling;
-        // role text now lives directly over the video at the upper-left.
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
             child.visibility = if (child === cameraBox) View.VISIBLE else View.GONE
@@ -114,6 +102,11 @@ class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLi
             visibility = View.VISIBLE
             bringToFront()
         }
+        findTagged(cameraBox, BroadcastCameraAppProvider.TAG_CAMERA_APP_UI)?.apply {
+            visibility = View.VISIBLE
+            bringToFront()
+        }
+        findTagged(cameraBox, TAG_ROLE_LABEL)?.bringToFront()
         cameraBox.requestLayout()
     }
 
