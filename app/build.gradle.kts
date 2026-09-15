@@ -85,5 +85,5 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.kakao.maps.open:android:2.15.1")
     implementation("com.google.zxing:core:3.5.3")
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    implementation("io.github.webrtc-sdk:android:150.7871.01")
 }
