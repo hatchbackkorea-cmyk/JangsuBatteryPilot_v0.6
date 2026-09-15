@@ -33,10 +33,9 @@ import kotlin.math.roundToInt
 /**
  * Final camera-app polish for broadcast-only CAM phones.
  *
- * The working camera/broadcast implementation is left untouched. This provider only owns the
- * field presentation: a right-side control rail, a clean centred LIVE label, explicit selected
- * states for zoom/recording, a large camera-style shutter, synced megapixel display, and a hard
- * landscape lock.
+ * The underlying camera provider still owns camera state and click actions, while this provider owns
+ * the visible field controls. Quality and REC use stable proxy views so the legacy provider can keep
+ * updating its hidden source views without fighting over visible text/colors every few hundred ms.
  */
 class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -128,8 +127,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
 
         refreshQualityMp(activity, rail)
         refreshZoomSelection(appUi, rail)
-        refreshRecSelection(activity, rail)
-        normalizeCells(activity, rail)
+        refreshRecSelection(activity, appUi, rail)
     }
 
     private fun buildRail(
@@ -142,16 +140,17 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         val zoom1 = findTagged(appUi, "broadcast_camera_zoom_1") as? TextView
         val zoom2 = findTagged(appUi, "broadcast_camera_zoom_2") as? TextView
         val zoom3 = findTagged(appUi, "broadcast_camera_zoom_3") as? TextView
-        val quality = findText(appUi) {
-            it.startsWith("사진화질") || it.startsWith("표준") || it.startsWith("고화질") || it.startsWith("최고") || MP_ONLY.matches(it.trim())
+        val qualitySource = findText(appUi) {
+            it.startsWith("사진화질") || it.startsWith("표준") || it.startsWith("고화질") ||
+                it.startsWith("최고") || MP_ONLY.matches(it.trim())
         }
-        val rec = findText(appUi) { it.contains("REC") || it.contains("STOP") }
+        val recSource = findText(appUi) { it.contains("REC") || it.contains("STOP") }
         val exit = findText(appUi) { it.trim() == "나가기" }
         val shutter = findText(appUi) { it.trim() == "●" || it.trim() == "사진" }
 
-        if (zoom1 == null || zoom2 == null || zoom3 == null || quality == null || rec == null || exit == null || shutter == null) {
-            return null
-        }
+        if (zoom1 == null || zoom2 == null || zoom3 == null || qualitySource == null ||
+            recSource == null || exit == null || shutter == null
+        ) return null
 
         live?.let {
             (it.parent as? ViewGroup)?.removeView(it)
@@ -159,9 +158,11 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             styleLive(it)
             appUi.addView(
                 it,
-                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, LIVE_H_DP), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                    topMargin = dp(activity, LIVE_TOP_DP)
-                }
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    dp(activity, LIVE_H_DP),
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                ).apply { topMargin = dp(activity, LIVE_TOP_DP) }
             )
         }
 
@@ -169,14 +170,17 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             tag = TAG_RIGHT_RAIL
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            setPadding(0, 0, 0, 0)
             background = null
             isClickable = false
             isFocusable = false
         }
         appUi.addView(
             rail,
-            FrameLayout.LayoutParams(dp(activity, CELL_W_DP), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
+            FrameLayout.LayoutParams(
+                dp(activity, CELL_W_DP),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END
+            ).apply {
                 topMargin = dp(activity, RAIL_TOP_DP)
                 rightMargin = dp(activity, RAIL_RIGHT_DP)
             }
@@ -197,22 +201,51 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         shutter.text = ""
         moveIntoRail(shutter, rail)
         styleShutter(activity, shutter)
+        installPressPulse(shutter, 0.84f, 1.12f)
 
-        quality.tag = TAG_QUALITY_CELL
-        moveIntoRail(quality, rail)
-        styleButton(activity, quality)
+        // Keep the legacy quality TextView attached but hidden. BroadcastCameraAppProvider updates
+        // that source every 260ms; the visible proxy below is therefore never overwritten/flickered.
+        qualitySource.tag = TAG_QUALITY_SOURCE
+        val qualityProxy = TextView(activity).apply {
+            tag = TAG_QUALITY_CELL
+            text = "--MP"
+            isClickable = true
+            setOnClickListener {
+                installOneShotPulse(this)
+                qualitySource.performClick()
+                main.postDelayed({ refreshQualityMp(activity, rail) }, 40L)
+                main.postDelayed({ refreshQualityMp(activity, rail) }, 220L)
+            }
+        }
+        styleButton(activity, qualityProxy)
+        rail.addView(qualityProxy)
 
-        rec.tag = TAG_REC_CELL
-        moveIntoRail(rec, rail)
-        styleButton(activity, rec)
+        // Same idea for REC: the legacy source may freely change text/color while the visible proxy
+        // remains stable. Its state is read from the hidden source, but its paint is owned here only.
+        recSource.tag = TAG_REC_SOURCE
+        val recProxy = TextView(activity).apply {
+            tag = TAG_REC_CELL
+            text = "REC"
+            isClickable = true
+            setOnClickListener {
+                installOneShotPulse(this)
+                recSource.performClick()
+                main.postDelayed({ refreshRecSelection(activity, appUi, rail) }, 30L)
+                main.postDelayed({ refreshRecSelection(activity, appUi, rail) }, 220L)
+            }
+        }
+        styleButton(activity, recProxy)
+        rail.addView(recProxy)
 
         moveIntoRail(exit, rail)
         styleButton(activity, exit)
+        installPressPulse(exit, 0.90f, 1.05f)
 
         findAllText(appUi)
             .filter { it.parent !== rail && DECIMAL_ZOOM_READOUT.matches(it.text?.toString().orEmpty().trim()) }
             .forEach { it.visibility = View.GONE }
 
+        normalizeCells(activity, rail)
         return rail
     }
 
@@ -228,20 +261,25 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
             val view = rail.getChildAt(i) as? TextView ?: continue
             when (view.tag) {
                 TAG_SHUTTER_CELL -> {
-                    view.layoutParams = LinearLayout.LayoutParams(dp(activity, SHUTTER_DP), dp(activity, SHUTTER_DP)).apply {
+                    view.layoutParams = LinearLayout.LayoutParams(
+                        dp(activity, SHUTTER_DP),
+                        dp(activity, SHUTTER_DP)
+                    ).apply {
                         gravity = Gravity.CENTER_HORIZONTAL
                         bottomMargin = dp(activity, SHUTTER_GAP_DP)
                     }
                 }
                 TAG_ROLE_LABEL -> {
-                    view.layoutParams = LinearLayout.LayoutParams(dp(activity, CELL_W_DP), dp(activity, STATUS_H_DP)).apply {
-                        bottomMargin = dp(activity, CELL_GAP_DP)
-                    }
+                    view.layoutParams = LinearLayout.LayoutParams(
+                        dp(activity, CELL_W_DP),
+                        dp(activity, STATUS_H_DP)
+                    ).apply { bottomMargin = dp(activity, CELL_GAP_DP) }
                 }
                 else -> {
-                    view.layoutParams = LinearLayout.LayoutParams(dp(activity, CELL_W_DP), dp(activity, CELL_H_DP)).apply {
-                        bottomMargin = dp(activity, CELL_GAP_DP)
-                    }
+                    view.layoutParams = LinearLayout.LayoutParams(
+                        dp(activity, CELL_W_DP),
+                        dp(activity, CELL_H_DP)
+                    ).apply { bottomMargin = dp(activity, CELL_GAP_DP) }
                 }
             }
             view.gravity = Gravity.CENTER
@@ -324,40 +362,67 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
                 MotionEvent.ACTION_DOWN -> {
                     touched.animate().cancel()
                     touched.animate()
-                        .scaleX(0.80f)
-                        .scaleY(0.80f)
-                        .alpha(0.55f)
+                        .scaleX(0.74f)
+                        .scaleY(0.74f)
+                        .alpha(0.42f)
                         .setDuration(55L)
                         .start()
                 }
                 MotionEvent.ACTION_UP -> {
                     touched.animate().cancel()
                     touched.animate()
-                        .scaleX(1.24f)
-                        .scaleY(1.24f)
+                        .scaleX(1.32f)
+                        .scaleY(1.32f)
                         .alpha(1f)
-                        .setDuration(90L)
+                        .setDuration(85L)
                         .withEndAction {
                             touched.animate()
-                                .scaleX(1f)
-                                .scaleY(1f)
-                                .setDuration(150L)
+                                .scaleX(0.94f)
+                                .scaleY(0.94f)
+                                .setDuration(85L)
+                                .withEndAction {
+                                    touched.animate().scaleX(1f).scaleY(1f).setDuration(95L).start()
+                                }
                                 .start()
                         }
                         .start()
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     touched.animate().cancel()
-                    touched.animate()
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .alpha(1f)
-                        .setDuration(120L)
-                        .start()
+                    touched.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(100L).start()
                 }
             }
             false
         }
+    }
+
+    private fun installPressPulse(view: View, down: Float, up: Float) {
+        if (animatedViews[view] == true) return
+        animatedViews[view] = true
+        view.setOnTouchListener { touched, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> touched.animate().cancel().also {
+                    touched.animate().scaleX(down).scaleY(down).setDuration(60L).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    touched.animate().cancel()
+                    touched.animate().scaleX(up).scaleY(up).setDuration(80L).withEndAction {
+                        touched.animate().scaleX(1f).scaleY(1f).setDuration(100L).start()
+                    }.start()
+                }
+                MotionEvent.ACTION_CANCEL -> touched.animate().scaleX(1f).scaleY(1f).setDuration(90L).start()
+            }
+            false
+        }
+    }
+
+    private fun installOneShotPulse(view: View) {
+        view.animate().cancel()
+        view.scaleX = 0.82f
+        view.scaleY = 0.82f
+        view.animate().scaleX(1.10f).scaleY(1.10f).setDuration(95L).withEndAction {
+            view.animate().scaleX(1f).scaleY(1f).setDuration(110L).start()
+        }.start()
     }
 
     private fun refreshZoomSelection(appUi: FrameLayout, rail: LinearLayout) {
@@ -369,6 +434,8 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         listOf(1, 2, 3).forEach { z ->
             val button = findTagged(rail, "broadcast_camera_zoom_$z") as? TextView ?: return@forEach
             val selected = abs(readout - z.toFloat()) < 0.08f
+            if (button.isSelected == selected) return@forEach
+            button.isSelected = selected
             if (selected) {
                 button.setTextColor(Color.BLACK)
                 button.background = selectedBackground(button.context as Activity)
@@ -379,9 +446,13 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         }
     }
 
-    private fun refreshRecSelection(activity: Activity, rail: LinearLayout) {
+    private fun refreshRecSelection(activity: Activity, appUi: FrameLayout, rail: LinearLayout) {
+        val source = findTagged(appUi, TAG_REC_SOURCE) as? TextView ?: return
         val rec = findTagged(rail, TAG_REC_CELL) as? TextView ?: return
-        val active = rec.text?.toString()?.contains("STOP") == true
+        val active = source.text?.toString()?.contains("STOP") == true
+        rec.text = "REC"
+        if (rec.isSelected == active) return
+        rec.isSelected = active
         if (active) {
             rec.setTextColor(Color.WHITE)
             rec.background = recActiveBackground(activity)
@@ -464,12 +535,14 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     companion object {
-        private const val TAG_RIGHT_RAIL = "broadcast_camera_right_rail_v3"
+        private const val TAG_RIGHT_RAIL = "broadcast_camera_right_rail_v4"
         private const val TAG_ROLE_LABEL = "camera_gate_actual_role_label_v1"
         private const val TAG_LIVE_CENTER = "broadcast_camera_live_center_v1"
         private const val TAG_SHUTTER_CELL = "broadcast_camera_shutter_cell_v1"
-        private const val TAG_QUALITY_CELL = "broadcast_camera_quality_cell_v3"
-        private const val TAG_REC_CELL = "broadcast_camera_rec_cell_v1"
+        private const val TAG_QUALITY_SOURCE = "broadcast_camera_quality_source_v1"
+        private const val TAG_QUALITY_CELL = "broadcast_camera_quality_cell_v4"
+        private const val TAG_REC_SOURCE = "broadcast_camera_rec_source_v1"
+        private const val TAG_REC_CELL = "broadcast_camera_rec_cell_v2"
 
         private const val PREFS = "broadcast_camera_app"
         private const val KEY_QUALITY = "photo_quality"
@@ -487,7 +560,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         private const val RAIL_RIGHT_DP = 10
         private const val LIVE_H_DP = 34
         private const val LIVE_TOP_DP = 10
-        private const val POLL_MS = 90L
+        private const val POLL_MS = 180L
 
         private val DECIMAL_ZOOM_READOUT = Regex("^\\d+\\.\\d+x$")
         private val MP_ONLY = Regex("^\\d+(?:\\.\\d+)?MP$", RegexOption.IGNORE_CASE)
