@@ -28,7 +28,7 @@ object TimingOperatorStoreCore {
     private const val ACCESS_TTL_MS=12L*60L*60L*1000L
     private const val LEGACY_LEASE_TTL_MS=36L*60L*60L*1000L
     val TIMING_ROLES=listOf("START","CP1","CP2","CP3","CP4","CP5","FINISH")
-    val BROADCAST_ROLES=(1..12).map { "CAM$it" }
+    val BROADCAST_ROLES=listOf("CHASE")+(1..12).map { "CAM$it" }
     val ROLES=TIMING_ROLES+BROADCAST_ROLES
     fun isBroadcastRole(role:String)=role.trim().uppercase(Locale.US) in BROADCAST_ROLES
 
