@@ -102,11 +102,11 @@ object CameraGateBroadcastBridge {
 }
 
 /**
- * Creates a P2P WebRTC publisher for an assigned timing/broadcast phone.
+ * Activity-owned publisher for the normal phone-camera path.
  *
- * When CHASE input is USB_H264 the publisher exists only while the USB source is actually producing
- * decodable AVC. If the cable/camera dies, signaling is closed so the spectator removes CHASE from
- * its online-role set. It deliberately does NOT fall back to the phone camera.
+ * USB_H264 CHASE is deliberately excluded here because UsbH264ChaseService owns that source and its
+ * publisher independently from the Activity lifecycle. That prevents onPause/onDestroy from
+ * clearing the background CHASE transport when the phone locks or the user navigates away.
  */
 class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val fallbackStreamers = WeakHashMap<Activity, CameraGateBroadcastStreamer>()
@@ -123,30 +123,22 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         if (activity !is CameraGateHighSpeedActivity) return
         val assignment = TimingOperatorStore.current(activity)
         if (assignment == null) {
-            CameraGateBroadcastBridge.bindFallback(null)
-            CameraGateBroadcastBridge.bindWebRtc(null)
-            CameraGateBroadcastBridge.bindPublisherAvailabilityController(null)
+            clearActivityOwnedBindings(activity)
             return
         }
         assignments[activity] = assignment
 
-        CameraGateBroadcastBridge.bindPublisherAvailabilityController { available ->
-            activity.runOnUiThread {
-                if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
-                val current = assignments[activity] ?: return@runOnUiThread
-                if (usesUsbChase(activity, current)) {
-                    if (available) ensurePublishers(activity) else closePublishers(activity)
-                }
-            }
+        if (usesUsbChase(activity, assignment)) {
+            closeActivityStreamers(activity, unbind = false)
+            CameraGateBroadcastBridge.setExternalSourceRequired(true)
+            UsbH264ChaseService.start(activity)
+            return
         }
 
-        if (usesUsbChase(activity, assignment)) {
-            CameraGateBroadcastBridge.setExternalSourceRequired(true)
-            if (UsbH264ChaseRuntime.streaming) ensurePublishers(activity) else closePublishers(activity)
-        } else {
-            CameraGateBroadcastBridge.setExternalSourceRequired(false)
-            ensurePublishers(activity)
-        }
+        UsbH264ChaseService.stop(activity)
+        CameraGateBroadcastBridge.bindPublisherAvailabilityController(null)
+        CameraGateBroadcastBridge.setExternalSourceRequired(false)
+        ensurePublishers(activity)
     }
 
     private fun usesUsbChase(activity: Activity, assignment: TimingOperatorStore.Assignment): Boolean =
@@ -167,17 +159,19 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         CameraGateBroadcastBridge.bindFallback(fallbackStreamers[activity])
     }
 
-    private fun closePublishers(activity: Activity) {
+    private fun closeActivityStreamers(activity: Activity, unbind: Boolean) {
         fallbackStreamers.remove(activity)?.close()
         webRtcStreamers.remove(activity)?.close()
-        CameraGateBroadcastBridge.bindFallback(null)
-        CameraGateBroadcastBridge.bindWebRtc(null)
+        if (unbind) {
+            CameraGateBroadcastBridge.bindFallback(null)
+            CameraGateBroadcastBridge.bindWebRtc(null)
+        }
     }
 
     private fun ensureFallback(activity: Activity) {
         if (activity.isFinishing || activity.isDestroyed) return
         val assignment = assignments[activity] ?: TimingOperatorStore.current(activity) ?: return
-        if (usesUsbChase(activity, assignment) && !UsbH264ChaseRuntime.streaming) return
+        if (usesUsbChase(activity, assignment)) return
         val existing = fallbackStreamers[activity]
         if (existing != null) {
             CameraGateBroadcastBridge.bindFallback(existing)
@@ -190,21 +184,32 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
 
     override fun onActivityPaused(activity: Activity) {
         if (activity !is CameraGateHighSpeedActivity) return
+        val assignment = assignments[activity] ?: TimingOperatorStore.current(activity)
+        if (assignment != null && usesUsbChase(activity, assignment)) return
         CameraGateBroadcastBridge.bindWebRtc(webRtcStreamers[activity])
         CameraGateBroadcastBridge.bindFallback(fallbackStreamers[activity])
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        closePublishers(activity)
-        assignments.remove(activity)
-        if (activity is CameraGateHighSpeedActivity) {
-            CameraGateBroadcastBridge.bindFallback(null)
-            CameraGateBroadcastBridge.bindWebRtc(null)
+        if (activity !is CameraGateHighSpeedActivity) return
+        val assignment = assignments.remove(activity) ?: TimingOperatorStore.current(activity)
+        val usbOwned = assignment != null && usesUsbChase(activity, assignment)
+        if (usbOwned) {
+            closeActivityStreamers(activity, unbind = false)
             CameraGateBroadcastBridge.bindLocalSink(null)
             CameraGateBroadcastBridge.bindKeyFrameRequester(null)
-            CameraGateBroadcastBridge.bindPublisherAvailabilityController(null)
-            CameraGateBroadcastBridge.setExternalSourceRequired(false)
+            return
         }
+        clearActivityOwnedBindings(activity)
+    }
+
+    private fun clearActivityOwnedBindings(activity: Activity) {
+        closeActivityStreamers(activity, unbind = true)
+        assignments.remove(activity)
+        CameraGateBroadcastBridge.bindLocalSink(null)
+        CameraGateBroadcastBridge.bindKeyFrameRequester(null)
+        CameraGateBroadcastBridge.bindPublisherAvailabilityController(null)
+        CameraGateBroadcastBridge.setExternalSourceRequired(false)
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit

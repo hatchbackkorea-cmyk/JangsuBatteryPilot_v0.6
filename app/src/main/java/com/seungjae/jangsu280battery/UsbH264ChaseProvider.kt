@@ -7,12 +7,13 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
-import java.util.WeakHashMap
 
-/** Starts the external Action-camera source only for a CHASE assignment explicitly set to USB H.264. */
+/**
+ * Starts/stops the long-lived USB CHASE foreground service based on the active assignment.
+ * The service intentionally survives Activity pause/destroy so screen-off and app navigation do not
+ * interrupt the Action-camera stream.
+ */
 class UsbH264ChaseProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
-    private val sources = WeakHashMap<Activity, UsbH264ChaseSource>()
-
     override fun onCreate(): Boolean {
         val app = context?.applicationContext as? Application ?: return true
         app.registerActivityLifecycleCallbacks(this)
@@ -20,29 +21,17 @@ class UsbH264ChaseProvider : ContentProvider(), Application.ActivityLifecycleCal
     }
 
     override fun onActivityResumed(activity: Activity) {
-        if (activity !is CameraGateHighSpeedActivity) return
-        val assignment = TimingOperatorStore.current(activity) ?: return
-        val usbChase = assignment.role.equals("CHASE", ignoreCase = true) &&
+        if (activity !is CameraGateHighSpeedActivity && activity !is BroadcastCameraEnrollmentActivity) return
+        val assignment = TimingOperatorStore.current(activity)
+        val usbChase = assignment != null &&
+            assignment.role.equals("CHASE", ignoreCase = true) &&
             ChaseVideoInputStore.get(activity) == ChaseVideoInputMode.USB_H264
-        if (!usbChase) {
-            sources.remove(activity)?.stop()
-            return
-        }
-        val source = sources[activity] ?: UsbH264ChaseSource(activity.applicationContext).also {
-            sources[activity] = it
-        }
-        source.start()
+        if (usbChase) UsbH264ChaseService.start(activity)
+        else UsbH264ChaseService.stop(activity)
     }
 
-    override fun onActivityPaused(activity: Activity) {
-        if (activity !is CameraGateHighSpeedActivity) return
-        sources.remove(activity)?.stop()
-    }
-
-    override fun onActivityDestroyed(activity: Activity) {
-        sources.remove(activity)?.stop()
-    }
-
+    override fun onActivityPaused(activity: Activity) = Unit
+    override fun onActivityDestroyed(activity: Activity) = Unit
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
     override fun onActivityStarted(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
