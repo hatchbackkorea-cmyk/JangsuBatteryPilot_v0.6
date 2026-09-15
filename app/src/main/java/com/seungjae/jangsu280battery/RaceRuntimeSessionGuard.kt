@@ -62,7 +62,7 @@ class RaceRuntimeSessionGuardProvider : ContentProvider() {
     override fun getType(uri: Uri): String? = null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
-    override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+    override fun update(uri: Uri, values: ContentValues?): Int = 0
 }
 
 private object RaceRuntimeUiCallbacks : Application.ActivityLifecycleCallbacks {
@@ -94,6 +94,7 @@ object RaceRuntimeLiveUiInstaller {
     private const val TAG_PLAIN_GPX = "timegate_plain_gpx_status_v03473"
     private const val TAG_FOOTER_ROW = "timegate_live_footer_row_v03473"
     private const val TAG_DNF = "timegate_dnf_text_v03473"
+    private const val TAG_LEGACY_GPX = "timegate_gpx_status_banner_v03449"
     private const val REFRESH_MS = 250L
 
     private class State(val handler: Handler) {
@@ -134,15 +135,24 @@ object RaceRuntimeLiveUiInstaller {
         }
 
         if (!state.legacyBannerHidden) {
-            hideLegacyGpxStatus(content)
-            state.legacyBannerHidden = true
+            // RaceDebugUiInstaller is registered later in the process lifecycle and can create its
+            // legacy banner after this installer has already been asked to run. Keep retrying only
+            // until that banner exists, then never scan the tree again for the current content root.
+            state.legacyBannerHidden = hideLegacyGpxStatus(content)
         }
 
         updatePlainGpxStatus(activity, content, state)
         state.footerPrepared = installFooterDnf(activity, content, state, state.footerPrepared)
     }
 
-    private fun hideLegacyGpxStatus(root: View) {
+    private fun hideLegacyGpxStatus(root: ViewGroup): Boolean {
+        root.findViewWithTag<View>(TAG_LEGACY_GPX)?.let { banner ->
+            if (banner.visibility != View.GONE) banner.visibility = View.GONE
+            return true
+        }
+
+        // Compatibility fallback for an older build where the banner might not have carried a tag.
+        var found = false
         walkText(root) { tv ->
             val t = tv.text?.toString().orEmpty()
             if (
@@ -153,9 +163,11 @@ object RaceRuntimeLiveUiInstaller {
                 t.startsWith("대회 미참가") ||
                 t.startsWith("대회 참가됨")
             ) {
-                tv.visibility = View.GONE
+                if (tv.visibility != View.GONE) tv.visibility = View.GONE
+                found = true
             }
         }
+        return found
     }
 
     private fun updatePlainGpxStatus(activity: RaceActivity, content: ViewGroup, state: State) {
