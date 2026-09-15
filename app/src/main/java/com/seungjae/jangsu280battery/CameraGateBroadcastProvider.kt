@@ -9,10 +9,13 @@ import android.net.Uri
 import android.os.Bundle
 import java.util.WeakHashMap
 
-/** Lightweight handoff between the GL camera thread and the active network transports. */
+/** Lightweight handoff between the GL camera thread and the active network/local transports. */
 object CameraGateBroadcastBridge {
     @Volatile private var fallbackStreamer: CameraGateBroadcastStreamer? = null
     @Volatile private var webRtcStreamer: CameraGateWebRtcStreamer? = null
+    @Volatile private var localSink: CameraGateBroadcastPacketSink? = null
+    @Volatile private var latestCsd0: CameraGateBroadcastPacket? = null
+    @Volatile private var latestCsd1: CameraGateBroadcastPacket? = null
 
     fun bindFallback(value: CameraGateBroadcastStreamer?) {
         fallbackStreamer = value
@@ -22,7 +25,20 @@ object CameraGateBroadcastBridge {
         webRtcStreamer = value
     }
 
+    fun bindLocalSink(value: CameraGateBroadcastPacketSink?) {
+        localSink = value
+        if (value != null) {
+            latestCsd0?.let(value::offer)
+            latestCsd1?.let(value::offer)
+        }
+    }
+
     fun offer(packet: CameraGateBroadcastPacket) {
+        when (packet.kind) {
+            CameraGateBroadcastStreamer.KIND_CSD0 -> latestCsd0 = packet
+            CameraGateBroadcastStreamer.KIND_CSD1 -> latestCsd1 = packet
+        }
+        localSink?.offer(packet)
         webRtcStreamer?.offer(packet)
         fallbackStreamer?.offer(packet)
     }
@@ -93,6 +109,7 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         if (activity is CameraGateHighSpeedActivity) {
             CameraGateBroadcastBridge.bindFallback(null)
             CameraGateBroadcastBridge.bindWebRtc(null)
+            CameraGateBroadcastBridge.bindLocalSink(null)
         }
     }
 
