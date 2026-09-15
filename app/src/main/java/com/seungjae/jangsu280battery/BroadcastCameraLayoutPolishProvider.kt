@@ -13,6 +13,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.MediaActionSound
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -41,6 +42,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     private val main = Handler(Looper.getMainLooper())
     private val jobs = WeakHashMap<Activity, Runnable>()
     private val animatedViews = WeakHashMap<View, Boolean>()
+    private val shutterSound = MediaActionSound().apply { load(MediaActionSound.SHUTTER_CLICK) }
 
     override fun onCreate(): Boolean {
         val app = context?.applicationContext as? Application ?: return true
@@ -201,7 +203,7 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         shutter.text = ""
         moveIntoRail(shutter, rail)
         styleShutter(activity, shutter)
-        installPressPulse(shutter, 0.84f, 1.12f)
+        installShutterFeedback(activity, shutter)
 
         // Keep the legacy quality TextView attached but hidden. BroadcastCameraAppProvider updates
         // that source every 260ms; the visible proxy below is therefore never overwritten/flickered.
@@ -323,14 +325,19 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
     private fun styleShutter(activity: Activity, view: TextView) {
         view.text = ""
         view.setPadding(0, 0, 0, 0)
-        view.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.WHITE)
-            setStroke(dp(activity, 3), Color.argb(205, 255, 255, 255))
-        }
+        view.background = shutterBackground(activity, false)
         view.elevation = dp(activity, 3).toFloat()
         view.isClickable = true
         view.isFocusable = true
+    }
+
+    private fun shutterBackground(activity: Activity, redBorder: Boolean) = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(Color.WHITE)
+        setStroke(
+            dp(activity, if (redBorder) 5 else 3),
+            if (redBorder) Color.rgb(235, 42, 52) else Color.argb(215, 255, 255, 255)
+        )
     }
 
     private fun cellBackground(activity: Activity, alpha: Int, strokeAlpha: Int) = GradientDrawable().apply {
@@ -352,6 +359,50 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         setColor(Color.rgb(225, 45, 52))
         cornerRadius = dp(activity, 10).toFloat()
         setStroke(dp(activity, 1), Color.rgb(255, 118, 124))
+    }
+
+    private fun installShutterFeedback(activity: Activity, view: TextView) {
+        if (animatedViews[view] == true) return
+        animatedViews[view] = true
+        view.setOnTouchListener { touched, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    touched.animate().cancel()
+                    touched.background = shutterBackground(activity, true)
+                    touched.animate()
+                        .scaleX(0.78f)
+                        .scaleY(0.78f)
+                        .setDuration(55L)
+                        .start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    runCatching { shutterSound.play(MediaActionSound.SHUTTER_CLICK) }
+                    touched.background = shutterBackground(activity, true)
+                    touched.animate().cancel()
+                    touched.animate()
+                        .scaleX(1.18f)
+                        .scaleY(1.18f)
+                        .setDuration(85L)
+                        .withEndAction {
+                            touched.animate()
+                                .scaleX(1f)
+                                .scaleY(1f)
+                                .setDuration(115L)
+                                .start()
+                            main.postDelayed({
+                                if (touched.isAttachedToWindow) touched.background = shutterBackground(activity, false)
+                            }, 130L)
+                        }
+                        .start()
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    touched.animate().cancel()
+                    touched.animate().scaleX(1f).scaleY(1f).setDuration(90L).start()
+                    touched.background = shutterBackground(activity, false)
+                }
+            }
+            false
+        }
     }
 
     private fun installZoomPressAnimation(view: TextView) {
@@ -401,7 +452,8 @@ class BroadcastCameraLayoutPolishProvider : ContentProvider(), Application.Activ
         animatedViews[view] = true
         view.setOnTouchListener { touched, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> touched.animate().cancel().also {
+                MotionEvent.ACTION_DOWN -> {
+                    touched.animate().cancel()
                     touched.animate().scaleX(down).scaleY(down).setDuration(60L).start()
                 }
                 MotionEvent.ACTION_UP -> {
