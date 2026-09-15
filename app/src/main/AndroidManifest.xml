@@ -30,6 +30,7 @@
         <activity android:name=".RaceActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="race"/></intent-filter></activity>
         <activity android:name=".TimingDeviceManagerActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".TimingOperatorEnrollmentActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jangsubatterypilot" android:host="timing" android:pathPrefix="/enroll"/></intent-filter></activity>
+        <activity android:name=".BroadcastCameraEnrollmentActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateTestActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateTestActivityV2" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".CameraGateHighSpeedActivity" android:exported="false" android:screenOrientation="fullSensor" />
@@ -67,6 +68,8 @@
         <provider android:name=".TimingOperatorLockProvider" android:authorities="${applicationId}.timing-operator-lock" android:exported="false" android:initOrder="78" />
         <provider android:name=".CameraGateRoleLabelProvider" android:authorities="${applicationId}.camera-gate-role-label" android:exported="false" android:initOrder="75" />
         <provider android:name=".CameraGateBroadcastProvider" android:authorities="${applicationId}.camera-gate-broadcast" android:exported="false" android:initOrder="74" />
+        <provider android:name=".BroadcastCameraHeartbeatProvider" android:authorities="${applicationId}.broadcast-camera-heartbeat" android:exported="false" android:initOrder="73" />
+        <provider android:name=".BroadcastCameraHomeLauncherProvider" android:authorities="${applicationId}.broadcast-camera-home-launcher" android:exported="false" android:initOrder="72" />
         <provider android:name=".CameraGateFullscreenUiProvider" android:authorities="${applicationId}.camera-gate-fullscreen-ui" android:exported="false" android:initOrder="70" />
         <provider android:name=".CameraGateFieldPolishProvider" android:authorities="${applicationId}.camera-gate-field-polish" android:exported="false" android:initOrder="60" />
         <provider android:name=".RaceBroadcastCameraProvider" android:authorities="${applicationId}.race-broadcast-camera" android:exported="false" android:initOrder="55" />
