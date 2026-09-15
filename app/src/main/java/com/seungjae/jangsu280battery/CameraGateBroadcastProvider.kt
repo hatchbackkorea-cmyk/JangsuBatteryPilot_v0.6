@@ -9,21 +9,32 @@ import android.net.Uri
 import android.os.Bundle
 import java.util.WeakHashMap
 
-/** Lightweight handoff between the GL camera thread and the active network/local transports. */
+/** Lightweight handoff between camera sources and the active network/local transports. */
 object CameraGateBroadcastBridge {
     @Volatile private var fallbackStreamer: CameraGateBroadcastStreamer? = null
     @Volatile private var webRtcStreamer: CameraGateWebRtcStreamer? = null
     @Volatile private var localSink: CameraGateBroadcastPacketSink? = null
     @Volatile private var keyFrameRequester: (() -> Unit)? = null
+    @Volatile private var publisherAvailabilityController: ((Boolean) -> Unit)? = null
     @Volatile private var latestCsd0: CameraGateBroadcastPacket? = null
     @Volatile private var latestCsd1: CameraGateBroadcastPacket? = null
+    @Volatile private var externalSourceRequired = false
+    @Volatile private var externalAvailable = false
 
     fun bindFallback(value: CameraGateBroadcastStreamer?) {
         fallbackStreamer = value
+        if (value != null) {
+            latestCsd0?.let(value::offer)
+            latestCsd1?.let(value::offer)
+        }
     }
 
     fun bindWebRtc(value: CameraGateWebRtcStreamer?) {
         webRtcStreamer = value
+        if (value != null) {
+            latestCsd0?.let(value::offer)
+            latestCsd1?.let(value::offer)
+        }
     }
 
     fun bindLocalSink(value: CameraGateBroadcastPacketSink?) {
@@ -34,16 +45,52 @@ object CameraGateBroadcastBridge {
         }
     }
 
-    /** Warm-standby viewer promotion asks the existing encoder for an IDR immediately. */
+    /** Warm-standby promotion may ask the phone encoder for an IDR. USB H.264 owns its own GOP. */
     fun bindKeyFrameRequester(value: (() -> Unit)?) {
         keyFrameRequester = value
     }
 
     fun requestKeyFrame() {
-        runCatching { keyFrameRequester?.invoke() }
+        if (!externalSourceRequired) runCatching { keyFrameRequester?.invoke() }
     }
 
+    fun bindPublisherAvailabilityController(value: ((Boolean) -> Unit)?) {
+        publisherAvailabilityController = value
+    }
+
+    /** USB mode suppresses every encoded frame produced by the phone camera. */
+    fun setExternalSourceRequired(required: Boolean) {
+        if (externalSourceRequired == required) return
+        externalSourceRequired = required
+        latestCsd0 = null
+        latestCsd1 = null
+        if (!required) {
+            externalAvailable = false
+            publisherAvailabilityController?.invoke(true)
+        }
+    }
+
+    fun setExternalAvailable(available: Boolean) {
+        externalAvailable = available
+        if (externalSourceRequired) publisherAvailabilityController?.invoke(available)
+    }
+
+    fun isExternalSourceRequired(): Boolean = externalSourceRequired
+    fun isExternalAvailable(): Boolean = externalAvailable
+
+    /** Existing internal camera/MediaCodec path. */
     fun offer(packet: CameraGateBroadcastPacket) {
+        if (externalSourceRequired) return
+        offerAccepted(packet)
+    }
+
+    /** Pre-encoded UVC H.264 path. No decode or re-encode occurs here. */
+    fun offerExternal(packet: CameraGateBroadcastPacket) {
+        if (!externalSourceRequired) return
+        offerAccepted(packet)
+    }
+
+    private fun offerAccepted(packet: CameraGateBroadcastPacket) {
         when (packet.kind) {
             CameraGateBroadcastStreamer.KIND_CSD0 -> latestCsd0 = packet
             CameraGateBroadcastStreamer.KIND_CSD1 -> latestCsd1 = packet
@@ -55,11 +102,11 @@ object CameraGateBroadcastBridge {
 }
 
 /**
- * Creates a P2P WebRTC publisher for a QR-assigned timing phone.
+ * Creates a P2P WebRTC publisher for an assigned timing/broadcast phone.
  *
- * The older WebSocket video publisher is not started during normal operation. It is created only
- * when a WebRTC viewer explicitly requests fallback or P2P establishment times out, avoiding the
- * previous duplicate upload and keeping the phone's uplink focused on the direct P2P stream.
+ * When CHASE input is USB_H264 the publisher exists only while the USB source is actually producing
+ * decodable AVC. If the cable/camera dies, signaling is closed so the spectator removes CHASE from
+ * its online-role set. It deliberately does NOT fall back to the phone camera.
  */
 class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val fallbackStreamers = WeakHashMap<Activity, CameraGateBroadcastStreamer>()
@@ -78,10 +125,37 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         if (assignment == null) {
             CameraGateBroadcastBridge.bindFallback(null)
             CameraGateBroadcastBridge.bindWebRtc(null)
+            CameraGateBroadcastBridge.bindPublisherAvailabilityController(null)
             return
         }
         assignments[activity] = assignment
 
+        CameraGateBroadcastBridge.bindPublisherAvailabilityController { available ->
+            activity.runOnUiThread {
+                if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+                val current = assignments[activity] ?: return@runOnUiThread
+                if (usesUsbChase(activity, current)) {
+                    if (available) ensurePublishers(activity) else closePublishers(activity)
+                }
+            }
+        }
+
+        if (usesUsbChase(activity, assignment)) {
+            CameraGateBroadcastBridge.setExternalSourceRequired(true)
+            if (UsbH264ChaseRuntime.streaming) ensurePublishers(activity) else closePublishers(activity)
+        } else {
+            CameraGateBroadcastBridge.setExternalSourceRequired(false)
+            ensurePublishers(activity)
+        }
+    }
+
+    private fun usesUsbChase(activity: Activity, assignment: TimingOperatorStore.Assignment): Boolean =
+        assignment.role.equals("CHASE", ignoreCase = true) &&
+            ChaseVideoInputStore.get(activity) == ChaseVideoInputMode.USB_H264
+
+    private fun ensurePublishers(activity: Activity) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        val assignment = assignments[activity] ?: TimingOperatorStore.current(activity) ?: return
         val rtc = webRtcStreamers[activity] ?: CameraGateWebRtcStreamer(
             activity.applicationContext,
             assignment,
@@ -93,9 +167,17 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         CameraGateBroadcastBridge.bindFallback(fallbackStreamers[activity])
     }
 
+    private fun closePublishers(activity: Activity) {
+        fallbackStreamers.remove(activity)?.close()
+        webRtcStreamers.remove(activity)?.close()
+        CameraGateBroadcastBridge.bindFallback(null)
+        CameraGateBroadcastBridge.bindWebRtc(null)
+    }
+
     private fun ensureFallback(activity: Activity) {
         if (activity.isFinishing || activity.isDestroyed) return
         val assignment = assignments[activity] ?: TimingOperatorStore.current(activity) ?: return
+        if (usesUsbChase(activity, assignment) && !UsbH264ChaseRuntime.streaming) return
         val existing = fallbackStreamers[activity]
         if (existing != null) {
             CameraGateBroadcastBridge.bindFallback(existing)
@@ -113,14 +195,15 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        fallbackStreamers.remove(activity)?.close()
-        webRtcStreamers.remove(activity)?.close()
+        closePublishers(activity)
         assignments.remove(activity)
         if (activity is CameraGateHighSpeedActivity) {
             CameraGateBroadcastBridge.bindFallback(null)
             CameraGateBroadcastBridge.bindWebRtc(null)
             CameraGateBroadcastBridge.bindLocalSink(null)
             CameraGateBroadcastBridge.bindKeyFrameRequester(null)
+            CameraGateBroadcastBridge.bindPublisherAvailabilityController(null)
+            CameraGateBroadcastBridge.setExternalSourceRequired(false)
         }
     }
 
