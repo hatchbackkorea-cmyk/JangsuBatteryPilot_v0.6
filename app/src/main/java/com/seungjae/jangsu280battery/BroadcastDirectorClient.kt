@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  * Tiny control-plane client for Broadcast Director V2.
  *
  * No rider GPS, route position, speed, rank, or timing result is sent here. A camera phone only
- * requests/releases the temporary broadcast token based on its own local camera event.
+ * activates V2 and requests/releases the temporary broadcast token based on its own local event.
  */
 object BroadcastDirectorClient {
     private val http = OkHttpClient.Builder()
@@ -25,24 +25,32 @@ object BroadcastDirectorClient {
         .retryOnConnectionFailure(true)
         .build()
 
+    fun activate(context: Context, assignment: TimingOperatorStore.Assignment) {
+        if (!validAssignment(assignment)) return
+        post(context, assignment, "activate", "camera-v2-online")
+    }
+
     fun requestLive(context: Context, assignment: TimingOperatorStore.Assignment, reason: String = "local-camera-event") {
-        if (!eligible(assignment)) return
+        if (!eligibleOverride(assignment)) return
         post(context, assignment, "request", reason)
     }
 
     fun releaseLive(context: Context, assignment: TimingOperatorStore.Assignment, reason: String = "local-camera-clear") {
-        if (!eligible(assignment)) return
+        if (!eligibleOverride(assignment)) return
         post(context, assignment, "release", reason)
     }
 
-    private fun eligible(assignment: TimingOperatorStore.Assignment): Boolean {
+    private fun validAssignment(assignment: TimingOperatorStore.Assignment): Boolean {
         val role = assignment.role.trim().uppercase(Locale.US)
         if (assignment.eventCode.isBlank()) return false
-        if (role !in TimingOperatorStore.ROLES || role == "CHASE") return false
+        if (role !in TimingOperatorStore.ROLES) return false
         if (assignment.token.length < 20) return false
         if (assignment.expiresAtMs <= System.currentTimeMillis()) return false
         return true
     }
+
+    private fun eligibleOverride(assignment: TimingOperatorStore.Assignment): Boolean =
+        validAssignment(assignment) && assignment.role.trim().uppercase(Locale.US) != "CHASE"
 
     private fun post(context: Context, assignment: TimingOperatorStore.Assignment, action: String, reason: String) {
         val base = assignment.serverUrl.trim().trimEnd('/').ifBlank {
