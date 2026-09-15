@@ -13,20 +13,20 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.TextView
 import java.util.WeakHashMap
 
 /**
- * Broadcast-only CAM phones use the same proven Camera Gate capture/encoder pipeline as timing
- * phones, but none of the timing controls belong on their field screen.
+ * Broadcast-only CAM phones reuse the proven Camera Gate capture/encoder pipeline, but the field
+ * screen must contain video only. Timing phones keep the full timing UI.
  *
- * For CAM1..CAM12 this provider:
- *  - hides the timing detection overlay/line,
- *  - removes ARM, clock sync, sensitivity, FPS/score, trigger and log UI,
- *  - lets the camera preview fill all space below the small navigation bar,
- *  - relabels the header as a 720p24 live camera.
+ * For CAM1..CAM12 this provider repeatedly enforces a strict allow-list:
+ *  - keep the TextureView camera preview,
+ *  - keep the actual-role label (CAM1..CAM12),
+ *  - hide the GateOverlay / detection line,
+ *  - hide/remove every fullscreen timing dock, ARM/sync/sensitivity/log widget and telemetry panel,
+ *  - make the camera fill the activity.
  *
- * START/CP/FINISH assignments are deliberately untouched, so their timing line and controls remain.
+ * START/CP/FINISH assignments are untouched.
  */
 class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -36,6 +36,14 @@ class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLi
         val app = context?.applicationContext as? Application ?: return true
         app.registerActivityLifecycleCallbacks(this)
         return true
+    }
+
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+        if (activity is CameraGateHighSpeedActivity) main.post { apply(activity) }
+    }
+
+    override fun onActivityStarted(activity: Activity) {
+        if (activity is CameraGateHighSpeedActivity) main.post { apply(activity) }
     }
 
     override fun onActivityResumed(activity: Activity) {
@@ -48,7 +56,7 @@ class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLi
                     return
                 }
                 apply(activity)
-                main.postDelayed(this, 350L)
+                main.postDelayed(this, 180L)
             }
         }
         jobs[activity] = job
@@ -66,57 +74,63 @@ class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLi
         val assignment = TimingOperatorStore.current(activity) ?: return
         if (!TimingOperatorStore.isBroadcastRole(assignment.role)) return
 
-        val overlay = readField(activity, "overlay") as? View ?: return
-        overlay.visibility = View.GONE
-        val cameraBox = overlay.parent as? FrameLayout ?: return
+        val texture = readField(activity, "textureView") as? View ?: return
+        val overlay = readField(activity, "overlay") as? View
+        val cameraBox = texture.parent as? FrameLayout ?: return
         val root = cameraBox.parent as? LinearLayout ?: return
-        val cameraIndex = root.indexOfChild(cameraBox)
-        if (cameraIndex < 0) return
 
-        // Keep only the navigation/header row and the camera itself. Any role selector or timing
-        // widgets injected later by compatibility providers are hidden again on the next pass.
+        // Broadcast-only means VIDEO ONLY. Fullscreen/field-polish providers may create their own
+        // timing dock inside cameraBox, so hiding only the original root controls is not enough.
+        // Keep exactly the preview and the role badge; everything else in cameraBox is suppressed.
+        for (i in 0 until cameraBox.childCount) {
+            val child = cameraBox.getChildAt(i)
+            val keep = child === texture || child.tag == TAG_ROLE_LABEL
+            child.visibility = if (keep) View.VISIBLE else View.GONE
+        }
+        overlay?.visibility = View.GONE
+
+        // Remove known timing panels outright so they cannot reserve layout space or receive taps.
+        TIMING_TAGS.forEach { tag ->
+            findTagged(cameraBox, tag)?.let { victim ->
+                (victim.parent as? ViewGroup)?.removeView(victim)
+            }
+        }
+
+        // The original Activity places ARM/sync and telemetry below the camera. Hide every sibling;
+        // role text now lives directly over the video at the upper-left.
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
-            if (child === cameraBox || i < cameraIndex) {
-                child.visibility = View.VISIBLE
-            } else {
-                child.visibility = View.GONE
-            }
+            child.visibility = if (child === cameraBox) View.VISIBLE else View.GONE
         }
 
         (cameraBox.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-            if (lp.height != 0 || lp.weight != 1f) {
-                lp.height = 0
-                lp.weight = 1f
-                cameraBox.layoutParams = lp
-            }
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+            lp.height = 0
+            lp.weight = 1f
+            cameraBox.layoutParams = lp
         }
-
-        // Replace the beta/timing-oriented heading while keeping the back button available.
-        if (cameraIndex > 0) {
-            replaceHeaderText(root.getChildAt(cameraIndex - 1))
+        texture.visibility = View.VISIBLE
+        findTagged(cameraBox, TAG_ROLE_LABEL)?.apply {
+            visibility = View.VISIBLE
+            bringToFront()
         }
+        cameraBox.requestLayout()
     }
 
-    private fun replaceHeaderText(view: View) {
-        if (view is TextView) {
-            val text = view.text?.toString().orEmpty()
-            if (text.contains("CAMERA GATE") || text.contains("DIRECT 120")) {
-                view.text = "TIMEGATE LIVE CAMERA · 720p24"
-            }
-            return
-        }
+    private fun findTagged(view: View, tagValue: String): View? {
+        if (view.tag == tagValue) return view
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) replaceHeaderText(view.getChildAt(i))
+            for (i in 0 until view.childCount) {
+                findTagged(view.getChildAt(i), tagValue)?.let { return it }
+            }
         }
+        return null
     }
 
     private fun readField(target: Any, name: String): Any? = runCatching {
         target.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(target)
     }.getOrNull()
 
-    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-    override fun onActivityStarted(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
@@ -125,4 +139,23 @@ class BroadcastCameraCleanUiProvider : ContentProvider(), Application.ActivityLi
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+
+    companion object {
+        private const val TAG_ROLE_LABEL = "camera_gate_actual_role_label_v1"
+        private val TIMING_TAGS = listOf(
+            "camera_gate_fullscreen_dock_v1",
+            "camera_gate_fullscreen_log_panel_v1",
+            "camera_gate_fullscreen_log_scroll_v1",
+            "camera_gate_direction_row_v1",
+            "camera_gate_direction_toggle_v2",
+            "camera_gate_compact_controls_v1",
+            "camera_gate_control_bar_v3",
+            "camera_gate_control_bar_v4",
+            "camera_gate_direction_cell_v4",
+            "camera_gate_start_cell_v4",
+            "camera_gate_sensitivity_cell_v4",
+            "camera_gate_sync_cell_v4",
+            "camera_gate_log_cell_v4"
+        )
+    }
 }
