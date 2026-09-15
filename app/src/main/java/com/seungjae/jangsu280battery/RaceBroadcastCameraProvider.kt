@@ -16,7 +16,7 @@ import java.util.WeakHashMap
  * Camera Gate broadcast quality governor.
  *
  * The in-app START/CP/FINISH video viewer was intentionally removed. Timing phones publish video
- * only for the PC operator tool. The secondary broadcast encoder is restarted at 1280x720/30fps
+ * only for the PC operator tool. The secondary broadcast encoder is restarted at 1280x720/24fps
  * while the primary timing stream remains untouched.
  *
  * This provider keeps the historical class name so older manifests remain compatible.
