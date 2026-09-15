@@ -9,22 +9,36 @@ import android.net.Uri
 import android.os.Bundle
 import java.util.WeakHashMap
 
-/** Lightweight handoff between the GL camera thread and the network publisher. */
+/** Lightweight handoff between the GL camera thread and the active network transports. */
 object CameraGateBroadcastBridge {
-    @Volatile private var streamer: CameraGateBroadcastStreamer? = null
+    @Volatile private var fallbackStreamer: CameraGateBroadcastStreamer? = null
+    @Volatile private var webRtcStreamer: CameraGateWebRtcStreamer? = null
 
-    fun bind(value: CameraGateBroadcastStreamer?) {
-        streamer = value
+    fun bindFallback(value: CameraGateBroadcastStreamer?) {
+        fallbackStreamer = value
+    }
+
+    fun bindWebRtc(value: CameraGateWebRtcStreamer?) {
+        webRtcStreamer = value
     }
 
     fun offer(packet: CameraGateBroadcastPacket) {
-        streamer?.offer(packet)
+        webRtcStreamer?.offer(packet)
+        fallbackStreamer?.offer(packet)
     }
 }
 
-/** Creates a publisher only for a QR-assigned official timing phone. */
+/**
+ * Creates a P2P WebRTC publisher for a QR-assigned timing phone.
+ *
+ * The older WebSocket video publisher is not started during normal operation. It is created only
+ * when a WebRTC viewer explicitly requests fallback or P2P establishment times out, avoiding the
+ * previous duplicate upload and keeping the phone's uplink focused on the direct P2P stream.
+ */
 class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
-    private val streamers = WeakHashMap<Activity, CameraGateBroadcastStreamer>()
+    private val fallbackStreamers = WeakHashMap<Activity, CameraGateBroadcastStreamer>()
+    private val webRtcStreamers = WeakHashMap<Activity, CameraGateWebRtcStreamer>()
+    private val assignments = WeakHashMap<Activity, TimingOperatorStore.Assignment>()
 
     override fun onCreate(): Boolean {
         val app = context?.applicationContext as? Application ?: return true
@@ -36,28 +50,50 @@ class CameraGateBroadcastProvider : ContentProvider(), Application.ActivityLifec
         if (activity !is CameraGateHighSpeedActivity) return
         val assignment = TimingOperatorStore.current(activity)
         if (assignment == null) {
-            CameraGateBroadcastBridge.bind(null)
+            CameraGateBroadcastBridge.bindFallback(null)
+            CameraGateBroadcastBridge.bindWebRtc(null)
             return
         }
-        val existing = streamers[activity]
+        assignments[activity] = assignment
+
+        val rtc = webRtcStreamers[activity] ?: CameraGateWebRtcStreamer(
+            activity.applicationContext,
+            assignment,
+        ) {
+            activity.runOnUiThread { ensureFallback(activity) }
+        }.also { webRtcStreamers[activity] = it }
+
+        CameraGateBroadcastBridge.bindWebRtc(rtc)
+        CameraGateBroadcastBridge.bindFallback(fallbackStreamers[activity])
+    }
+
+    private fun ensureFallback(activity: Activity) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        val assignment = assignments[activity] ?: TimingOperatorStore.current(activity) ?: return
+        val existing = fallbackStreamers[activity]
         if (existing != null) {
-            CameraGateBroadcastBridge.bind(existing)
+            CameraGateBroadcastBridge.bindFallback(existing)
             return
         }
         val streamer = CameraGateBroadcastStreamer(activity.applicationContext, assignment)
-        streamers[activity] = streamer
-        CameraGateBroadcastBridge.bind(streamer)
+        fallbackStreamers[activity] = streamer
+        CameraGateBroadcastBridge.bindFallback(streamer)
     }
 
     override fun onActivityPaused(activity: Activity) {
-        // Keep the socket object through a short pause/rotation. Camera frames simply stop while the
-        // underlying camera session is unavailable and resume from the next key frame.
-        if (activity is CameraGateHighSpeedActivity) CameraGateBroadcastBridge.bind(streamers[activity])
+        if (activity !is CameraGateHighSpeedActivity) return
+        CameraGateBroadcastBridge.bindWebRtc(webRtcStreamers[activity])
+        CameraGateBroadcastBridge.bindFallback(fallbackStreamers[activity])
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        streamers.remove(activity)?.close()
-        if (activity is CameraGateHighSpeedActivity) CameraGateBroadcastBridge.bind(null)
+        fallbackStreamers.remove(activity)?.close()
+        webRtcStreamers.remove(activity)?.close()
+        assignments.remove(activity)
+        if (activity is CameraGateHighSpeedActivity) {
+            CameraGateBroadcastBridge.bindFallback(null)
+            CameraGateBroadcastBridge.bindWebRtc(null)
+        }
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
