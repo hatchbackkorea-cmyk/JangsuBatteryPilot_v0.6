@@ -15,7 +15,6 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -27,9 +26,9 @@ import kotlin.math.roundToInt
 /**
  * Broadcast-only camera enrollment.
  *
- * Unlike official timing phones, this flow requires no admin-created CAM point and no QR. The
- * operator types only the event code. Codes are case-insensitive; the canonical value is stored
- * uppercase after the server accepts it. GPS determines the camera's order on the course.
+ * FIXED cameras keep the original GPS-to-course registration. CHASE is a moving default feed and
+ * therefore registers without a fixed course coordinate. Both use the same low-latency video
+ * transport and never receive START/CP/FINISH timing authority.
  */
 class BroadcastCameraEnrollmentActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
@@ -37,6 +36,7 @@ class BroadcastCameraEnrollmentActivity : Activity() {
     private lateinit var codeInput: EditText
     private lateinit var status: TextView
     private lateinit var connectButton: Button
+    private lateinit var chaseButton: Button
     private lateinit var locationManager: LocationManager
     private var pendingConnect = false
     private var locationListener: LocationListener? = null
@@ -58,7 +58,7 @@ class BroadcastCameraEnrollmentActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(24), dp(38), dp(24), dp(28))
+            setPadding(dp(24), dp(32), dp(24), dp(26))
             setBackgroundColor(Color.rgb(247, 249, 252))
         }
         root.addView(TextView(this).apply {
@@ -68,10 +68,10 @@ class BroadcastCameraEnrollmentActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
         }, LinearLayout.LayoutParams(-1, -2))
         root.addView(TextView(this).apply {
-            text = "관리자 등록이나 QR 없이 경기코드만 입력하세요.\n현재 GPS 위치를 코스에 맞춰 자동으로 CAM 순서를 정하고 AUTO 중계에 바로 포함됩니다."
+            text = "경기코드만 입력한 뒤 카메라 역할을 선택하세요.\n고정 카메라는 현재 위치에 배치되고, 체이스 카메라는 경기 중 기본 메인 화면이 됩니다."
             textSize = 15f
             setTextColor(Color.rgb(78, 92, 111))
-            setPadding(0, dp(10), 0, dp(26))
+            setPadding(0, dp(10), 0, dp(22))
         }, LinearLayout.LayoutParams(-1, -2))
 
         codeInput = EditText(this).apply {
@@ -89,18 +89,35 @@ class BroadcastCameraEnrollmentActivity : Activity() {
             text = "대소문자는 구별하지 않습니다 · ab12cd = AB12CD"
             textSize = 13f
             setTextColor(Color.rgb(90, 107, 129))
-            setPadding(dp(4), dp(8), 0, dp(18))
+            setPadding(dp(4), dp(8), 0, dp(16))
         }, LinearLayout.LayoutParams(-1, -2))
 
         connectButton = Button(this).apply {
-            text = "GPS 확인 후 중계 카메라 연결"
-            textSize = 17f
+            text = "📍 고정 / 포인트 중계카메라 연결"
+            textSize = 16f
             setTextColor(Color.WHITE)
             isAllCaps = false
             background = rounded(Color.rgb(12, 91, 235), Color.rgb(12, 91, 235), 12f)
-            setOnClickListener { startConnect() }
+            setOnClickListener { startFixedConnect() }
         }
         root.addView(connectButton, LinearLayout.LayoutParams(-1, dp(58)))
+
+        chaseButton = Button(this).apply {
+            text = "🏍 체이스 카메라로 연결"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            isAllCaps = false
+            background = rounded(Color.rgb(20, 126, 82), Color.rgb(20, 126, 82), 12f)
+            setOnClickListener { startChaseConnect() }
+        }
+        root.addView(chaseButton, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(10) })
+
+        root.addView(TextView(this).apply {
+            text = "체이스 카메라는 경기당 1대이며, CP/포인트 카메라가 방송권을 요청하지 않는 동안 기본 화면으로 사용됩니다."
+            textSize = 12f
+            setTextColor(Color.rgb(83, 101, 124))
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        }, LinearLayout.LayoutParams(-1, -2))
 
         val openCurrent = Button(this).apply {
             text = "현재 중계 카메라 화면 열기"
@@ -124,31 +141,52 @@ class BroadcastCameraEnrollmentActivity : Activity() {
             textSize = 14f
             setTextColor(Color.rgb(48, 63, 84))
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(4), dp(24), dp(4), dp(8))
+            setPadding(dp(4), dp(20), dp(4), dp(8))
         }
         root.addView(status, LinearLayout.LayoutParams(-1, -2))
         return root
     }
 
-    private fun startConnect() {
+    private fun canonicalCode(): String? {
         val raw = codeInput.text?.toString().orEmpty().trim()
         if (raw.isBlank()) {
             status.text = "경기코드를 입력해 주세요."
-            return
+            return null
         }
-        // Canonicalize only at submission. Lower/mixed-case input remains fully accepted.
-        codeInput.setText(raw.uppercase(Locale.US))
+        val code = raw.uppercase(Locale.US)
+        codeInput.setText(code)
+        return code
+    }
+
+    private fun startFixedConnect() {
+        canonicalCode() ?: return
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             pendingConnect = true
-            status.text = "중계 카메라 자동등록에 GPS 권한이 필요합니다."
+            status.text = "고정 중계카메라 자동배치에 GPS 권한이 필요합니다."
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOCATION)
             return
         }
         acquireLocationAndRegister()
     }
 
+    private fun startChaseConnect() {
+        val code = canonicalCode() ?: return
+        stopLocationWait()
+        setButtonsEnabled(false)
+        status.text = "${code} 확인 · CHASE 연결권한 발급 중…"
+        executor.execute {
+            val result = runCatching { BroadcastCameraClient.registerChase(applicationContext, code) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                setButtonsEnabled(true)
+                result.onSuccess { registered -> completeRegistration(registered, true) }
+                    .onFailure { error -> status.text = "체이스 연결 실패 · ${error.message ?: error.javaClass.simpleName}" }
+            }
+        }
+    }
+
     private fun acquireLocationAndRegister() {
-        connectButton.isEnabled = false
+        setButtonsEnabled(false)
         status.text = "GPS 위치 확인 중…"
         val cached = bestLastKnownLocation()
         val now = System.currentTimeMillis()
@@ -182,14 +220,14 @@ class BroadcastCameraEnrollmentActivity : Activity() {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 700L, 0f, listener, Looper.getMainLooper())
             }
         }.onFailure {
-            connectButton.isEnabled = true
+            setButtonsEnabled(true)
             status.text = "GPS를 시작할 수 없습니다 · ${it.message ?: "위치 설정을 확인해 주세요."}"
         }
         val timeout = Runnable {
             stopLocationWait()
             val fallback = bestLastKnownLocation()
             if (fallback != null) registerAt(fallback) else {
-                connectButton.isEnabled = true
+                setButtonsEnabled(true)
                 status.text = "GPS 위치를 잡지 못했습니다. 위치 서비스를 켜고 다시 시도해 주세요."
             }
         }
@@ -210,37 +248,47 @@ class BroadcastCameraEnrollmentActivity : Activity() {
     private fun registerAt(location: Location) {
         stopLocationWait()
         val code = codeInput.text?.toString().orEmpty().trim().uppercase(Locale.US)
-        status.text = "${code} 확인 · 카메라 자동등록 중…"
+        status.text = "${code} 확인 · 고정 카메라 자동등록 중…"
         executor.execute {
             val result = runCatching { BroadcastCameraClient.register(applicationContext, code, location) }
             runOnUiThread {
-                connectButton.isEnabled = true
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                result.onSuccess { registered ->
-                    val base = runCatching { RaceServerClient(this).baseUrl().trim().trimEnd('/') }.getOrDefault("")
-                    TimingOperatorStore.save(
-                        this,
-                        TimingOperatorStore.Assignment(
-                            eventCode = registered.eventCode,
-                            role = registered.role,
-                            token = registered.leaseToken,
-                            expiresAtMs = registered.expiresAtMs,
-                            serverUrl = base,
-                        )
-                    )
-                    codeInput.setText(registered.eventCode)
-                    status.text = "연결 완료 · ${registered.eventCode} · ${registered.role}\n코스 ${(registered.routeM / 1000.0).format2()} km · GPS ±${registered.accuracyM.roundToInt()}m · 코스에서 ${registered.nearestM.roundToInt()}m"
-                    main.postDelayed({
-                        if (!isFinishing && !isDestroyed) {
-                            startActivity(Intent(this, CameraGateHighSpeedActivity::class.java))
-                            finish()
-                        }
-                    }, 650L)
-                }.onFailure { error ->
-                    status.text = "연결 실패 · ${error.message ?: error.javaClass.simpleName}"
-                }
+                setButtonsEnabled(true)
+                result.onSuccess { registered -> completeRegistration(registered, false) }
+                    .onFailure { error -> status.text = "연결 실패 · ${error.message ?: error.javaClass.simpleName}" }
             }
         }
+    }
+
+    private fun completeRegistration(registered: BroadcastCameraClient.RegisterResult, chase: Boolean) {
+        val base = runCatching { RaceServerClient(this).baseUrl().trim().trimEnd('/') }.getOrDefault("")
+        TimingOperatorStore.save(
+            this,
+            TimingOperatorStore.Assignment(
+                eventCode = registered.eventCode,
+                role = registered.role,
+                token = registered.leaseToken,
+                expiresAtMs = registered.expiresAtMs,
+                serverUrl = base,
+            )
+        )
+        codeInput.setText(registered.eventCode)
+        status.text = if (chase) {
+            "연결 완료 · ${registered.eventCode} · CHASE\n이 카메라가 기본 라이브 화면입니다. 포인트 방송이 끝나면 자동으로 CHASE로 복귀합니다."
+        } else {
+            "연결 완료 · ${registered.eventCode} · ${registered.role}\n코스 ${(registered.routeM / 1000.0).format2()} km · GPS ±${registered.accuracyM.roundToInt()}m · 코스에서 ${registered.nearestM.roundToInt()}m"
+        }
+        main.postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                startActivity(Intent(this, CameraGateHighSpeedActivity::class.java))
+                finish()
+            }
+        }, 650L)
+    }
+
+    private fun setButtonsEnabled(enabled: Boolean) {
+        connectButton.isEnabled = enabled
+        chaseButton.isEnabled = enabled
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -251,8 +299,8 @@ class BroadcastCameraEnrollmentActivity : Activity() {
             acquireLocationAndRegister()
         } else {
             pendingConnect = false
-            connectButton.isEnabled = true
-            status.text = "GPS 권한이 없으면 중계 카메라 위치를 자동 배치할 수 없습니다."
+            setButtonsEnabled(true)
+            status.text = "GPS 권한이 없으면 고정 중계카메라 위치를 자동 배치할 수 없습니다."
         }
     }
 
