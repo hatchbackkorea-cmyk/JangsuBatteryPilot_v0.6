@@ -86,4 +86,6 @@ dependencies {
     implementation("com.kakao.maps.open:android:2.15.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.github.webrtc-sdk:android:150.7871.01")
+    // AUSBC maintained fork. Pin to the source commit used for this prototype so the field test is reproducible.
+    implementation("com.github.ernestp.AndroidUSBCamera:libausbc:09df386a46e6aef22e4a020105246b2c9805ed05")
 }
