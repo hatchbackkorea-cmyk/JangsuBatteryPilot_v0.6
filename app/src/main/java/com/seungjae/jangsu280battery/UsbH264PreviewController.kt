@@ -58,9 +58,12 @@ object UsbH264PreviewTap {
 }
 
 /** Hardware decoder used only while the CHASE Activity is visible. */
-class UsbH264PreviewDecoder(private val surface: Surface) {
+class UsbH264PreviewDecoder(
+    private val surface: Surface,
+    private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> },
+) {
     private val closed = AtomicBoolean(false)
-    private val thread = HandlerThread("UsbH264PreviewDecoderV2").apply { start() }
+    private val thread = HandlerThread("UsbH264PreviewDecoderV3").apply { start() }
     private val handler = Handler(thread.looper)
     private val info = MediaCodec.BufferInfo()
     private var decoder: MediaCodec? = null
@@ -68,6 +71,8 @@ class UsbH264PreviewDecoder(private val surface: Surface) {
     private var csd1: ByteArray? = null
     private var width = 1280
     private var height = 720
+    private var notifiedWidth = 0
+    private var notifiedHeight = 0
     private var waitingForKey = true
 
     fun offer(packet: CameraGateBroadcastPacket) {
@@ -76,8 +81,14 @@ class UsbH264PreviewDecoder(private val surface: Surface) {
     }
 
     private fun consume(packet: CameraGateBroadcastPacket) {
-        width = packet.width.coerceAtLeast(1)
-        height = packet.height.coerceAtLeast(1)
+        val packetWidth = packet.width.coerceAtLeast(1)
+        val packetHeight = packet.height.coerceAtLeast(1)
+        if (packetWidth != width || packetHeight != height) {
+            width = packetWidth
+            height = packetHeight
+        }
+        notifyVideoSize(width, height)
+
         when (packet.kind) {
             CameraGateBroadcastStreamer.KIND_CSD0 -> {
                 csd0 = packet.data.copyOf()
@@ -137,6 +148,7 @@ class UsbH264PreviewDecoder(private val surface: Surface) {
                 start()
             }
             waitingForKey = true
+            notifyVideoSize(width, height)
             true
         }.getOrElse {
             resetDecoder()
@@ -149,10 +161,22 @@ class UsbH264PreviewDecoder(private val surface: Surface) {
             val index = codec.dequeueOutputBuffer(info, 0)
             when {
                 index >= 0 -> runCatching { codec.releaseOutputBuffer(index, true) }
-                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
+                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    val format = runCatching { codec.outputFormat }.getOrNull()
+                    val outputWidth = runCatching { format?.getInteger(MediaFormat.KEY_WIDTH) ?: width }.getOrDefault(width)
+                    val outputHeight = runCatching { format?.getInteger(MediaFormat.KEY_HEIGHT) ?: height }.getOrDefault(height)
+                    notifyVideoSize(outputWidth.coerceAtLeast(1), outputHeight.coerceAtLeast(1))
+                }
                 else -> return
             }
         }
+    }
+
+    private fun notifyVideoSize(w: Int, h: Int) {
+        if (w == notifiedWidth && h == notifiedHeight) return
+        notifiedWidth = w
+        notifiedHeight = h
+        runCatching { onVideoSize(w, h) }
     }
 
     private fun resetDecoder() {
