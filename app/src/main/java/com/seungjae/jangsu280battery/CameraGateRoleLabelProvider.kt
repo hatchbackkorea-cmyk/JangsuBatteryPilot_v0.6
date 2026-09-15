@@ -22,9 +22,8 @@ import java.util.Locale
 import java.util.WeakHashMap
 
 /**
- * Replaces the legacy fixed "START LINE" camera label with the phone's actual timing role.
- * QR-assigned official phones use TimingOperatorStore as the source of truth, so CP/FINISH
- * cameras can never be mistaken for START at a glance.
+ * Replaces the legacy fixed "START LINE" camera label with the phone's actual role.
+ * Official timing phones show START/CP1..CP5/FINISH and broadcast-only phones show CAM1..CAM12.
  */
 class CameraGateRoleLabelProvider : ContentProvider(), Application.ActivityLifecycleCallbacks {
     private val main = Handler(Looper.getMainLooper())
@@ -57,7 +56,7 @@ class CameraGateRoleLabelProvider : ContentProvider(), Application.ActivityLifec
     override fun onActivityDestroyed(activity: Activity) = stop(activity)
 
     private fun stop(activity: Activity) {
-        jobs.remove(activity)?.let { main.removeCallbacks(it) }
+        jobs.remove(activity)?.let(main::removeCallbacks)
     }
 
     private fun applyRoleLabel(activity: CameraGateHighSpeedActivity) {
@@ -65,7 +64,7 @@ class CameraGateRoleLabelProvider : ContentProvider(), Application.ActivityLifec
         val cameraBox = overlay.parent as? FrameLayout ?: return
 
         // GateOverlay redraws its color every frame but never resets text size. Setting text size to
-        // zero cleanly removes the old hard-coded START LINE text while preserving the timing line.
+        // zero removes the old hard-coded START LINE text. The actual role label below replaces it.
         val paint = readField(overlay, "textPaint") as? Paint
         if (paint != null && paint.textSize != 0f) {
             paint.textSize = 0f
@@ -100,9 +99,7 @@ class CameraGateRoleLabelProvider : ContentProvider(), Application.ActivityLifec
     private fun resolvedRole(context: Context): String {
         val assigned = TimingOperatorStore.current(context)?.role
             ?.trim()?.uppercase(Locale.US).orEmpty()
-        if (assigned == "START" || assigned == "FINISH" || assigned.matches(Regex("CP[1-5]"))) {
-            return assigned
-        }
+        if (assigned in TimingOperatorStore.ROLES) return assigned
 
         val manual = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_ROLE, "START")
